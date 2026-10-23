@@ -25,6 +25,7 @@ import {
   createUv,
 } from './process.ts';
 import { fromShape } from './shape.ts';
+import { createHttpParser } from './http_parser.ts';
 import { createProcessWrap, createSignalWrap, createSpawnSync } from './process_wrap.ts';
 import { createPipeWrap, createStreamWrap, createTtyWrap } from './stream.ts';
 import { createTypes, createUtil } from './util.ts';
@@ -47,6 +48,7 @@ export const factories: Record<string, BindingFactory> = {
   encoding_binding: createEncodingBinding,
   errors: createErrors,
   fs: createFs,
+  http_parser: createHttpParser,
   icu: createIcu,
   messaging: createMessaging,
   mksnapshot: createMksnapshot,
