@@ -108,6 +108,11 @@ export class ModuleWrap {
     }
     const index = new Map<string, Request>();
     for (const imp of imports) {
+      // es-module-lexer reports import.meta either as its own type or as a "dynamic" import at -2
+      if (imp.type === 'import-meta') {
+        this.#metaRanges.push({ start: imp.start, end: imp.end });
+        continue;
+      }
       if (imp.type === 'dynamic') {
         if (imp.dynamicStart === -2) this.#metaRanges.push({ start: imp.start, end: imp.end });
         else if (imp.dynamicStart >= 0) this.#dynamicRanges.push({ kwStart: imp.importStart, kwEnd: imp.importStart + 6 });
@@ -442,6 +447,12 @@ export class ModuleWrap {
     if (!dynamicImportCallback) return Promise.reject(new Error('dynamic import callback not set'));
     return dynamicImportCallback(this.#hostDefinedOption, String(specifier), attributes, this.url);
   }
+}
+
+/** The module URL (file://…) for a URL the runtime served the module at, if it is one. */
+export function moduleUrlForServed(url: string): string | undefined {
+  const m = /\/__ov\/mw\/\d+\/(\d+)\.mjs$/.exec(url);
+  return m ? byId.get(m[1])?.url : undefined;
 }
 
 /** Dynamic import from a CommonJS module or a script (compiled by contextify). */

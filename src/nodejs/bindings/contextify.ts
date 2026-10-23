@@ -72,6 +72,8 @@ function sourceMapInfo(code: string) {
 export const lineOneOffset = new Map<string, number>();
 
 function compileWrapper(code: string, filename: string, params: string[], symbol: unknown): Function {
+  // V8 accepts a hashbang only at the very start of a script, not inside the wrapper
+  if (code.startsWith('#!')) code = '//' + code.slice(2);
   const body = routeDynamicImport(code, symbol, filename);
   // keep the code on the wrapper's first line so line numbers match the file
   const head = `(function (${params.join(', ')}) {`;

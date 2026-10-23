@@ -26,9 +26,27 @@ let handlerInstalled = false;
 function installHandler() {
   if (handlerInstalled) return;
   handlerInstalled = true;
-  S.kernelHandlers.set('fd-data', (msg: { fd?: number; data: Uint8Array | null }) => {
+  S.kernelHandlers.set('fd-data', (msg: { fd?: number; id?: number; data: Uint8Array | null; err?: string }) => {
+    if (msg.id !== undefined) {
+      const cb = oneShot.get(msg.id);
+      oneShot.delete(msg.id);
+      cb?.(msg.data, msg.err);
+      return;
+    }
     if (msg.fd === undefined) return;
     readers.get(msg.fd)?._onData(msg.data);
+  });
+}
+
+// single reads that must not block the worker (async fs.read on a pipe, tty or socket)
+const oneShot = new Map<number, (data: Uint8Array | null, err?: string) => void>();
+let nextReadId = 1;
+export function readOnce(fd: number, len: number): Promise<Uint8Array> {
+  installHandler();
+  const id = nextReadId++;
+  return new Promise((resolve, reject) => {
+    oneShot.set(id, (data, err) => (err ? reject(new SysError(err, err)) : resolve(data ?? new Uint8Array(0))));
+    post({ t: 'readOnce', id, fd, len });
   });
 }
 

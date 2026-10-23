@@ -7,6 +7,7 @@ import * as loop from '../loop.ts';
 import { S, lib } from '../state.ts';
 import { Enc, decode, encode, encodingOf } from './buffer.ts';
 import { fromShape } from './shape.ts';
+import { readOnce } from './stream.ts';
 import { HandleWrap } from './stream.ts';
 
 const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
@@ -133,6 +134,38 @@ export function createFs() {
         else loop.scope(r.oncomplete, r, null, result);
       }
     });
+    return undefined;
+  }
+
+  /** Pipes, ttys and sockets: an async read waits for data without blocking the worker. */
+  const isStreamFd = (fd: number) => {
+    try {
+      const k = sys<string | null>('fdKind', { fd });
+      return k === 'pipe' || k === 'tty' || k === 'socket';
+    } catch {
+      return false;
+    }
+  };
+
+  /** Like run() for work that completes asynchronously. */
+  function runAsync<T>(req: unknown, syscall: string, fn: () => Promise<T>): Promise<T> | undefined {
+    const done = loop.startReq(req === kUsePromises ? 'FSReqPromise' : 'FSReqCallback');
+    const p = fn().then(
+      (v) => {
+        done();
+        return v;
+      },
+      (e) => {
+        done();
+        throw uvError(e, syscall);
+      },
+    );
+    if (req === kUsePromises) return p;
+    const r = req as FSReqCallback;
+    p.then(
+      (v) => typeof r.oncomplete === 'function' && loop.scope(r.oncomplete, r, null, v),
+      (e) => typeof r.oncomplete === 'function' && loop.scope(r.oncomplete, r, e),
+    );
     return undefined;
   }
 
@@ -285,7 +318,14 @@ export function createFs() {
       run(req, 'open', path, undefined, () => new FileHandle(sys<number>('open', { p: pathString(path), flags, mode }))),
     close: (fd: number, req?: unknown) => run(req, 'close', undefined, undefined, () => void sys('close', { fd })),
     read: (fd: number, buffer: Uint8Array, offset: number, length: number, position: unknown, req?: unknown) =>
-      run(req, 'read', undefined, undefined, () => {
+      req !== undefined && length > 0 && isStreamFd(fd)
+        ? runAsync(req, 'read', () =>
+            readOnce(fd, length).then((d) => {
+              buffer.set(d, offset);
+              return d.length;
+            }),
+          )
+        : run(req, 'read', undefined, undefined, () => {
         if (length === 0) return 0;
         const d = readBytes(fd, length, position);
         buffer.set(d, offset);
@@ -449,6 +489,33 @@ export function createFs() {
     lutimes: (path: unknown, atime: number, mtime: number, req?: unknown) =>
       run(req, 'lutime', path, undefined, () => void sys('utimes', { p: pathString(path), atime: atime * 1000, mtime: mtime * 1000, l: true })),
     mkdtemp: (prefix: unknown, encoding: unknown, req?: unknown) => run(req, 'mkdtemp', `${pathString(prefix)}XXXXXX`, undefined, () => encodeOut(sys<string>('mkdtemp', { prefix: pathString(prefix) }), encoding)),
+    /** ESM resolution of a package's "main" (node_file.cc LegacyMainResolve): the index of the first candidate that is a file. */
+    legacyMainResolve(pkgPath: string, main: string | undefined, base: string | undefined) {
+      const isFile = (p: string) => {
+        try {
+          return (st(p, false).mode & S_IFMT) === S_IFREG;
+        } catch {
+          return false;
+        }
+      };
+      const join = (a: string, b: string) => {
+        const parts: string[] = [];
+        for (const seg of `${a}/${b}`.split('/')) {
+          if (!seg || seg === '.') continue;
+          if (seg === '..') parts.pop();
+          else parts.push(seg);
+        }
+        return '/' + parts.join('/');
+      };
+      if (typeof main === 'string') {
+        const exts = ['', '.js', '.json', '.node', '/index.js', '/index.json', '/index.node'];
+        for (let i = 0; i < exts.length; i++) if (isFile(join(pkgPath, main + exts[i]))) return i;
+      }
+      const tail = ['./index.js', './index.json', './index.node'];
+      for (let i = 0; i < tail.length; i++) if (isFile(join(pkgPath, tail[i]))) return 7 + i;
+      const { codes } = lib('internal/errors');
+      throw new codes.ERR_MODULE_NOT_FOUND(pkgPath, base && base.startsWith('file:') ? decodeURIComponent(new URL(base).pathname) : base, undefined);
+    },
     getFormatOfExtensionlessFile(path: unknown) {
       try {
         const fd = sys<number>('open', { p: pathString(path), flags: 0 });

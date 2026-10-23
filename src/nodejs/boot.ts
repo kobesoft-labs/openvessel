@@ -8,6 +8,7 @@ import nodeData from '../node/data/process.json';
 import { initSys, post, sys } from '../node/sys.ts';
 import { getInternalBinding, getLinkedBinding } from './bindings/index.ts';
 import { lineOneOffset } from './bindings/contextify.ts';
+import { moduleUrlForServed } from './bindings/module_wrap.ts';
 import { fromShape } from './bindings/shape.ts';
 import * as loop from './loop.ts';
 import { parseCommandLine } from './options.ts';
@@ -198,7 +199,41 @@ function asCompiledFrame(cs: any) {
   });
 }
 
+/**
+ * CallSite.getFileName as V8 reports it under Node: ES modules are served to the browser from
+ * /__ov/mw/… but are file:// URLs to Node, and code compiled with eval (CommonJS modules, builtins)
+ * is named by its sourceURL. Patched on the shared CallSite prototype so callers that install their
+ * own Error.prepareStackTrace (callsites, depd, …) see the same names.
+ */
+function patchCallSites() {
+  const prev = (Error as any).prepareStackTrace;
+  (Error as any).prepareStackTrace = (_e: Error, s: unknown[]) => s;
+  const sample = (new Error().stack as unknown as object[])[0];
+  (Error as any).prepareStackTrace = prev;
+  const proto = sample && Object.getPrototypeOf(sample);
+  if (!proto || typeof proto.getFileName !== 'function') return;
+  const getFileName = proto.getFileName;
+  const getScriptName = proto.getScriptNameOrSourceURL;
+  const fix = (f: unknown, cs: any) => {
+    if (typeof f === 'string' && f) return moduleUrlForServed(f) ?? f;
+    return cs.isEval?.() ? getScriptName.call(cs) || f : f;
+  };
+  const define = (name: string, fn: Function) => {
+    try {
+      Object.defineProperty(proto, name, { value: fn, writable: false, enumerable: false, configurable: true });
+    } catch {}
+  };
+  define('getFileName', function (this: any) {
+    return fix(getFileName.call(this), this);
+  });
+  define('getScriptNameOrSourceURL', function (this: any) {
+    const f = getScriptName.call(this);
+    return typeof f === 'string' ? (moduleUrlForServed(f) ?? f) : f;
+  });
+}
+
 function installStackTraceHook() {
+  patchCallSites();
   const nodePrepare = (Error as any).prepareStackTrace as (e: Error, t: any[]) => unknown;
   const runtimeFile = new URL(import.meta.url).pathname;
   let inCallback = false;
@@ -235,6 +270,8 @@ function shapeGlobal() {
     for (const name of Object.getOwnPropertyNames(obj)) {
       if (seen.has(name)) continue;
       seen.add(name);
+      // the runtime's own entry points (non-enumerable already)
+      if (name.startsWith('__ov')) continue;
       const own = obj === g;
       const d = Object.getOwnPropertyDescriptor(obj, name)!;
       try {

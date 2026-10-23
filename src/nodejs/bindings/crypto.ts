@@ -32,6 +32,12 @@ function setFipsCrypto(_enable: unknown) {}
 
 export function createCrypto() {
   return Object.assign(fromShape('crypto'), {
+    // certificate stores: TLS runs in the browser (fetch), so the process holds none
+    getBundledRootCertificates: () => [],
+    getSystemCACertificates: () => [],
+    getExtraCACertificates: () => [],
+    getUserRootCertificates: () => [],
+    resetRootCertStore: () => {},
     // hashes and MACs
     Hash,
     Hmac,

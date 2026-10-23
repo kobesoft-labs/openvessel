@@ -94,6 +94,12 @@ export const factories: Record<string, BindingFactory> = {
   worker: createWorkerBinding,
   zlib: createZlib,
   v8: createV8,
+  // HTTP/2 needs TLS sessions, which a browser process can't hold; the module still has to load
+  http2: () =>
+    Object.assign(fromShape('http2'), {
+      setCallbackFunctions: () => {},
+      refreshDefaultSettings: () => {},
+    }),
   // only for v8.queryObjects(), which needs heap access
   internal_only_v8: () => ({ queryObjects: () => [] }),
   // WebAssembly.compileStreaming/instantiateStreaming are the browser's own
