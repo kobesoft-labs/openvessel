@@ -15,23 +15,22 @@ const HIDE = [
 
 export function hideBrowserGlobals() {
   const g = globalThis as any;
+  // Only the worker scope's own prototypes are touched: EventTarget.prototype is shared with
+  // AbortSignal, MessagePort, etc., so names inherited from it are shadowed on the global instead.
+  const stop = new Set<unknown>([EventTarget.prototype, Object.prototype, null]);
   for (const name of HIDE) {
-    let obj: any = g;
-    while (obj) {
+    for (let obj: any = g; !stop.has(obj); obj = Object.getPrototypeOf(obj)) {
       const d = Object.getOwnPropertyDescriptor(obj, name);
-      if (d) {
-        if (d.configurable) {
-          try {
-            delete obj[name];
-          } catch {}
-        } else {
-          try {
-            Object.defineProperty(g, name, { value: undefined, writable: true, configurable: true, enumerable: false });
-          } catch {}
-          break;
-        }
+      if (d?.configurable) {
+        try {
+          delete obj[name];
+        } catch {}
       }
-      obj = Object.getPrototypeOf(obj);
+    }
+    if (name in g) {
+      try {
+        Object.defineProperty(g, name, { value: undefined, writable: true, configurable: true, enumerable: false });
+      } catch {}
     }
   }
   const hc = (navigator as any)?.hardwareConcurrency ?? 4;

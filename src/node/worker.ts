@@ -3,6 +3,7 @@
 import './buffer-patch.ts';
 import * as bufferMod from 'buffer';
 import pathMod from '../shared/path.ts';
+import * as testRunner from './test-runner.ts';
 import { setCwdProvider } from '../shared/path.ts';
 import { fileURLToPathLoose, pathToFileURLString } from '../shared/resolve.ts';
 import assertMod, { strict as assertStrict } from './assert.ts';
@@ -198,7 +199,7 @@ function defineBuiltins() {
     trace_events: () => misc.traceEvents,
     domain: () => misc.domain,
     repl: () => misc.repl,
-    test: () => misc.testModule,
+    test: () => testRunner.default,
     'test/reporters': () => ({}),
     sea: () => misc.sea,
     sqlite: () => misc.sqlite,

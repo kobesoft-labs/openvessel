@@ -194,35 +194,60 @@ async function runOv(tests) {
 // ---------------------------------------------------------------------------
 // report
 
+/** shape: only the error's code/message/validation differs; value: a result differs; crash: an unexpected exception; timeout. */
+function classify(file, r) {
+  if (r.timedOut) return { kind: 'timeout', detail: 'TIMEOUT' };
+  const log = existsSync(join(resultsDir, 'logs', file + '.log')) ? readFileSync(join(resultsDir, 'logs', file + '.log'), 'utf8') : '';
+  const lines = log.split('\n');
+  const head = lines.findIndex((l) => /^\w*(Error|Exception)\b|^Error \[|^\w+Error:|^AssertionError/.test(l));
+  const first = (head >= 0 ? lines[head] : r.error || '').trim();
+  const at = lines.slice(Math.max(0, head)).find((l) => /\/node\/test\/parallel\/[^:]+:\d+/.test(l));
+  const where = at ? /test\/parallel\/([^:]+:\d+)/.exec(at)[1] : '';
+  if (/^AssertionError/.test(first)) {
+    if (/Missing expected (exception|rejection)/.test(first)) return { kind: 'shape', detail: 'no error thrown (argument validation)', where };
+    const cmp = log.match(/^[+-]\s+(code|message|name|errno|syscall): /m);
+    if (cmp || /is expected to match the expected value/.test(log)) return { kind: 'shape', detail: `error ${cmp?.[1] ?? 'validation'} differs`, where };
+    const diff = lines.slice(head + 1, head + 8).filter((l) => l.trim() && !/^\s+at /.test(l)).join(' ').replace(/\s+/g, ' ').slice(0, 140);
+    return { kind: 'value', detail: diff || first.slice(0, 140), where };
+  }
+  return { kind: 'crash', detail: first.replace(/\/node\/test\/[^\s)]+/g, '<test>').slice(0, 160), where };
+}
+
 function report() {
   const base = loadJson(join(resultsDir, 'baseline.json'), {});
   const res = loadJson(join(resultsDir, 'ov.json'), {});
   const byMod = {};
-  const causes = {};
+  const causes = { crash: {}, value: {}, timeout: {}, shape: {} };
   for (const [file, r] of Object.entries(res)) {
     if (base[file] && !base[file].pass) continue;
-    const m = (byMod[r.mod] ??= { pass: 0, total: 0 });
+    const m = (byMod[r.mod] ??= { pass: 0, total: 0, crash: 0, value: 0, timeout: 0, shape: 0 });
     m.total++;
-    if (r.pass) m.pass++;
-    else {
-      const key = r.error.replace(/'[^']*'|"[^"]*"|\d+/g, '…').slice(0, 120);
-      (causes[key] ??= []).push(file);
+    if (r.pass) {
+      m.pass++;
+      continue;
     }
+    const c = classify(file, r);
+    m[c.kind]++;
+    const key = c.detail.replace(/'[^']*'|"[^"]*"|\b\d+\b/g, '…');
+    (causes[c.kind][key] ??= []).push(file + (c.where ? ` (${c.where.split(':')[1]})` : ''));
   }
-  const lines = ['| module | pass | total |', '|---|---:|---:|'];
-  let p = 0;
-  let t = 0;
+  const lines = ['| module | pass | total | crash | value | timeout | shape |', '|---|---:|---:|---:|---:|---:|---:|'];
+  const sum = { pass: 0, total: 0, crash: 0, value: 0, timeout: 0, shape: 0 };
   for (const [m, v] of Object.entries(byMod).sort((a, b) => b[1].total - a[1].total)) {
-    lines.push(`| ${m} | ${v.pass} | ${v.total} |`);
-    p += v.pass;
-    t += v.total;
+    lines.push(`| ${m} | ${v.pass} | ${v.total} | ${v.crash} | ${v.value} | ${v.timeout} | ${v.shape} |`);
+    for (const k of Object.keys(sum)) sum[k] += v[k];
   }
-  lines.push(`| **all** | **${p}** | **${t}** |`, '', '## failures by cause', '');
-  for (const [k, files] of Object.entries(causes).sort((a, b) => b[1].length - a[1].length)) {
-    lines.push(`- **${files.length}** \`${k}\`  `, `  ${files.slice(0, 6).join(', ')}${files.length > 6 ? ', …' : ''}`);
+  lines.push(`| **all** | **${sum.pass}** | **${sum.total}** | ${sum.crash} | ${sum.value} | ${sum.timeout} | ${sum.shape} |`, '');
+  lines.push('crash: unexpected exception · value: a result differs · timeout: hung (30s) · shape: only the error code/message or argument validation differs', '');
+  for (const kind of ['crash', 'value', 'timeout', 'shape']) {
+    lines.push(`## ${kind}`, '');
+    for (const [k, files] of Object.entries(causes[kind]).sort((a, b) => b[1].length - a[1].length)) {
+      lines.push(`- **${files.length}** \`${k}\`  `, `  ${files.slice(0, 8).join(', ')}${files.length > 8 ? ', …' : ''}`);
+    }
+    lines.push('');
   }
   writeFileSync(join(resultsDir, 'REPORT.md'), lines.join('\n') + '\n');
-  console.log(lines.slice(0, Object.keys(byMod).length + 4).join('\n'));
+  console.log(lines.slice(0, Object.keys(byMod).length + 3).join('\n'));
   console.log(`\nfull report: ${join(resultsDir, 'REPORT.md')}`);
 }
 
