@@ -12,6 +12,7 @@ import * as loop from './loop.ts';
 import { parseCommandLine } from './options.ts';
 import { S, type InitMsg } from './state.ts';
 import './typescript.ts';
+import './fetch.ts';
 
 declare const self: DedicatedWorkerGlobalScope;
 
