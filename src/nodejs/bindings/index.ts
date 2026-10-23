@@ -40,6 +40,9 @@ import { createEncodingBinding } from './encoding.ts';
 import { createIcu } from './icu.ts';
 import { createModules } from './modules.ts';
 import { createStringDecoder } from './string_decoder.ts';
+import { createSerdes } from './serdes.ts';
+import { createV8 } from './v8.ts';
+import { createHeapUtils } from './heap_utils.ts';
 
 export type BindingFactory = () => any;
 
@@ -58,6 +61,7 @@ export const factories: Record<string, BindingFactory> = {
   fs: createFs,
   fs_dir: createFsDir,
   fs_event_wrap: createFsEventWrap,
+  heap_utils: createHeapUtils,
   http_parser: createHttpParser,
   icu: createIcu,
   messaging: createMessaging,
@@ -70,6 +74,7 @@ export const factories: Record<string, BindingFactory> = {
   pipe_wrap: createPipeWrap,
   process_methods: createProcessMethods,
   process_wrap: createProcessWrap,
+  serdes: createSerdes,
   signal_wrap: createSignalWrap,
   spawn_sync: createSpawnSync,
   stream_wrap: createStreamWrap,
@@ -86,6 +91,7 @@ export const factories: Record<string, BindingFactory> = {
   uv: createUv,
   worker: createWorkerBinding,
   zlib: createZlib,
+  v8: createV8,
   // only for v8.queryObjects(), which needs heap access
   internal_only_v8: () => ({ queryObjects: () => [] }),
   // WebAssembly.compileStreaming/instantiateStreaming are the browser's own
