@@ -7,6 +7,7 @@ import { S } from '../state.ts';
 import { fromShape, shapeOf } from './shape.ts';
 import { perfNow, timeOrigin } from '../../node/native.ts';
 import { hardwareConcurrency, nativeQueueMicrotask } from '../web.ts';
+import { Histogram, createELDHistogram } from './performance.ts';
 
 const enc = new TextEncoder();
 const t0 = perfNow();
@@ -320,6 +321,8 @@ export function createPerformance() {
     installGarbageCollectionTracking: () => {},
     removeGarbageCollectionTracking: () => {},
     notify: () => {},
+    Histogram,
+    createELDHistogram,
   });
 }
 
