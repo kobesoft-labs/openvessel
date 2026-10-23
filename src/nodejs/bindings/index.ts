@@ -25,6 +25,7 @@ import {
   createUv,
 } from './process.ts';
 import { fromShape } from './shape.ts';
+import { createProcessWrap, createSignalWrap, createSpawnSync } from './process_wrap.ts';
 import { createPipeWrap, createStreamWrap, createTtyWrap } from './stream.ts';
 import { createTypes, createUtil } from './util.ts';
 import { createUrl } from './url.ts';
@@ -56,6 +57,9 @@ export const factories: Record<string, BindingFactory> = {
   performance: createPerformance,
   pipe_wrap: createPipeWrap,
   process_methods: createProcessMethods,
+  process_wrap: createProcessWrap,
+  signal_wrap: createSignalWrap,
+  spawn_sync: createSpawnSync,
   stream_wrap: createStreamWrap,
   string_decoder: createStringDecoder,
   symbols: createSymbols,
@@ -67,6 +71,8 @@ export const factories: Record<string, BindingFactory> = {
   url: createUrl,
   util: createUtil,
   uv: createUv,
+  // only for v8.queryObjects(), which needs heap access
+  internal_only_v8: () => ({ queryObjects: () => [] }),
   // WebAssembly.compileStreaming/instantiateStreaming are the browser's own
   wasm_web_api: () => Object.assign(fromShape('wasm_web_api'), { setImplementation: () => {} }),
 };

@@ -523,6 +523,16 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
           return;
         }
         f.ref();
+        // drop our reference when the process exits, even while a read is still pending, so
+        // the other end of a pipe/socketpair sees EOF
+        let released = false;
+        const release = () => {
+          if (released) return;
+          released = true;
+          state.active = false;
+          f.unref();
+        };
+        proc.onExit.add(release);
         (async () => {
           try {
             while (state.active && proc.state === 'running') {
@@ -538,7 +548,8 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
           } catch (e) {
             kernel.post(proc, { t: 'fd-data', fd: msg.fd, data: null });
           } finally {
-            f.unref();
+            proc.onExit.delete(release);
+            release();
             if (readers.get(key) === state) readers.delete(key);
           }
         })();
