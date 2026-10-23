@@ -221,8 +221,11 @@ export class NodeMessagePort extends EventEmitter {
     nativeToWrapper.set(native, this);
     native.onmessage = (ev) => this._receive(ev.data as Envelope);
     native.onmessageerror = (ev) => this.emit('messageerror', ev.data);
+    // newListener fires before the listener is added, so activate explicitly
     this.on('newListener', (ev: string) => {
-      if (ev === 'message' && !this.started) this.start();
+      if (ev !== 'message' || this.closed) return;
+      if (!this.started) this.start();
+      this.handle.activate();
     });
     this.on('removeListener', (ev: string) => {
       if (ev === 'message' && this.listenerCount('message') === 0) this.handle.deactivate();
@@ -276,9 +279,12 @@ export class NodeMessagePort extends EventEmitter {
     this.started = true;
     this[kNative].start();
     if (this.listenerCount('message') > 0) this.handle.activate();
-    const q = this.queued;
-    this.queued = [];
-    for (const e of q) this.emit('message', rewrap(e.d));
+    // flush after the current listener has been attached (start() may run inside newListener)
+    queueMicrotask(() => {
+      const q = this.queued;
+      this.queued = [];
+      for (const e of q) this.emit('message', rewrap(e.d));
+    });
   }
 
   /** Enables the shared-ring mirror for this direction. */
