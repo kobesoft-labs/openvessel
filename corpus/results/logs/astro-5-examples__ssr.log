@@ -1,0 +1,47 @@
+$ npm install
+npm warn deprecated tsconfck@3.1.6: unmaintained
+
+added 315 packages in 1.6s
+
+[exit 0 1640ms]
+$ npm run build
+
+> @example/ssr@0.0.1 build
+> astro build
+
+[2m18:19:26[22m [34m[@astrojs/node][39m Enabling sessions with filesystem storage
+[2m18:19:26[22m [34m[vite][39m Forced re-optimization of dependencies
+[2m18:19:27[22m [34m[content][39m Syncing content
+[2m18:19:27[22m [34m[content][39m Synced content
+[2m18:19:27[22m [34m[types][39m Generated [2m1.03s[22m
+[2m18:19:27[22m [34m[build][39m output: [34m"server"[39m
+[2m18:19:27[22m [34m[build][39m mode: [34m"server"[39m
+[2m18:19:27[22m [34m[build][39m directory: [34m/home/user/app/dist/[39m
+[2m18:19:27[22m [34m[build][39m adapter: [32m@astrojs/node[39m
+[2m18:19:27[22m [34m[build][39m Collecting build info...
+[2m18:19:27[22m [34m[build][39m [32m✓ Completed in 1.04s.[39m
+[2m18:19:27[22m [34m[build][39m Building server entrypoints...
+[2m18:19:28[22m [34m[vite][39m [32m✓ built in 1.06s[39m
+[2m18:19:28[22m [34m[build][39m [32m✓ Completed in 1.11s.[39m
+
+[42m[30m building client (vite) [39m[49m
+[2m18:19:28[22m [34m[vite][39m transforming...
+[2m18:19:29[22m [34m[vite][39m [32m✓[39m 112 modules transformed.
+[2m18:19:29[22m [34m[vite][39m rendering chunks...
+[2m18:19:29[22m [34m[vite][39m computing gzip size...
+[2m18:19:29[22m [34m[vite][39m [2mdist/client/[22m[2m_astro/[22m[36mdisclose-version.DsnmJJEf.js  [39m[1m[2m 0.07 kB[22m[1m[22m[2m │ gzip: 0.08 kB[22m
+[2m18:19:29[22m [34m[vite][39m [2mdist/client/[22m[2m_astro/[22m[36mCart.Br6OQZlj.js              [39m[1m[2m 0.99 kB[22m[1m[22m[2m │ gzip: 0.60 kB[22m
+[2m18:19:29[22m [34m[vite][39m [2mdist/client/[22m[2m_astro/[22m[36mclient.svelte.CtUy9lmG.js     [39m[1m[2m 1.16 kB[22m[1m[22m[2m │ gzip: 0.65 kB[22m
+[2m18:19:29[22m [34m[vite][39m [2mdist/client/[22m[2m_astro/[22m[36mAddToCart.BVSEy2ig.js         [39m[1m[2m 1.27 kB[22m[1m[22m[2m │ gzip: 0.78 kB[22m
+[2m18:19:29[22m [34m[vite][39m [2mdist/client/[22m[2m_astro/[22m[36mrender.CF_eSbad.js            [39m[1m[2m 6.90 kB[22m[1m[22m[2m │ gzip: 3.15 kB[22m
+[2m18:19:29[22m [34m[vite][39m [2mdist/client/[22m[2m_astro/[22m[36mtemplate.cX1BMgmm.js          [39m[1m[2m23.25 kB[22m[1m[22m[2m │ gzip: 9.60 kB[22m
+[2m18:19:29[22m [34m[vite][39m [32m✓ built in 249ms[39m
+
+[42m[30m prerendering static routes [39m[49m
+[2m18:19:29[22m [32m✓ Completed in 11ms.
+[39m
+[2m18:19:29[22m [34m[build][39m Rearranging server assets...
+[2m18:19:29[22m [34m[build][39m Server built in [1m2.42s[22m
+[2m18:19:29[22m [34m[build][39m [1mComplete![22m
+
+[exit 0 2959ms]

@@ -1,0 +1,170 @@
+{
+  "astro-5-examples__basics": {
+    "id": "astro-5-examples__basics",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 7723,
+    "error": ""
+  },
+  "astro-5-examples__blog": {
+    "id": "astro-5-examples__blog",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 5473,
+    "error": ""
+  },
+  "astro-5-examples__container-with-vitest": {
+    "id": "astro-5-examples__container-with-vitest",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 6559,
+    "error": ""
+  },
+  "astro-5-examples__framework-alpine": {
+    "id": "astro-5-examples__framework-alpine",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 4268,
+    "error": ""
+  },
+  "astro-5-examples__framework-multiple": {
+    "id": "astro-5-examples__framework-multiple",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 9083,
+    "error": ""
+  },
+  "astro-5-examples__framework-preact": {
+    "id": "astro-5-examples__framework-preact",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 3687,
+    "error": ""
+  },
+  "astro-5-examples__framework-react": {
+    "id": "astro-5-examples__framework-react",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 3380,
+    "error": ""
+  },
+  "astro-5-examples__framework-solid": {
+    "id": "astro-5-examples__framework-solid",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 3115,
+    "error": ""
+  },
+  "astro-5-examples__framework-svelte": {
+    "id": "astro-5-examples__framework-svelte",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 3434,
+    "error": ""
+  },
+  "astro-5-examples__framework-vue": {
+    "id": "astro-5-examples__framework-vue",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 3848,
+    "error": ""
+  },
+  "astro-5-examples__hackernews": {
+    "id": "astro-5-examples__hackernews",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 3467,
+    "error": ""
+  },
+  "astro-5-examples__minimal": {
+    "id": "astro-5-examples__minimal",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 2443,
+    "error": ""
+  },
+  "astro-5-examples__portfolio": {
+    "id": "astro-5-examples__portfolio",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 3805,
+    "error": ""
+  },
+  "astro-5-examples__ssr": {
+    "id": "astro-5-examples__ssr",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 4844,
+    "error": ""
+  },
+  "astro-5-examples__starlog": {
+    "id": "astro-5-examples__starlog",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 6038,
+    "error": ""
+  },
+  "astro-5-examples__toolbar-app": {
+    "id": "astro-5-examples__toolbar-app",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 2451,
+    "error": ""
+  },
+  "astro-5-examples__with-markdoc": {
+    "id": "astro-5-examples__with-markdoc",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 6239,
+    "error": ""
+  },
+  "astro-5-examples__with-mdx": {
+    "id": "astro-5-examples__with-mdx",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 5525,
+    "error": ""
+  },
+  "astro-5-examples__with-nanostores": {
+    "id": "astro-5-examples__with-nanostores",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 5386,
+    "error": ""
+  },
+  "astro-5-examples__with-tailwindcss": {
+    "id": "astro-5-examples__with-tailwindcss",
+    "astro": 5,
+    "install": true,
+    "build": false,
+    "ms": 5671,
+    "error": "  \u001b[1mCaused by:\u001b[22m\n\u001b[2m  Cannot find module '@rolldown/binding-wasm32-wasi'\nRequire stack:\n- /home/user/app/node_modules/rolldown/dist/shared/binding-BMtuZhvP.mjs\n    at file:///home/user/app/node_modules/rolldown/dist/shared/binding-BMtuZhvP.mjs:495:18\n    at createLoadErrorChain (file:///home/user/app/node_modules/rolldown/dist/shared/binding-BMtuZhvP.mjs:488:17)\n    at file:///home/user/app/node_modules/rolldown/dist/shared/binding-BMtuZhvP.mjs:9:49\u001b[22m\nnpm error Lifecycle script `build` failed with error:\nnpm error code 1\nnpm error path /home/user/app\nnpm error command failed\nnpm error command sh -c astro build"
+  },
+  "astro-5-examples__with-vitest": {
+    "id": "astro-5-examples__with-vitest",
+    "astro": 5,
+    "install": true,
+    "build": true,
+    "ms": 5790,
+    "error": ""
+  }
+}

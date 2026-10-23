@@ -1,0 +1,40 @@
+$ npm install
+npm warn deprecated tsconfck@3.1.6: unmaintained
+
+added 282 packages in 2.2s
+
+[exit 0 2200ms]
+$ npm run build
+
+> @example/framework-alpine@0.0.1 build
+> astro build
+
+[2m18:18:47[22m [34m[content][39m Syncing content
+[2m18:18:47[22m [34m[content][39m Synced content
+[2m18:18:47[22m [34m[types][39m Generated [2m637ms[22m
+[2m18:18:47[22m [34m[build][39m output: [34m"static"[39m
+[2m18:18:47[22m [34m[build][39m mode: [34m"static"[39m
+[2m18:18:47[22m [34m[build][39m directory: [34m/home/user/app/dist/[39m
+[2m18:18:47[22m [34m[build][39m Collecting build info...
+[2m18:18:47[22m [34m[build][39m [32m✓ Completed in 646ms.[39m
+[2m18:18:47[22m [34m[build][39m Building static entrypoints...
+[2m18:18:47[22m [34m[vite][39m [32m✓ built in 420ms[39m
+[2m18:18:47[22m [34m[build][39m [32m✓ Completed in 462ms.[39m
+
+[42m[30m building client (vite) [39m[49m
+[2m18:18:47[22m [34m[vite][39m transforming...
+[2m18:18:47[22m [34m[vite][39m [32m✓[39m 3 modules transformed.
+[2m18:18:48[22m [34m[vite][39m rendering chunks...
+[2m18:18:48[22m [34m[vite][39m computing gzip size...
+[2m18:18:48[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mpage.DEIkyDCW.js  [39m[1m[2m55.53 kB[22m[1m[22m[2m │ gzip: 20.57 kB[22m
+[2m18:18:48[22m [34m[vite][39m [32m✓ built in 160ms[39m
+
+[42m[30m generating static routes [39m[49m
+[2m18:18:48[22m [32m▶[39m src/pages/index.astro
+[2m18:18:48[22m   [34m└─[39m [2m/index.html[22m [2m(+3ms)[22m 
+[2m18:18:48[22m [32m✓ Completed in 9ms.
+[39m
+[2m18:18:48[22m [34m[build][39m 1 page(s) built in [1m1.29s[22m
+[2m18:18:48[22m [34m[build][39m [1mComplete![22m
+
+[exit 0 1818ms]

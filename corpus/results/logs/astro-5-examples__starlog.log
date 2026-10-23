@@ -1,0 +1,52 @@
+$ npm install
+npm warn deprecated tsconfck@3.1.6: unmaintained
+
+added 283 packages in 2.2s
+
+[exit 0 2233ms]
+$ npm run build
+
+> @example/starlog@0.0.1 build
+> astro build
+
+[2m18:19:33[22m [34m[content][39m Syncing content
+[2m18:19:33[22m [34m[content][39m Synced content
+[2m18:19:33[22m [34m[types][39m Generated [2m1.24s[22m
+[2m18:19:33[22m [34m[build][39m output: [34m"static"[39m
+[2m18:19:33[22m [34m[build][39m mode: [34m"static"[39m
+[2m18:19:33[22m [34m[build][39m directory: [34m/home/user/app/dist/[39m
+[2m18:19:33[22m [34m[build][39m Collecting build info...
+[2m18:19:33[22m [34m[build][39m [32m✓ Completed in 1.25s.[39m
+[2m18:19:33[22m [34m[build][39m Building static entrypoints...
+[2m18:19:34[22m [34m[vite][39m [32m✓ built in 909ms[39m
+[2m18:19:34[22m [34m[build][39m [32m✓ Completed in 958ms.[39m
+
+[42m[30m building client (vite) [39m[49m
+[2m18:19:34[22m [34m[vite][39m transforming...
+[2m18:19:34[22m [34m[vite][39m [32m✓[39m 13 modules transformed.
+[2m18:19:34[22m [34m[vite][39m rendering chunks...
+[2m18:19:34[22m [34m[vite][39m computing gzip size...
+[2m18:19:34[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mClientRouter.astro_astro_type_script_index_0_lang.CDGfc0hd.js  [39m[1m[2m15.36 kB[22m[1m[22m[2m │ gzip: 5.48 kB[22m
+[2m18:19:34[22m [34m[vite][39m [32m✓ built in 73ms[39m
+
+[42m[30m generating static routes [39m[49m
+[2m18:19:34[22m [32m▶[39m src/pages/index.astro
+[2m18:19:34[22m   [34m└─[39m [2m/index.html[22m [2m(+16ms)[22m 
+[2m18:19:34[22m [32m▶[39m src/pages/releases/[slug].astro
+[2m18:19:34[22m   [34m├─[39m [2m/releases/1_0/index.html[22m [2m(+1ms)[22m 
+[2m18:19:34[22m   [34m├─[39m [2m/releases/1_4/index.html[22m [2m(+1ms)[22m 
+[2m18:19:34[22m   [34m├─[39m [2m/releases/1_8/index.html[22m [2m(+1ms)[22m 
+[2m18:19:34[22m   [34m└─[39m [2m/releases/2_0/index.html[22m [2m(+1ms)[22m 
+[2m18:19:34[22m [32m✓ Completed in 32ms.
+[39m
+[42m[30m generating optimized images [39m[49m
+[2m18:19:35[22m   [32m▶[39m /_astro/starlog-placeholder-2.Dx_N7jU4_1ILTMY.webp [2m(before: 443kB, after: 13kB)[22m [2m(+262ms)[22m [2m(1/4)[22m
+[2m18:19:35[22m   [32m▶[39m /_astro/starlog-placeholder-14.C35Xhprn_gXUkr.webp [2m(before: 355kB, after: 13kB)[22m [2m(+318ms)[22m [2m(2/4)[22m
+[2m18:19:35[22m   [32m▶[39m /_astro/starlog-placeholder-18.DGuuNQXy_AnPhP.webp [2m(before: 375kB, after: 19kB)[22m [2m(+373ms)[22m [2m(3/4)[22m
+[2m18:19:35[22m   [32m▶[39m /_astro/starlog-placeholder-1.D1Ad2KDX_SxrBT.webp [2m(before: 399kB, after: 12kB)[22m [2m(+433ms)[22m [2m(4/4)[22m
+[2m18:19:35[22m [32m✓ Completed in 433ms.
+[39m
+[2m18:19:35[22m [34m[build][39m 5 page(s) built in [1m2.76s[22m
+[2m18:19:35[22m [34m[build][39m [1mComplete![22m
+
+[exit 0 3422ms]

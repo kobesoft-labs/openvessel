@@ -1,0 +1,35 @@
+$ npm install
+npm warn deprecated tsconfck@3.1.6: unmaintained
+
+added 350 packages in 4.6s
+
+[exit 0 4587ms]
+$ npm run build
+
+> @example/with-tailwindcss@0.0.1 build
+> astro build
+
+[2m18:20:00[22m [31m[1m[vite][22m[39m [31m[2m(ssr)[22m[39m [31mError when evaluating SSR module /home/user/app/astro.config.mjs: Cannot find native binding. npm has a bug related to optional dependencies (https://github.com/npm/cli/issues/4828). Please try `npm i` again after removing both package-lock.json and node_modules directory.[39m
+      at file:///home/user/app/node_modules/rolldown/dist/shared/binding-BMtuZhvP.mjs:601:34
+      at file:///home/user/app/node_modules/rolldown/dist/shared/binding-BMtuZhvP.mjs:9:49
+      at file:///home/user/app/node_modules/rolldown/dist/shared/parse-B7LUicIJ.mjs:3:46
+[1m[31m[astro][39m[22m Unable to load your Astro config
+
+Cannot find native binding. npm has a bug related to optional dependencies (https://github.com/npm/cli/issues/4828). Please try `npm i` again after removing both package-lock.json and node_modules directory.
+  [1mStack trace:[22m
+[2m    at file:///home/user/app/node_modules/rolldown/dist/shared/binding-BMtuZhvP.mjs:601:34
+    at file:///home/user/app/node_modules/rolldown/dist/shared/parse-B7LUicIJ.mjs:3:46[22m
+  [1mCaused by:[22m
+[2m  Cannot find module '@rolldown/binding-wasm32-wasi'
+Require stack:
+- /home/user/app/node_modules/rolldown/dist/shared/binding-BMtuZhvP.mjs
+    at file:///home/user/app/node_modules/rolldown/dist/shared/binding-BMtuZhvP.mjs:495:18
+    at createLoadErrorChain (file:///home/user/app/node_modules/rolldown/dist/shared/binding-BMtuZhvP.mjs:488:17)
+    at file:///home/user/app/node_modules/rolldown/dist/shared/binding-BMtuZhvP.mjs:9:49[22m
+npm error Lifecycle script `build` failed with error:
+npm error code 1
+npm error path /home/user/app
+npm error command failed
+npm error command sh -c astro build
+
+[exit 1 931ms]

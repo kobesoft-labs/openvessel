@@ -1,0 +1,49 @@
+$ npm install
+npm warn deprecated tsconfck@3.1.6: unmaintained
+
+added 340 packages in 2.5s
+
+[exit 0 2454ms]
+$ npm run build
+
+> @example/with-nanostores@0.0.1 build
+> astro build
+
+[2m18:19:53[22m [34m[content][39m Syncing content
+[2m18:19:53[22m [34m[content][39m Synced content
+[2m18:19:53[22m [34m[types][39m Generated [2m935ms[22m
+[2m18:19:53[22m [34m[build][39m output: [34m"static"[39m
+[2m18:19:53[22m [34m[build][39m mode: [34m"static"[39m
+[2m18:19:53[22m [34m[build][39m directory: [34m/home/user/app/dist/[39m
+[2m18:19:53[22m [34m[build][39m Collecting build info...
+[2m18:19:53[22m [34m[build][39m [32m✓ Completed in 946ms.[39m
+[2m18:19:53[22m [34m[build][39m Building static entrypoints...
+[2m18:19:54[22m [34m[vite][39m [32m✓ built in 672ms[39m
+[2m18:19:54[22m [34m[build][39m [32m✓ Completed in 722ms.[39m
+
+[42m[30m building client (vite) [39m[49m
+[2m18:19:54[22m [34m[vite][39m transforming...
+[2m18:19:54[22m [34m[vite][39m [32m✓[39m 29 modules transformed.
+[2m18:19:54[22m [34m[vite][39m rendering chunks...
+[2m18:19:54[22m [34m[vite][39m computing gzip size...
+[2m18:19:54[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mindex.95d291e9.HOgEm-Ep.js     [39m[1m[2m 0.16 kB[22m[1m[22m[2m │ gzip: 0.12 kB[22m
+[2m18:19:54[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mAddToCartForm.Dtp9Az2L.js      [39m[1m[2m 0.25 kB[22m[1m[22m[2m │ gzip: 0.20 kB[22m
+[2m18:19:54[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mCartFlyoutToggle.C7DN21_X.js   [39m[1m[2m 0.28 kB[22m[1m[22m[2m │ gzip: 0.22 kB[22m
+[2m18:19:54[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mindex.D7Y3Mnpd.js              [39m[1m[2m 0.41 kB[22m[1m[22m[2m │ gzip: 0.28 kB[22m
+[2m18:19:54[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mCartFlyout.hx5VfO3F.js         [39m[1m[2m 0.67 kB[22m[1m[22m[2m │ gzip: 0.39 kB[22m
+[2m18:19:54[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mjsxRuntime.module.BQnTyqh7.js  [39m[1m[2m 1.33 kB[22m[1m[22m[2m │ gzip: 0.73 kB[22m
+[2m18:19:54[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mclient.BWAqKV0Z.js             [39m[1m[2m 2.29 kB[22m[1m[22m[2m │ gzip: 1.24 kB[22m
+[2m18:19:54[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mhooks.module.BbaKT0yd.js       [39m[1m[2m 2.53 kB[22m[1m[22m[2m │ gzip: 1.15 kB[22m
+[2m18:19:54[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36msignals.module.BVhNoODT.js     [39m[1m[2m 7.92 kB[22m[1m[22m[2m │ gzip: 3.13 kB[22m
+[2m18:19:54[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mpreact.module.BTqC4RwC.js      [39m[1m[2m10.57 kB[22m[1m[22m[2m │ gzip: 4.59 kB[22m
+[2m18:19:54[22m [34m[vite][39m [32m✓ built in 193ms[39m
+
+[42m[30m generating static routes [39m[49m
+[2m18:19:54[22m [32m▶[39m src/pages/index.astro
+[2m18:19:54[22m   [34m└─[39m [2m/index.html[22m [2m(+7ms)[22m 
+[2m18:19:54[22m [32m✓ Completed in 24ms.
+[39m
+[2m18:19:54[22m [34m[build][39m 1 page(s) built in [1m1.90s[22m
+[2m18:19:54[22m [34m[build][39m [1mComplete![22m
+
+[exit 0 2694ms]

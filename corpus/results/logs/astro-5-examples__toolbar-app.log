@@ -1,0 +1,13 @@
+$ npm install
+npm warn deprecated tsconfck@3.1.6: unmaintained
+
+added 279 packages in 1.8s
+
+[exit 0 1781ms]
+$ npm run build
+
+> @example/toolbar-app@0.0.1 build
+> tsc
+
+
+[exit 0 587ms]

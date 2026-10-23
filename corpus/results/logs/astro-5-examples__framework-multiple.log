@@ -1,0 +1,57 @@
+$ npm install
+npm warn deprecated tsconfck@3.1.6: unmaintained
+
+added 468 packages in 5.9s
+
+[exit 0 5897ms]
+$ npm run build
+
+> @example/framework-multiple@0.0.1 build
+> astro build
+
+[2m18:18:54[22m [34m[vite][39m Forced re-optimization of dependencies
+[2m18:18:55[22m [34m[content][39m Syncing content
+[2m18:18:55[22m [34m[content][39m Synced content
+[2m18:18:55[22m [34m[types][39m Generated [2m1.00s[22m
+[2m18:18:55[22m [34m[build][39m output: [34m"static"[39m
+[2m18:18:55[22m [34m[build][39m mode: [34m"static"[39m
+[2m18:18:55[22m [34m[build][39m directory: [34m/home/user/app/dist/[39m
+[2m18:18:55[22m [34m[build][39m Collecting build info...
+[2m18:18:55[22m [34m[build][39m [32m✓ Completed in 1.01s.[39m
+[2m18:18:55[22m [34m[build][39m Building static entrypoints...
+[2m18:18:56[22m [34m[vite][39m [32m✓ built in 494ms[39m
+[2m18:18:56[22m [34m[build][39m [32m✓ Completed in 526ms.[39m
+
+[42m[30m building client (vite) [39m[49m
+[2m18:18:56[22m [34m[vite][39m transforming...
+[2m18:18:56[22m [34m[vite][39m [32m✓[39m 160 modules transformed.
+[2m18:18:56[22m [34m[vite][39m rendering chunks...
+[2m18:18:57[22m [34m[vite][39m computing gzip size...
+[2m18:18:57[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mSolidCounter.DaA_4R-N.js              [39m[1m[2m  0.45 kB[22m[1m[22m[2m │ gzip:  0.30 kB[22m
+[2m18:18:57[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mVueCounter.CDwtRY_E.js                [39m[1m[2m  0.60 kB[22m[1m[22m[2m │ gzip:  0.39 kB[22m
+[2m18:18:57[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mSvelteCounter.ByOdQfYM.js             [39m[1m[2m  0.62 kB[22m[1m[22m[2m │ gzip:  0.41 kB[22m
+[2m18:18:57[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mPreactCounter.qiJ7jXbd.js             [39m[1m[2m  0.76 kB[22m[1m[22m[2m │ gzip:  0.45 kB[22m
+[2m18:18:57[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mclient.svelte.MFY4jVH1.js             [39m[1m[2m  0.91 kB[22m[1m[22m[2m │ gzip:  0.52 kB[22m
+[2m18:18:57[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mReactCounter.CVXehPEa.js              [39m[1m[2m  1.35 kB[22m[1m[22m[2m │ gzip:  0.77 kB[22m
+[2m18:18:57[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mclient.BJXhpRYu.js                    [39m[1m[2m  2.29 kB[22m[1m[22m[2m │ gzip:  1.24 kB[22m
+[2m18:18:57[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mhooks.module.JhoGcvsy.js              [39m[1m[2m  2.44 kB[22m[1m[22m[2m │ gzip:  1.12 kB[22m
+[2m18:18:57[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mclient.BRHlZY4W.js                    [39m[1m[2m  6.13 kB[22m[1m[22m[2m │ gzip:  2.60 kB[22m
+[2m18:18:57[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mindex._OACqPSs.js                     [39m[1m[2m  6.81 kB[22m[1m[22m[2m │ gzip:  2.76 kB[22m
+[2m18:18:57[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mclient.BHXpXbcV.js                    [39m[1m[2m  7.55 kB[22m[1m[22m[2m │ gzip:  3.54 kB[22m
+[2m18:18:57[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36msignals.module.DENl0Bb0.js            [39m[1m[2m  7.92 kB[22m[1m[22m[2m │ gzip:  3.13 kB[22m
+[2m18:18:57[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mpreact.module.BTqC4RwC.js             [39m[1m[2m 10.57 kB[22m[1m[22m[2m │ gzip:  4.59 kB[22m
+[2m18:18:57[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mweb.D7twyycj.js                       [39m[1m[2m 11.63 kB[22m[1m[22m[2m │ gzip:  4.87 kB[22m
+[2m18:18:57[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36msnippet.CrUDz5dH.js                   [39m[1m[2m 30.93 kB[22m[1m[22m[2m │ gzip: 12.39 kB[22m
+[2m18:18:57[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mruntime-core.esm-bundler.oaEnLumn.js  [39m[1m[2m 68.80 kB[22m[1m[22m[2m │ gzip: 27.97 kB[22m
+[2m18:18:57[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mclient.CimA0ymp.js                    [39m[1m[2m136.51 kB[22m[1m[22m[2m │ gzip: 45.74 kB[22m
+[2m18:18:57[22m [34m[vite][39m [32m✓ built in 716ms[39m
+
+[42m[30m generating static routes [39m[49m
+[2m18:18:57[22m [32m▶[39m src/pages/index.astro
+[2m18:18:57[22m   [34m└─[39m [2m/index.html[22m [2m(+10ms)[22m 
+[2m18:18:57[22m [32m✓ Completed in 33ms.
+[39m
+[2m18:18:57[22m [34m[build][39m 1 page(s) built in [1m2.30s[22m
+[2m18:18:57[22m [34m[build][39m [1mComplete![22m
+
+[exit 0 3060ms]

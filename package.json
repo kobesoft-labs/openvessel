@@ -1,0 +1,38 @@
+{
+  "name": "openvessel",
+  "version": "0.1.0",
+  "description": "A browser-only Node.js-like environment for building and previewing Astro sites. Clean-room, no real ports.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/host/index.js",
+  "exports": {
+    ".": "./dist/host/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs --watch & node scripts/serve.mjs",
+    "serve": "node scripts/serve.mjs",
+    "test": "node scripts/test.mjs",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "esbuild": "^0.28.2",
+    "playwright-core": "^1.64.1",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.4.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "buffer": "^6.0.3",
+    "cjs-module-lexer": "^2.3.0",
+    "es-module-lexer": "^3.0.4",
+    "fflate": "^0.8.3",
+    "readable-stream": "^4.8.0",
+    "sucrase": "^3.35.1"
+  }
+}

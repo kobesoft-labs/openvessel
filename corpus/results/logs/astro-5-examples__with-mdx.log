@@ -1,0 +1,44 @@
+$ npm install
+npm warn deprecated tsconfck@3.1.6: unmaintained
+
+added 384 packages in 2.9s
+
+[exit 0 2860ms]
+$ npm run build
+
+> @example/with-mdx@0.0.1 build
+> astro build
+
+[2m18:19:48[22m [34m[content][39m Syncing content
+[2m18:19:48[22m [34m[content][39m Synced content
+[2m18:19:48[22m [34m[types][39m Generated [2m846ms[22m
+[2m18:19:48[22m [34m[build][39m output: [34m"static"[39m
+[2m18:19:48[22m [34m[build][39m mode: [34m"static"[39m
+[2m18:19:48[22m [34m[build][39m directory: [34m/home/user/app/dist/[39m
+[2m18:19:48[22m [34m[build][39m Collecting build info...
+[2m18:19:48[22m [34m[build][39m [32m✓ Completed in 859ms.[39m
+[2m18:19:48[22m [34m[build][39m Building static entrypoints...
+[2m18:19:49[22m [34m[vite][39m [32m✓ built in 704ms[39m
+[2m18:19:49[22m [34m[build][39m [32m✓ Completed in 757ms.[39m
+
+[42m[30m building client (vite) [39m[49m
+[2m18:19:49[22m [34m[vite][39m transforming...
+[2m18:19:49[22m [34m[vite][39m [32m✓[39m 9 modules transformed.
+[2m18:19:49[22m [34m[vite][39m rendering chunks...
+[2m18:19:49[22m [34m[vite][39m computing gzip size...
+[2m18:19:49[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mCounter.Bj9_9oLI.js         [39m[1m[2m 0.75 kB[22m[1m[22m[2m │ gzip: 0.45 kB[22m
+[2m18:19:49[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mclient.BJXhpRYu.js          [39m[1m[2m 2.29 kB[22m[1m[22m[2m │ gzip: 1.24 kB[22m
+[2m18:19:49[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mhooks.module.JhoGcvsy.js    [39m[1m[2m 2.44 kB[22m[1m[22m[2m │ gzip: 1.12 kB[22m
+[2m18:19:49[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36msignals.module.DENl0Bb0.js  [39m[1m[2m 7.92 kB[22m[1m[22m[2m │ gzip: 3.13 kB[22m
+[2m18:19:49[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mpreact.module.BTqC4RwC.js   [39m[1m[2m10.57 kB[22m[1m[22m[2m │ gzip: 4.59 kB[22m
+[2m18:19:49[22m [34m[vite][39m [32m✓ built in 109ms[39m
+
+[42m[30m generating static routes [39m[49m
+[2m18:19:49[22m [32m▶[39m src/pages/index.mdx
+[2m18:19:49[22m   [34m└─[39m [2m/index.html[22m [2m(+12ms)[22m 
+[2m18:19:49[22m [32m✓ Completed in 24ms.
+[39m
+[2m18:19:49[22m [34m[build][39m 1 page(s) built in [1m1.76s[22m
+[2m18:19:49[22m [34m[build][39m [1mComplete![22m
+
+[exit 0 2526ms]

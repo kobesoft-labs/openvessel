@@ -1,0 +1,49 @@
+$ npm install
+npm warn deprecated tsconfck@3.1.6: unmaintained
+
+added 277 packages in 1.5s
+
+[exit 0 1463ms]
+$ npm run build
+
+> @example/portfolio@0.0.1 build
+> astro build
+
+[2m18:19:23[22m [34m[content][39m Syncing content
+[2m18:19:23[22m [34m[content][39m Synced content
+[2m18:19:23[22m [34m[types][39m Generated [2m799ms[22m
+[2m18:19:23[22m [34m[build][39m output: [34m"static"[39m
+[2m18:19:23[22m [34m[build][39m mode: [34m"static"[39m
+[2m18:19:23[22m [34m[build][39m directory: [34m/home/user/app/dist/[39m
+[2m18:19:23[22m [34m[build][39m Collecting build info...
+[2m18:19:23[22m [34m[build][39m [32m✓ Completed in 804ms.[39m
+[2m18:19:23[22m [34m[build][39m Building static entrypoints...
+[2m18:19:24[22m [34m[vite][39m [32m✓ built in 661ms[39m
+[2m18:19:24[22m [34m[build][39m [32m✓ Completed in 691ms.[39m
+
+[42m[30m building client (vite) [39m[49m
+[2m18:19:24[22m [34m[vite][39m transforming...
+[2m18:19:24[22m [34m[vite][39m [32m✓[39m 3 modules transformed.
+[2m18:19:24[22m [34m[vite][39m rendering chunks...
+[2m18:19:24[22m [34m[vite][39m [32m✓ built in 26ms[39m
+
+[42m[30m generating static routes [39m[49m
+[2m18:19:24[22m [32m▶[39m src/pages/404.astro
+[2m18:19:24[22m   [34m└─[39m [2m/404.html[22m [2m(+4ms)[22m 
+[2m18:19:24[22m [32m▶[39m src/pages/about.astro
+[2m18:19:24[22m   [34m└─[39m [2m/about/index.html[22m [2m(+1ms)[22m 
+[2m18:19:24[22m [32m▶[39m src/pages/index.astro
+[2m18:19:24[22m   [34m└─[39m [2m/index.html[22m [2m(+4ms)[22m 
+[2m18:19:24[22m [32m▶[39m src/pages/work/[...slug].astro
+[2m18:19:24[22m   [34m├─[39m [2m/work/bloom-box/index.html[22m [2m(+1ms)[22m 
+[2m18:19:24[22m   [34m├─[39m [2m/work/h20/index.html[22m [2m(+1ms)[22m 
+[2m18:19:24[22m   [34m├─[39m [2m/work/markdown-mystery-tour/index.html[22m [2m(+1ms)[22m 
+[2m18:19:24[22m   [34m└─[39m [2m/work/nested/duvet-genius/index.html[22m [2m(+1ms)[22m 
+[2m18:19:24[22m [32m▶[39m src/pages/work.astro
+[2m18:19:24[22m   [34m└─[39m [2m/work/index.html[22m [2m(+1ms)[22m 
+[2m18:19:24[22m [32m✓ Completed in 29ms.
+[39m
+[2m18:19:24[22m [34m[build][39m 8 page(s) built in [1m1.56s[22m
+[2m18:19:24[22m [34m[build][39m [1mComplete![22m
+
+[exit 0 2055ms]

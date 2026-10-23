@@ -1,0 +1,61 @@
+$ npm install
+npm warn deprecated tsconfck@3.1.6: unmaintained
+npm warn ERESOLVE zod-to-ts@1.2.0 wants peer zod@"^3", found 4.6.7
+
+added 340 packages in 2.1s
+
+[exit 0 2133ms]
+$ npm run build
+
+> @example/blog@0.0.1 build
+> astro build
+
+[2m18:18:35[22m [34m[content][39m Syncing content
+[2m18:18:35[22m [34m[content][39m Synced content
+[2m18:18:35[22m [34m[types][39m Generated [2m994ms[22m
+[2m18:18:35[22m [34m[build][39m output: [34m"static"[39m
+[2m18:18:35[22m [34m[build][39m mode: [34m"static"[39m
+[2m18:18:35[22m [34m[build][39m directory: [34m/home/user/app/dist/[39m
+[2m18:18:35[22m [34m[build][39m Collecting build info...
+[2m18:18:35[22m [34m[build][39m [32m✓ Completed in 1.01s.[39m
+[2m18:18:35[22m [34m[build][39m Building static entrypoints...
+[2m18:18:36[22m [34m[vite][39m [32m✓ built in 669ms[39m
+[2m18:18:36[22m [34m[build][39m [32m✓ Completed in 700ms.[39m
+
+[42m[30m generating static routes [39m[49m
+[2m18:18:36[22m [32m▶[39m src/pages/about.astro
+[2m18:18:36[22m   [34m└─[39m [2m/about/index.html[22m [2m(+6ms)[22m 
+[2m18:18:36[22m [32m▶[39m src/pages/blog/[...slug].astro
+[2m18:18:36[22m   [34m├─[39m [2m/blog/using-mdx/index.html[22m [2m(+5ms)[22m 
+[2m18:18:36[22m   [34m├─[39m [2m/blog/first-post/index.html[22m [2m(+1ms)[22m 
+[2m18:18:36[22m   [34m├─[39m [2m/blog/second-post/index.html[22m [2m(+1ms)[22m 
+[2m18:18:36[22m   [34m├─[39m [2m/blog/third-post/index.html[22m [2m(+1ms)[22m 
+[2m18:18:36[22m   [34m└─[39m [2m/blog/markdown-style-guide/index.html[22m [2m(+1ms)[22m 
+[2m18:18:36[22m [32m▶[39m src/pages/blog/index.astro
+[2m18:18:36[22m   [34m└─[39m [2m/blog/index.html[22m [2m(+1ms)[22m 
+[2m18:18:36[22m [32m▶[39m src/pages/index.astro
+[2m18:18:36[22m   [34m└─[39m [2m/index.html[22m [2m(+1ms)[22m 
+[2m18:18:36[22m [35mλ[39m src/pages/rss.xml.js
+[2m18:18:36[22m   [34m└─[39m [2m/rss.xml[22m [2m(+5ms)[22m 
+[2m18:18:36[22m [32m✓ Completed in 66ms.
+[39m
+[42m[30m generating optimized images [39m[49m
+[2m18:18:36[22m   [32m▶[39m /_astro/blog-placeholder-4.gLBdjEDe_sXP1K.webp [2m(before: 37kB, after: 37kB)[22m [2m(+285ms)[22m [2m(1/12)[22m
+[2m18:18:36[22m   [32m▶[39m /_astro/blog-placeholder-2.1WQRLJGH_2ml2Jq.webp [2m(before: 32kB, after: 28kB)[22m [2m(+339ms)[22m [2m(2/12)[22m
+[2m18:18:36[22m   [32m▶[39m /_astro/blog-placeholder-5.CB3Xi-gp_Z1y5ehD.webp [2m(before: 34kB, after: 17kB)[22m [2m(+389ms)[22m [2m(3/12)[22m
+[2m18:18:36[22m   [32m▶[39m /_astro/blog-placeholder-3.ijrf8Ohr_1S4sd1.webp [2m(before: 28kB, after: 23kB)[22m [2m(+438ms)[22m [2m(4/12)[22m
+[2m18:18:36[22m   [32m▶[39m /_astro/blog-placeholder-1.Bx0Zcyzv_Z29X6w5.webp [2m(before: 31kB, after: 22kB)[22m [2m(+489ms)[22m [2m(5/12)[22m
+[2m18:18:37[22m   [32m▶[39m /_astro/blog-placeholder-about.BtEdEmGp_2eecaz.webp [2m(before: 21kB, after: 14kB)[22m [2m(+541ms)[22m [2m(6/12)[22m
+[2m18:18:37[22m   [32m▶[39m /_astro/blog-placeholder-4.gLBdjEDe_Z15Ss3d.webp [2m(before: 37kB, after: 22kB)[22m [2m(+287ms)[22m [2m(7/12)[22m
+[2m18:18:37[22m   [32m▶[39m /_astro/blog-placeholder-2.1WQRLJGH_15TD1q.webp [2m(before: 32kB, after: 16kB)[22m [2m(+259ms)[22m [2m(8/12)[22m
+[2m18:18:37[22m   [32m▶[39m /_astro/blog-placeholder-5.CB3Xi-gp_j9V0O.webp [2m(before: 34kB, after: 9kB)[22m [2m(+234ms)[22m [2m(9/12)[22m
+[2m18:18:37[22m   [32m▶[39m /_astro/blog-placeholder-3.ijrf8Ohr_Z1373cG.webp [2m(before: 28kB, after: 12kB)[22m [2m(+211ms)[22m [2m(10/12)[22m
+[2m18:18:37[22m   [32m▶[39m /_astro/blog-placeholder-1.Bx0Zcyzv_Z1v5W1C.webp [2m(before: 31kB, after: 13kB)[22m [2m(+188ms)[22m [2m(11/12)[22m
+[2m18:18:37[22m   [32m▶[39m /_astro/blog-placeholder-about.BtEdEmGp_Z2srqQK.webp [2m(before: 21kB, after: 14kB)[22m [2m(+171ms)[22m [2m(12/12)[22m
+[2m18:18:37[22m [32m✓ Completed in 712ms.
+[39m
+[2m18:18:37[22m [34m[@astrojs/sitemap][39m `sitemap-index.xml` created at `dist`
+[2m18:18:37[22m [34m[build][39m 8 page(s) built in [1m2.50s[22m
+[2m18:18:37[22m [34m[build][39m [1mComplete![22m
+
+[exit 0 3101ms]

@@ -1,0 +1,759 @@
+[
+  {
+    "id": "astro-5-examples__basics",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/basics",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__blog",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/blog",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__container-with-vitest",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/container-with-vitest",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__framework-alpine",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/framework-alpine",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__framework-multiple",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/framework-multiple",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__framework-preact",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/framework-preact",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__framework-react",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/framework-react",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__framework-solid",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/framework-solid",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__framework-svelte",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/framework-svelte",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__framework-vue",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/framework-vue",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__hackernews",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/hackernews",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__minimal",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/minimal",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__portfolio",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/portfolio",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__ssr",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/ssr",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__starlog",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/starlog",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__toolbar-app",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/toolbar-app",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__with-markdoc",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/with-markdoc",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__with-mdx",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/with-mdx",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__with-nanostores",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/with-nanostores",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__with-tailwindcss",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/with-tailwindcss",
+    "astro": 5
+  },
+  {
+    "id": "astro-5-examples__with-vitest",
+    "repo": "withastro/astro",
+    "ref": "astro@5.18.2",
+    "path": "examples/with-vitest",
+    "astro": 5
+  },
+  {
+    "id": "astro-6-examples__advanced-routing",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/advanced-routing",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__basics",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/basics",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__blog",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/blog",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__container-with-vitest",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/container-with-vitest",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__framework-alpine",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/framework-alpine",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__framework-multiple",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/framework-multiple",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__framework-preact",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/framework-preact",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__framework-react",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/framework-react",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__framework-solid",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/framework-solid",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__framework-svelte",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/framework-svelte",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__framework-vue",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/framework-vue",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__hackernews",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/hackernews",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__minimal",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/minimal",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__portfolio",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/portfolio",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__ssr",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/ssr",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__starlog",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/starlog",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__toolbar-app",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/toolbar-app",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__with-markdoc",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/with-markdoc",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__with-mdx",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/with-mdx",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__with-nanostores",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/with-nanostores",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__with-tailwindcss",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/with-tailwindcss",
+    "astro": 6
+  },
+  {
+    "id": "astro-6-examples__with-vitest",
+    "repo": "withastro/astro",
+    "ref": "astro@6.4.8",
+    "path": "examples/with-vitest",
+    "astro": 6
+  },
+  {
+    "id": "saicaca__fuwari",
+    "repo": "saicaca/fuwari",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 5102
+  },
+  {
+    "id": "radishzzz__astro-theme-retypeset",
+    "repo": "radishzzz/astro-theme-retypeset",
+    "ref": "master",
+    "sha": null,
+    "astro": 6,
+    "stars": 708
+  },
+  {
+    "id": "matt765__Tailcast",
+    "repo": "matt765/Tailcast",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 411
+  },
+  {
+    "id": "the3ash__astro-chiri",
+    "repo": "the3ash/astro-chiri",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 317
+  },
+  {
+    "id": "WhitePaper233__yukina",
+    "repo": "WhitePaper233/yukina",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 282
+  },
+  {
+    "id": "0xdres__astro-devosfera",
+    "repo": "0xdres/astro-devosfera",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 183
+  },
+  {
+    "id": "ArtemKutsan__astro-citrus",
+    "repo": "ArtemKutsan/astro-citrus",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 153
+  },
+  {
+    "id": "shadcnblocks__mainline-astro-template",
+    "repo": "shadcnblocks/mainline-astro-template",
+    "ref": "master",
+    "sha": null,
+    "astro": 5,
+    "stars": 99
+  },
+  {
+    "id": "D-Sketon__astro-theme-reimu",
+    "repo": "D-Sketon/astro-theme-reimu",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 78
+  },
+  {
+    "id": "alex-on-ai__astroblog",
+    "repo": "alex-on-ai/astroblog",
+    "ref": "master",
+    "sha": null,
+    "astro": 5,
+    "stars": 66
+  },
+  {
+    "id": "devgelo-labs__astro-starter-pro",
+    "repo": "devgelo-labs/astro-starter-pro",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 61
+  },
+  {
+    "id": "webrating__starfolio",
+    "repo": "webrating/starfolio",
+    "ref": "master",
+    "sha": null,
+    "astro": 6,
+    "stars": 56
+  },
+  {
+    "id": "itsyujay__astro-zen-blog",
+    "repo": "itsyujay/astro-zen-blog",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 55
+  },
+  {
+    "id": "erlandv__case",
+    "repo": "erlandv/case",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 52
+  },
+  {
+    "id": "erlandv__virex",
+    "repo": "erlandv/virex",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 52
+  },
+  {
+    "id": "ChurchTao__PlainPage",
+    "repo": "ChurchTao/PlainPage",
+    "ref": "master",
+    "sha": null,
+    "astro": 5,
+    "stars": 44
+  },
+  {
+    "id": "nbakh16__career-portfolio-template",
+    "repo": "nbakh16/career-portfolio-template",
+    "ref": "master",
+    "sha": null,
+    "astro": 6,
+    "stars": 41
+  },
+  {
+    "id": "bekturaslan__syntro-astro",
+    "repo": "bekturaslan/syntro-astro",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 36
+  },
+  {
+    "id": "odhyp__astro-sidey",
+    "repo": "odhyp/astro-sidey",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 34
+  },
+  {
+    "id": "itsyujay__apple-style-portfolio",
+    "repo": "itsyujay/apple-style-portfolio",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 34
+  },
+  {
+    "id": "francosuarez-dev__artistree",
+    "repo": "francosuarez-dev/artistree",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 26
+  },
+  {
+    "id": "alamguardin__astrodev",
+    "repo": "alamguardin/astrodev",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 19
+  },
+  {
+    "id": "the-coded-type__open-blog-revolution",
+    "repo": "the-coded-type/open-blog-revolution",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 16
+  },
+  {
+    "id": "kpab__astro-darkness",
+    "repo": "kpab/astro-darkness",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 16
+  },
+  {
+    "id": "LemonAdorable__astro-theme-iris",
+    "repo": "LemonAdorable/astro-theme-iris",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 15
+  },
+  {
+    "id": "CloudCannon__jetstream-astro-template",
+    "repo": "CloudCannon/jetstream-astro-template",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 14
+  },
+  {
+    "id": "supportgenix__supportgenix-docs",
+    "repo": "supportgenix/supportgenix-docs",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 9
+  },
+  {
+    "id": "FuTseYi__Astro-Theme-Shyne",
+    "repo": "FuTseYi/Astro-Theme-Shyne",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 9
+  },
+  {
+    "id": "itsyujay__quiet-bar",
+    "repo": "itsyujay/quiet-bar",
+    "ref": "master",
+    "sha": null,
+    "astro": 5,
+    "stars": 8
+  },
+  {
+    "id": "M4xKey__astro-chalet",
+    "repo": "M4xKey/astro-chalet",
+    "ref": "master",
+    "sha": null,
+    "astro": 6,
+    "stars": 8
+  },
+  {
+    "id": "IMMINJU__astro-theme-chapterlog",
+    "repo": "IMMINJU/astro-theme-chapterlog",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 8
+  },
+  {
+    "id": "Liksium__astro-theme-sora",
+    "repo": "Liksium/astro-theme-sora",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 7
+  },
+  {
+    "id": "protomorph__astromorph",
+    "repo": "protomorph/astromorph",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 7
+  },
+  {
+    "id": "L-J-Yinph__fuwari",
+    "repo": "L-J-Yinph/fuwari",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 5
+  },
+  {
+    "id": "fabformhub__paperastro",
+    "repo": "fabformhub/paperastro",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 5
+  },
+  {
+    "id": "Axi404__MinimalistTextFramework",
+    "repo": "Axi404/MinimalistTextFramework",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 5
+  },
+  {
+    "id": "crrashh1542__astro-theme-rudeus",
+    "repo": "crrashh1542/astro-theme-rudeus",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 5
+  },
+  {
+    "id": "aligundogdu__Astro-Tailwind-Daisyui-Starter",
+    "repo": "aligundogdu/Astro-Tailwind-Daisyui-Starter",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 5
+  },
+  {
+    "id": "ak0r__astro-flexoki",
+    "repo": "ak0r/astro-flexoki",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 4
+  },
+  {
+    "id": "DRAG0NM__astro-theme-pianpker",
+    "repo": "DRAG0NM/astro-theme-pianpker",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 3
+  },
+  {
+    "id": "vic__awesome-gh-repos",
+    "repo": "vic/awesome-gh-repos",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 3
+  },
+  {
+    "id": "SolitudeRA__Solitude-Interface",
+    "repo": "SolitudeRA/Solitude-Interface",
+    "ref": "master",
+    "sha": null,
+    "astro": 5,
+    "stars": 3
+  },
+  {
+    "id": "mnyorba__astro-starter",
+    "repo": "mnyorba/astro-starter",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 3
+  },
+  {
+    "id": "Twolio-Studio__twolio-astro-theme",
+    "repo": "Twolio-Studio/twolio-astro-theme",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 2
+  },
+  {
+    "id": "JulyFire365__ridgeline-lite",
+    "repo": "JulyFire365/ridgeline-lite",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 2
+  },
+  {
+    "id": "hilava999__vellum",
+    "repo": "hilava999/vellum",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 2
+  },
+  {
+    "id": "HuanNan520__astro-sakura-blog",
+    "repo": "HuanNan520/astro-sakura-blog",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 2
+  },
+  {
+    "id": "zionfuo__astro-webstack",
+    "repo": "zionfuo/astro-webstack",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 2
+  },
+  {
+    "id": "dgddgd314__astro-bento-blog-template",
+    "repo": "dgddgd314/astro-bento-blog-template",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 2
+  },
+  {
+    "id": "zsancc__astro-argon",
+    "repo": "zsancc/astro-argon",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 1
+  },
+  {
+    "id": "minggo-commits__cafe-website-starter-kit",
+    "repo": "minggo-commits/cafe-website-starter-kit",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 1
+  },
+  {
+    "id": "federicodiluca__federicodiluca.github.io",
+    "repo": "federicodiluca/federicodiluca.github.io",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 1
+  },
+  {
+    "id": "ClovertaTheTrilobita__astro-blog-template",
+    "repo": "ClovertaTheTrilobita/astro-blog-template",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 1
+  },
+  {
+    "id": "eigdoyr__ryodgie-v2",
+    "repo": "eigdoyr/ryodgie-v2",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 1
+  },
+  {
+    "id": "huangmingche__astro-theme-aither",
+    "repo": "huangmingche/astro-theme-aither",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 1
+  },
+  {
+    "id": "theserverlessdev__astro-monograph",
+    "repo": "theserverlessdev/astro-monograph",
+    "ref": "main",
+    "sha": null,
+    "astro": 6,
+    "stars": 1
+  },
+  {
+    "id": "Twolio-Studio__twolio-business-template-astro",
+    "repo": "Twolio-Studio/twolio-business-template-astro",
+    "ref": "main",
+    "sha": null,
+    "astro": 5,
+    "stars": 1
+  }
+]

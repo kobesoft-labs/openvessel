@@ -1,0 +1,46 @@
+$ npm install
+npm warn deprecated tsconfck@3.1.6: unmaintained
+
+added 338 packages in 1.7s
+
+[exit 0 1698ms]
+$ npm run build
+
+> @example/framework-preact@0.0.1 build
+> astro build
+
+[2m18:19:00[22m [34m[content][39m Syncing content
+[2m18:19:00[22m [34m[content][39m Synced content
+[2m18:19:00[22m [34m[types][39m Generated [2m608ms[22m
+[2m18:19:00[22m [34m[build][39m output: [34m"static"[39m
+[2m18:19:00[22m [34m[build][39m mode: [34m"static"[39m
+[2m18:19:00[22m [34m[build][39m directory: [34m/home/user/app/dist/[39m
+[2m18:19:00[22m [34m[build][39m Collecting build info...
+[2m18:19:00[22m [34m[build][39m [32m✓ Completed in 614ms.[39m
+[2m18:19:00[22m [34m[build][39m Building static entrypoints...
+[2m18:19:00[22m [34m[vite][39m [32m✓ built in 429ms[39m
+[2m18:19:00[22m [34m[build][39m [32m✓ Completed in 464ms.[39m
+
+[42m[30m building client (vite) [39m[49m
+[2m18:19:00[22m [34m[vite][39m transforming...
+[2m18:19:00[22m [34m[vite][39m [32m✓[39m 14 modules transformed.
+[2m18:19:00[22m [34m[vite][39m rendering chunks...
+[2m18:19:00[22m [34m[vite][39m computing gzip size...
+[2m18:19:00[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mCounter.Cd_Dht9n.js         [39m[1m[2m 0.17 kB[22m[1m[22m[2m │ gzip: 0.14 kB[22m
+[2m18:19:00[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mMessage.BjBlvEj8.js         [39m[1m[2m 0.24 kB[22m[1m[22m[2m │ gzip: 0.19 kB[22m
+[2m18:19:00[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mclient.OpvpT8Wi.js          [39m[1m[2m 1.21 kB[22m[1m[22m[2m │ gzip: 0.71 kB[22m
+[2m18:19:00[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mhooks.module.BcLKxt62.js    [39m[1m[2m 1.72 kB[22m[1m[22m[2m │ gzip: 0.80 kB[22m
+[2m18:19:00[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mCounter.D4gTebC1.js         [39m[1m[2m 6.63 kB[22m[1m[22m[2m │ gzip: 2.95 kB[22m
+[2m18:19:00[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36msignals.module.3Fw410Ib.js  [39m[1m[2m 7.92 kB[22m[1m[22m[2m │ gzip: 3.13 kB[22m
+[2m18:19:00[22m [34m[vite][39m [2mdist/[22m[2m_astro/[22m[36mpreact.module.Dzz3kv6d.js   [39m[1m[2m11.80 kB[22m[1m[22m[2m │ gzip: 5.17 kB[22m
+[2m18:19:00[22m [34m[vite][39m [32m✓ built in 122ms[39m
+
+[42m[30m generating static routes [39m[49m
+[2m18:19:00[22m [32m▶[39m src/pages/index.astro
+[2m18:19:00[22m   [34m└─[39m [2m/index.html[22m [2m(+6ms)[22m 
+[2m18:19:00[22m [32m✓ Completed in 20ms.
+[39m
+[2m18:19:00[22m [34m[build][39m 1 page(s) built in [1m1.23s[22m
+[2m18:19:00[22m [34m[build][39m [1mComplete![22m
+
+[exit 0 1824ms]

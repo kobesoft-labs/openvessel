@@ -1,0 +1,4 @@
+node_modules/
+dist/
+corpus/sites/
+.DS_Store
