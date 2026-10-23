@@ -1,6 +1,7 @@
 // internalBinding('buffer') — node_buffer.cc in JS.
 
 import { fromShape } from './shape.ts';
+import { setCryptoBufferPrototype } from './crypto.ts';
 
 const utf8Enc = new TextEncoder();
 const utf8Dec = new TextDecoder('utf-8');
@@ -418,6 +419,7 @@ export function createBuffer() {
     // removed by bootstrap/node.js right after the call (so it is not in the recorded shape)
     setBufferPrototype(proto: object) {
       bufferPrototype = proto;
+      setCryptoBufferPrototype(proto);
     },
   });
 }

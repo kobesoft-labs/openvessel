@@ -27,6 +27,7 @@ import {
   createUv,
 } from './process.ts';
 import { fromShape } from './shape.ts';
+import { createCrypto } from './crypto.ts';
 import { createBlob } from './blob.ts';
 import { createWorkerBinding } from './worker.ts';
 import { createCaresWrap, createTcpWrap } from './net.ts';
@@ -56,6 +57,7 @@ export const factories: Record<string, BindingFactory> = {
   config: createConfig,
   contextify: createContextify,
   credentials: createCredentials,
+  crypto: createCrypto,
   encoding_binding: createEncodingBinding,
   errors: createErrors,
   fs: createFs,
