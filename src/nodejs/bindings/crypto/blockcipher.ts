@@ -175,8 +175,3 @@ export function desEde(key: Uint8Array): BlockCipher {
     },
   };
 }
-
-/** Single DES, used only by tests against the FIPS vectors. */
-export function des(key: Uint8Array): BlockCipher {
-  return desEde(new Uint8Array([...key.subarray(0, 8), ...key.subarray(0, 8), ...key.subarray(0, 8)]));
-}

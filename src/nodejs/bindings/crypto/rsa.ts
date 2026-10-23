@@ -23,7 +23,6 @@ export const rsaErr = {
   invalidPadding: () => osslError('0200008A', 'rsa routines', 'invalid padding', 'ERR_OSSL_RSA_INVALID_PADDING'),
   oaepDecoding: () => osslError('02000079', 'rsa routines', 'oaep decoding error', 'ERR_OSSL_RSA_OAEP_DECODING_ERROR'),
   keySizeTooSmall: () => osslError('1C80006E', 'Provider routines', 'key size too small', 'ERR_OSSL_KEY_SIZE_TOO_SMALL'),
-  badSignature: () => osslError('02000068', 'rsa routines', 'bad signature', 'ERR_OSSL_RSA_BAD_SIGNATURE'),
 };
 
 const gcd = (a: bigint, b: bigint): bigint => {
