@@ -381,6 +381,12 @@ export class Kernel {
     main?.worker.postMessage(msg, transfer);
   }
 
+  /** To the thread that asked (its main thread may be blocked, e.g. in Atomics.wait), or the main thread once it has gone. */
+  postTo(proc: Proc, thread: NodeThread, msg: unknown, transfer: Transferable[] = []) {
+    if (proc.threads.get(thread.tid) === thread) thread.worker.postMessage(msg, transfer);
+    else this.post(proc, msg, transfer);
+  }
+
   // ---------------------------------------------------------------------------
   // signals
 

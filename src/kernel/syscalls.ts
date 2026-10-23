@@ -281,7 +281,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         const stop = vfs.onChange((ev) => {
           const inside = ev.path === base || (a.recursive ? ev.path.startsWith(base + '/') : path.dirname(ev.path) === base);
           if (!inside) return;
-          kernel.post(proc, { t: 'watch', id: a.id, type: ev.type, path: ev.path });
+          kernel.postTo(proc, thread, { t: 'watch', id: a.id, type: ev.type, path: ev.path });
         });
         watchers.set(key, stop);
         proc.onExit.add(() => {
@@ -366,7 +366,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
           throw e;
         }
         for (const f of toClose) f.unref();
-        c.onExit.add((st) => kernel.post(proc, { t: 'child-exit', pid: c.pid, code: st.code, signal: st.signal }));
+        c.onExit.add((st) => kernel.postTo(proc, thread, { t: 'child-exit', pid: c.pid, code: st.code, signal: st.signal }));
         return { pid: c.pid, fds: parentFds };
       }
       case 'spawnSync': {
@@ -569,7 +569,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         readers.set(key, state);
         const f = proc.fds.get(msg.fd);
         if (!f) {
-          kernel.post(proc, { t: 'fd-data', fd: msg.fd, data: null });
+          kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, data: null });
           return;
         }
         f.ref();
@@ -589,14 +589,14 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
               const d = await f.read(65536);
               if (proc.state !== 'running') break;
               if (d.length === 0) {
-                kernel.post(proc, { t: 'fd-data', fd: msg.fd, data: null });
+                kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, data: null });
                 state.active = false;
                 break;
               }
-              kernel.post(proc, { t: 'fd-data', fd: msg.fd, data: d });
+              kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, data: d });
             }
           } catch (e) {
-            kernel.post(proc, { t: 'fd-data', fd: msg.fd, data: null });
+            kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, data: null });
           } finally {
             proc.onExit.delete(release);
             release();
@@ -613,15 +613,15 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       case 'readOnce': {
         const f = proc.fds.get(msg.fd);
         if (!f) {
-          kernel.post(proc, { t: 'fd-data', id: msg.id, data: null, err: 'EBADF' });
+          kernel.postTo(proc, thread, { t: 'fd-data', id: msg.id, data: null, err: 'EBADF' });
           return;
         }
         f.read(msg.len ?? 65536).then(
           (d) => {
             if ((globalThis as any).__ovTrace && d.length === 0) console.warn(`[trace] pid ${proc.pid} (${proc.argv.slice(0, 3).join(' ')}) readOnce fd ${msg.fd} EOF kind=${f.kind}`);
-            kernel.post(proc, { t: 'fd-data', id: msg.id, data: d });
+            kernel.postTo(proc, thread, { t: 'fd-data', id: msg.id, data: d });
           },
-          (e) => kernel.post(proc, { t: 'fd-data', id: msg.id, data: null, err: e?.code ?? 'EIO' }),
+          (e) => kernel.postTo(proc, thread, { t: 'fd-data', id: msg.id, data: null, err: e?.code ?? 'EIO' }),
         );
         return;
       }
