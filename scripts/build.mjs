@@ -1,7 +1,8 @@
 // Builds dist/{runtime,preview,host,playground}.
 import { build, context } from 'esbuild';
-import { cpSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { genNodeLib } from './gen-nodelib.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const dist = join(root, 'dist');
@@ -23,11 +24,20 @@ const slashAliases = {
   },
 };
 
+const nodelibExternal = {
+  name: 'nodelib-external',
+  setup(b) {
+    b.onResolve({ filter: /^\.\/nodelib\.js$/ }, () => ({ path: './nodelib.js', external: true }));
+  },
+};
+
 const common = { plugins: [slashAliases], bundle: true, sourcemap: 'linked', target: 'es2022', logLevel: 'warning', legalComments: 'none', minify, platform: 'browser', alias, define: { global: 'globalThis' } };
 
 const configs = [
   { ...common, entryPoints: { kernel: 'src/kernel/index.ts', process: 'src/node/worker.ts' }, outdir: join(dist, 'runtime'), format: 'esm', splitting: true, chunkNames: 'chunks/[name]-[hash]' },
   { ...common, entryPoints: { runtime: 'src/runtime/runtime.ts', sw: 'src/runtime/sw.ts' }, outdir: join(dist, 'runtime'), format: 'iife' },
+  // the ported Node.js (src/nodejs); nodelib.js is generated next to it
+  { ...common, plugins: [...common.plugins, nodelibExternal], entryPoints: { 'node-process': 'src/nodejs/boot.ts' }, outdir: join(dist, 'runtime'), format: 'esm', alias: {} },
   { ...common, entryPoints: { sw: 'src/preview/sw.ts', relay: 'src/preview/relay.ts', inject: 'src/preview/inject.ts' }, outdir: join(dist, 'preview/__ov'), format: 'iife' },
   { ...common, entryPoints: { index: 'src/host/index.ts' }, outdir: join(dist, 'host'), format: 'esm' },
   { ...common, entryPoints: { app: 'playground/app.ts' }, outdir: join(dist, 'playground'), format: 'esm', loader: { '.css': 'css' } },
@@ -54,5 +64,7 @@ if (watch) {
   console.log('watching…');
 } else {
   await Promise.all(configs.map((c) => build(c)));
+  if (existsSync(join(root, 'vendor/node/natives.json'))) genNodeLib(join(dist, 'runtime/nodelib.js'));
+  else console.warn('vendor/node missing: run node scripts/gen-node-data.mjs to build the ported Node runtime');
   console.log('built dist/');
 }

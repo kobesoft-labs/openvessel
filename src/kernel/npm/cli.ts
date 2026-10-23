@@ -1,5 +1,6 @@
 // npm / npx / pnpm / yarn / bun commands (one implementation, several front ends).
 
+import { NODE_VERSION } from '../../node/version.ts';
 import * as path from '../../shared/path.ts';
 import type { Kernel, ProgramContext } from '../kernel.ts';
 import { exitCodeOf } from '../proc.ts';
@@ -183,7 +184,7 @@ class Npm {
   }
 
   userAgent() {
-    return `${this.pm}/${PM_VERSIONS[this.pm]} npm/? node/v22.20.0 linux x64 workspaces/false`;
+    return `${this.pm}/${PM_VERSIONS[this.pm]} npm/? node/v${NODE_VERSION} linux x64 workspaces/false`;
   }
 
   async install(dir: string, f: Flags, opts: { noLock?: boolean } = {}): Promise<number> {

@@ -262,6 +262,13 @@ function indexOfBytes(hay: Uint8Array, needle: Uint8Array, byteOffset: number, f
 
 // -----------------------------------------------------------------------------
 
+let bufferPrototype: object | null = null;
+/** A Buffer (FastBuffer) over these bytes, for bindings that hand buffers to JS (Buffer::New). */
+export function asBuffer(bytes: Uint8Array): Uint8Array {
+  if (bufferPrototype) Object.setPrototypeOf(bytes, bufferPrototype);
+  return bytes;
+}
+
 export function createBuffer() {
   const b = fromShape('buffer');
   const slice = (enc: Enc) =>
@@ -408,5 +415,9 @@ export function createBuffer() {
       return latin1(base64Decode(s));
     },
     getZeroFillToggle: () => new Uint32Array(1),
+    // removed by bootstrap/node.js right after the call (so it is not in the recorded shape)
+    setBufferPrototype(proto: object) {
+      bufferPrototype = proto;
+    },
   });
 }

@@ -8,7 +8,8 @@ import { Readable, Writable } from './stream.ts';
 import { SysError, sys } from './sys.ts';
 import { perfNow, timeOrigin } from './native.ts';
 
-export const NODE_VERSION = '22.20.0';
+export { NODE_VERSION } from './version.ts';
+import { NODE_VERSION } from './version.ts';
 
 export interface ProcessInit {
   pid: number;

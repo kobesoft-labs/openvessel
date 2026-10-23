@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const here = new URL('.', import.meta.url).pathname;
-const version = /NODE_VERSION = '([^']+)'/.exec(readFileSync(join(here, '../../src/node/process.ts'), 'utf8'))[1];
+const version = /NODE_VERSION = '([^']+)'/.exec(readFileSync(join(here, '../../src/node/version.ts'), 'utf8'))[1];
 const dest = join(here, '.node');
 const git = (...a) => execFileSync('git', a, { cwd: existsSync(dest) ? dest : here, stdio: 'inherit' });
 if (!existsSync(dest)) git('clone', '--depth', '1', '--filter=blob:none', '--sparse', '-b', `v${version}`, 'https://github.com/nodejs/node.git', dest);

@@ -37,6 +37,8 @@ export const S = {
   internalBinding: null as unknown as (name: string) => any,
   /** process.execArgv / argv as parsed from the command line. */
   execArgv: [] as string[],
+  /** -e/-p/--eval/--print was given. */
+  hasEval: false,
   argv: [] as string[],
   /** The origin serving the runtime (for ESM URLs). */
   runtimeOrigin: '',
@@ -48,6 +50,14 @@ export const S = {
   /** errors.setPrepareStackTraceCallback / setEnhanceStackForFatalException */
   prepareStackTrace: null as null | ((global: unknown, error: Error, trace: unknown[]) => string),
   enhanceStack: null as null | { before: (e: Error) => string; after: (e: Error) => string },
+  /** internalBinding('builtins'), built at boot from the bundled lib. */
+  builtinsBinding: null as any,
+  /** Parsed CLI option values (internalBinding('options').getCLIOptionsValues()). */
+  optionValues: {} as Record<string, unknown>,
+  /** What the per_context scripts exported (DOMException, emitMessage, …). */
+  perContextExports: {} as Record<string, any>,
+  /** Handlers for messages the kernel posts to this worker, by message type. */
+  kernelHandlers: new Map<string, (msg: any) => void>(),
 };
 
 /** Lazily requires a Node builtin (only valid after realm bootstrap). */

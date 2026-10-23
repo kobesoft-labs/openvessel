@@ -16,7 +16,7 @@ const nodeRoot = join(here, '.node');
 const parallel = join(nodeRoot, 'test/parallel');
 const resultsDir = join(here, 'results');
 mkdirSync(join(resultsDir, 'logs'), { recursive: true });
-const NODE_VERSION = /NODE_VERSION = '([^']+)'/.exec(readFileSync(join(here, '../../src/node/process.ts'), 'utf8'))[1];
+const NODE_VERSION = /NODE_VERSION = '([^']+)'/.exec(readFileSync(join(here, '../../src/node/version.ts'), 'utf8'))[1];
 
 const MODULES = ['fs', 'path', 'events', 'event-emitter', 'eventemitter', 'stream', 'stream2', 'stream3', 'readable', 'buffer', 'util', 'worker', 'crypto', 'child-process', 'url', 'whatwg-url', 'string-decoder', 'zlib', 'timers', 'process', 'module', 'require', 'readline', 'os', 'querystring', 'assert', 'abortcontroller', 'console', 'vm', 'async-local-storage', 'next-tick', 'promises', 'microtask', 'queue-microtask', 'wasi'];
 const SKIP_SOURCE = /expose[-_]internals|internalBinding|--expose-gc|common\/inspector|--inspect|--cpu-prof|--heap-prof|--prof\b|--trace-|--report|--diagnostic|--allow-natives-syntax|--max-old-space|--abort-on-uncaught|common\/sea|common\/v8|v8\.setFlagsFromString|--experimental-permission|--permission|process\.binding|--snapshot|--build-snapshot|--frozen-intrinsics|--icu|common\/shared-lib-util|common\/wpt|common\/benchmark|common\/debugger|--watch/;

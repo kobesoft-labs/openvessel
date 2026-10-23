@@ -1,9 +1,11 @@
 // `process` for bundled libraries: forwards to the runtime's process once it exists.
+import { NODE_VERSION } from '../version.ts';
+
 const fallback: any = {
   env: {},
   nextTick: (fn: (...a: any[]) => void, ...args: any[]) => queueMicrotask(() => fn(...args)),
-  version: 'v22.20.0',
-  versions: { node: '22.20.0' },
+  version: 'v' + NODE_VERSION,
+  versions: { node: NODE_VERSION },
   platform: 'linux',
   argv: [],
   cwd: () => '/',

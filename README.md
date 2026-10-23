@@ -10,6 +10,7 @@ OpenVessel is a clean-room implementation. It was written without looking at the
 
 - Targets **Astro 7, 6 and 5** (Vite 8 / 7 / 6). Astro 7's rolldown runs as the napi-rs `wasm32-wasi` build.
 - Tested against a corpus of 150 real sites (official examples and popular community themes for each major); see `corpus/`.
+- Built on **Node.js v22.20.0**: Node's own `lib/` runs unmodified; the C++ bindings are re-implemented in TypeScript. The pinned version and how to follow new releases: [docs/NODE-VERSION.md](docs/NODE-VERSION.md).
 - Chromium-based browsers. Requires cross-origin isolation (`SharedArrayBuffer`).
 
 ## Quick start

@@ -77,8 +77,21 @@ const proc = {
 };
 process.stdout.write(JSON.stringify({ bindings, natives, proc }));
 `;
-const raw = execFileSync('docker', ['run', '--rm', '--platform', 'linux/amd64', '--hostname', 'openvessel', '-e', 'HOME=/home/user', `node:${version}-bookworm-slim`, 'node', '--expose-internals', '--no-warnings', '-e', dumper], { maxBuffer: 1 << 30, encoding: 'utf8' });
+// the dumper comes in on stdin, so --eval keeps its default
+/** Runs the dumper inside the official node:<version> linux/amd64 image. */
+export function dumpNode(version) {
+const raw = execFileSync('docker', ['run', '--rm', '-i', '--platform', 'linux/amd64', '--hostname', 'openvessel', '-e', 'HOME=/home/user', `node:${version}-bookworm-slim`, 'node', '--expose-internals', '--no-warnings', '-'], { input: dumper, maxBuffer: 1 << 30, encoding: 'utf8' });
 const { bindings, natives, proc } = JSON.parse(raw);
+// undo what running the dumper itself changed in the option values
+const ov = proc.optionValues;
+Object.assign(ov, { '--expose-internals': false, '--warnings': true, '--require': [] });
+if ('--no-expose-internals' in ov) ov['--no-expose-internals'] = true;
+if ('--no-warnings' in ov) ov['--no-warnings'] = false;
+return { bindings, natives, proc };
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+const { bindings, natives, proc } = dumpNode(version);
 mkdirSync(join(root, 'vendor/node'), { recursive: true });
 mkdirSync(join(root, 'src/node/data'), { recursive: true });
 writeFileSync(join(root, 'vendor/node/natives.json'), JSON.stringify(natives));
@@ -87,3 +100,4 @@ writeFileSync(join(root, 'src/node/data/process.json'), JSON.stringify(proc, nul
 const license = execFileSync('curl', ['-fsSL', `https://raw.githubusercontent.com/nodejs/node/v${version}/LICENSE`], { maxBuffer: 1 << 26, encoding: 'utf8' });
 writeFileSync(join(root, 'vendor/node/LICENSE'), license);
 console.log(`node v${version}: ${Object.keys(natives).length} builtins, ${Object.keys(bindings).length} bindings`);
+}

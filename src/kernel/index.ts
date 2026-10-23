@@ -20,9 +20,18 @@ declare const self: DedicatedWorkerGlobalScope;
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 const processUrl = new URL('./process.js', import.meta.url).href;
+// the ported Node.js runtime (src/nodejs) is used when /etc/openvessel/node contains "port"
+const nodePortUrl = new URL('./node-process.js', import.meta.url).href;
+function processScript(): string {
+  try {
+    return dec.decode(kernel.vfs.readFile('/etc/openvessel/node')).trim() === 'port' ? nodePortUrl : processUrl;
+  } catch {
+    return processUrl;
+  }
+}
 
 const kernel = new Kernel({
-  createWorker: (name) => new Worker(processUrl, { type: 'module', name }),
+  createWorker: (name) => new Worker(processScript(), { type: 'module', name }),
   onListen: (port, pid) => emit({ ev: 'server-ready', port, pid }),
   onUnlisten: (port) => emit({ ev: 'port-closed', port }),
   log: (m) => console.warn('[openvessel]', m),
