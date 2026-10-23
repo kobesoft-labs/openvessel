@@ -30,8 +30,25 @@ function processScript(): string {
   }
 }
 
+// Process workers are created ahead of time: loading and compiling the runtime scripts is most of
+// a process's start-up cost, so a few already-loaded workers wait for their 'init' message.
+const WARM = 2;
+const warm = new Map<string, Worker[]>();
+function topUp(url: string) {
+  const list = warm.get(url) ?? [];
+  warm.set(url, list);
+  while (list.length < WARM) list.push(new Worker(url, { type: 'module', name: 'node (idle)' }));
+}
+function takeWorker(name: string): Worker {
+  const url = processScript();
+  const list = warm.get(url);
+  const w = list?.shift();
+  setTimeout(() => topUp(url), 0);
+  return w ?? new Worker(url, { type: 'module', name });
+}
+
 const kernel = new Kernel({
-  createWorker: (name) => new Worker(processScript(), { type: 'module', name }),
+  createWorker: (name) => takeWorker(name),
   onListen: (port, pid) => emit({ ev: 'server-ready', port, pid }),
   onUnlisten: (port) => emit({ ev: 'port-closed', port }),
   log: (m) => console.warn('[openvessel]', m),

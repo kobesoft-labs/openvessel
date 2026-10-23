@@ -173,6 +173,11 @@ function selectMain(values: Record<string, unknown>, argv: string[], hasEval: bo
   return 'internal/main/eval_stdin';
 }
 
+// OV_TIMING=1 prints how long each bootstrap stage took
+const marks: [string, number][] = [];
+const mark = (name: string) => marks.push([name, performance.now()]);
+mark('script loaded');
+
 function run(id: string, ...args: unknown[]) {
   const fn = fns[id];
   if (!fn) throw new Error(`missing builtin ${id}`);
@@ -180,6 +185,7 @@ function run(id: string, ...args: unknown[]) {
 }
 
 function boot(init: InitMsg) {
+  mark('init received');
   S.init = init;
   S.isMainThread = init.kind === 'main';
   S.runtimeOrigin = self.location.origin;
@@ -231,6 +237,7 @@ function boot(init: InitMsg) {
   }
   S.primordials = primordials;
   S.perContextExports = perContext;
+  mark('per_context');
 
   // builtins binding (node_builtins.cc)
   S.builtinsBinding = Object.assign(fromShape('builtins'), {
@@ -262,9 +269,11 @@ function boot(init: InitMsg) {
   S.process = process;
 
   run('internal/bootstrap/realm', process, getLinkedBinding, getInternalBinding, primordials);
+  mark('realm');
   const require = S.requireBuiltin;
   const internalBinding = S.internalBinding;
   run('internal/bootstrap/node', process, require, internalBinding, primordials);
+  mark('bootstrap/node');
   if (!getInternalBinding('config').noBrowserGlobals) {
     run('internal/bootstrap/web/exposed-wildcard', process, require, internalBinding, primordials);
     run('internal/bootstrap/web/exposed-window-or-worker', process, require, internalBinding, primordials);
@@ -277,11 +286,17 @@ function boot(init: InitMsg) {
     run('internal/bootstrap/switches/does_not_own_process_state', process, require, internalBinding, primordials);
   }
 
+  mark('web + switches');
   const main = selectMain(S.optionValues, S.argv, S.hasEval);
   loop.scope(() => {
     const r = run(main, process, require, internalBinding, primordials);
     if (r && typeof (r as Promise<unknown>).then === 'function') (r as Promise<unknown>).catch((e) => loop.triggerUncaughtException(e, false));
   });
+  mark(main);
+  if (init.env.OV_TIMING) {
+    const t0 = performance.timeOrigin;
+    writeFd(2, `[timing] worker start→script ${Math.round(marks[0][1])}ms\n` + marks.slice(1).map(([n, t], i) => `[timing] ${n}: ${(t - marks[i][1]).toFixed(1)}ms`).join('\n') + `\n[timing] total ${Math.round(marks[marks.length - 1][1])}ms since worker start (${new Date(t0).toISOString().slice(11, 23)})\n`);
+  }
   loop.startLoop();
 }
 
