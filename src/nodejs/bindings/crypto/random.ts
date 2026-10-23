@@ -104,25 +104,69 @@ function randomBits(bits: number, topTwo: boolean): bigint {
   return n;
 }
 
-/** BN_generate_prime_ex2 */
-export function generatePrime(bits: number, safe: boolean, add?: bigint, rem?: bigint): bigint {
-  if (bits < 2 || (bits === 2 && safe)) throw cryptoError('error:01800076:bignum routines::bits too small');
-  const check = (p: bigint) => isProbablePrime(p) && (!safe || isProbablePrime((p - 1n) >> 1n));
+/**
+ * Walks start, start + step, ... (at most `limit` candidates of exactly `bits` bits) and returns the
+ * first (safe) prime. Candidates are sieved incrementally against the small primes — for safe primes
+ * also (p - 1) / 2 — and pass a base-2 Fermat test before the full Miller-Rabin rounds.
+ */
+function sieveSearch(start: bigint, step: bigint, bits: number, safe: boolean, checks: number, limit: number): bigint | null {
+  const n = SMALL_PRIMES.length;
+  const res = new Int32Array(n);
+  const inc = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    const sp = BigInt(SMALL_PRIMES[i]);
+    res[i] = Number(start % sp);
+    inc[i] = Number(step % sp);
+  }
   const max = 1n << BigInt(bits);
-  for (;;) {
-    if (add === undefined) {
-      let p = randomBits(bits, true) | 1n;
-      if (safe) p |= 3n; // a safe prime > 7 is 3 mod 4
-      if (bits <= 2) p = 3n;
-      for (let tries = 0; tries < 4096 && p < max; tries++, p += safe ? 4n : 2n) if (check(p)) return p;
-      continue;
+  const min = 1n << BigInt(bits - 1);
+  let p = start;
+  outer: for (let k = 0; k < limit; k++, p += step) {
+    if (k) for (let i = 0; i < n; i++) res[i] = (res[i] + inc[i]) % SMALL_PRIMES[i];
+    if (p >= max) return null;
+    if (p < min) continue;
+    for (let i = 0; i < n; i++) {
+      // p divisible by a small prime, or (for safe primes) (p - 1) / 2 divisible by an odd one
+      if (res[i] === 0 || (safe && i > 0 && res[i] === 1)) continue outer;
     }
-    const r = rem ?? (safe ? 3n : 1n);
-    let p = randomBits(bits, false);
-    p = p - (p % add) + r;
-    for (let tries = 0; tries < 4096 && p < max; tries++, p += add) {
+    if (modPow(2n, p - 1n, p) !== 1n) continue;
+    const q = (p - 1n) >> 1n;
+    if (safe && modPow(2n, q - 1n, q) !== 1n) continue;
+    if (isProbablePrime(p, checks) && (!safe || isProbablePrime(q, checks))) return p;
+  }
+  return null;
+}
+
+/** BN_generate_prime_ex2 */
+export function generatePrime(bits: number, safe: boolean, add?: bigint, rem?: bigint, checks = 0): bigint {
+  if (bits < 2 || (bits === 2 && safe)) throw cryptoError('error:01800076:bignum routines::bits too small');
+  if (bits <= 16) {
+    // small enough to try every candidate directly
+    const check = (p: bigint) => isProbablePrime(p, checks) && (!safe || isProbablePrime((p - 1n) >> 1n, checks));
+    for (;;) {
+      let p = randomBits(bits, add === undefined);
+      if (add !== undefined) p = p - (p % add) + (rem ?? (safe ? 3n : 1n));
       if (bitLength(p) === bits && check(p)) return p;
     }
+  }
+  for (;;) {
+    let start: bigint;
+    let step: bigint;
+    if (add === undefined) {
+      start = randomBits(bits, true) | 1n;
+      step = 2n;
+      if (safe) {
+        start |= 3n; // a safe prime > 7 is 3 mod 4
+        step = 4n;
+      }
+    } else {
+      const r = rem ?? (safe ? 3n : 1n);
+      start = randomBits(bits, false);
+      start = start - (start % add) + r;
+      step = add;
+    }
+    const p = sieveSearch(start, step, bits, safe, checks, 1 << 16);
+    if (p !== null) return p;
   }
 }
 

@@ -2,22 +2,17 @@
 // NativeKeyObject and SecretKeyGenJob.
 
 import { Enc, decode } from '../buffer.ts';
+import type { Asym } from './asymkeys.ts';
 import { err, fillRandom, isAnyBufferSource, jobClass, stringOrBuffer, toBuffer, view } from './util.ts';
 
 export const kKeyTypeSecret = 0;
 export const kKeyTypePublic = 1;
 export const kKeyTypePrivate = 2;
 
-/** What a KeyObjectHandle holds (KeyObjectData). Asymmetric keys carry an AsymKey from asym.ts. */
-export type KeyData = { type: 0; secret: Uint8Array } | { type: 1 | 2; asym: AsymKey };
+/** What a KeyObjectHandle holds (KeyObjectData). Asymmetric material is described in asymkeys.ts. */
+export type KeyData = { type: 0; secret: Uint8Array } | { type: 1 | 2; asym: Asym };
 
-/** Implemented by asym.ts; registered at load to keep this module independent of the curve code. */
-export interface AsymKey {
-  /** 'ed25519' | 'x25519' | 'ec' | 'rsa' | ... */
-  kind: string;
-  [k: string]: any;
-}
-
+/** Implemented by asym.ts and registered at load, keeping this module free of the curve code. */
 export interface AsymOps {
   init(type: number, args: any[]): KeyData;
   initJwk(jwk: any, kty: string, namedCurve: unknown): KeyData;

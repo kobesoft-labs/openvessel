@@ -9,6 +9,8 @@ import { HKDFJob, PBKDF2Job, ScryptJob } from './crypto/kdf.ts';
 import { KeyObjectHandle, SecretKeyGenJob, createNativeKeyObjectClass } from './crypto/keys.ts';
 import { CheckPrimeJob, RandomBytesJob, RandomPrimeJob, secureBuffer, secureHeapUsed } from './crypto/random.ts';
 import { asymmetric } from './crypto/asym.ts';
+import { DiffieHellman, DiffieHellmanGroup } from './crypto/dh.ts';
+import { AESCipherJob, ECDHBitsJob, ECKeyExportJob, RSACipherJob, RSAKeyExportJob } from './crypto/webcrypto.ts';
 import { err, isAnyBufferSource, view } from './crypto/util.ts';
 
 export { setBufferPrototype as setCryptoBufferPrototype } from './crypto/util.ts';
@@ -58,6 +60,14 @@ export function createCrypto() {
     createNativeKeyObjectClass,
     SecretKeyGenJob,
     ...asymmetric,
+    DiffieHellman,
+    DiffieHellmanGroup,
+    // WebCrypto (crypto.subtle)
+    AESCipherJob,
+    ECDHBitsJob,
+    ECKeyExportJob,
+    RSAKeyExportJob,
+    RSACipherJob,
     // misc
     timingSafeEqual,
     getFipsCrypto: () => 0,

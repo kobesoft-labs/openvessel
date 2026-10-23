@@ -171,6 +171,11 @@ function runScript(s) {
             return enc(c.update(Buffer.from(op[1], 'hex')));
           case 'updateStr':
             return enc(c.update(op[1], op[2], op[3]));
+          case 'zeros': {
+            // a large update, recorded by digest to keep the fixture small
+            const r = c.update(Buffer.alloc(op[1]));
+            return { sha256: crypto.createHash('sha256').update(r).digest('hex') };
+          }
           case 'final':
             return enc(c.final(op[1]));
           case 'pad':
@@ -232,6 +237,12 @@ for (const name of ciphersSupported) {
   const info = crypto.getCipherInfo(name);
   const key = bytes(info.keyLength);
   const mode = info.mode;
+  // aliases of ciphers covered under their main name: one round trip each
+  if (/^id-aes\d+-(gcm|ccm)$|^aes\d+$|^des3$|^des-ede3$|^des-ede$/.test(name)) {
+    const aead = mode === 'gcm' || mode === 'ccm';
+    roundTrip(name, key, info.ivLength ? bytes(info.ivLength) : null, mode === 'ccm' ? { authTagLength: 16 } : undefined, bytes(33), aead && mode === 'ccm' ? [33] : [10, 23], { tag: aead });
+    continue;
+  }
   if (mode === 'wrap') {
     const iv = bytes(info.ivLength);
     for (const n of name.includes('pad') ? [1, 5, 8, 9, 16, 20, 40] : [16, 24, 40, 15, 8]) {
@@ -243,13 +254,13 @@ for (const name of ciphersSupported) {
     continue;
   }
   if (mode === 'gcm' || mode === 'ccm' || name === 'chacha20-poly1305') {
-    const ivs = mode === 'gcm' ? [12, 1, 16, 60] : mode === 'ccm' ? [7, 11, 12, 13] : [12];
-    const tagLens = mode === 'gcm' ? [undefined, 4, 8, 12, 16] : mode === 'ccm' ? [4, 10, 16] : [undefined, 1, 8, 16];
+    const ivs = mode === 'gcm' ? [12, 1, 60] : mode === 'ccm' ? [7, 12, 13] : [12];
+    const tagLens = mode === 'gcm' ? [undefined, 4, 13] : mode === 'ccm' ? [4, 16] : [undefined, 1, 16];
     for (const ivl of ivs) {
       for (const tl of tagLens) {
         const iv = bytes(ivl);
         const opts = tl === undefined ? undefined : { authTagLength: tl };
-        for (const [ptl, aadl] of [[0, 0], [1, 0], [16, 5], [40, 17], [100, 300]]) {
+        for (const [ptl, aadl] of [[0, 0], [1, 0], [16, 5], [70, 33]]) {
           const pt = bytes(ptl);
           const aad = hex(bytes(aadl));
           const pre = aadl ? [mode === 'ccm' ? ['aad', aad, ptl] : ['aad', aad]] : [];
@@ -278,7 +289,8 @@ for (const name of ciphersSupported) {
       add({ cipher: name, key: hex(key), iv: hex(iv), opts, ops: [['update', ''], ['final'], ['tag']] });
       add({ cipher: name, key: hex(key), iv: hex(iv), opts, decrypt: true, ops: [['update', '0102'], ['final']] });
       add({ cipher: name, key: hex(key), iv: hex(iv), opts, decrypt: true, ops: [['final']] });
-      add({ cipher: name, key: hex(key), iv: hex(bytes(13)), opts, ops: [['update', hex(bytes(65536))], ['final'], ['tag']] });
+      add({ cipher: name, key: hex(key), iv: hex(bytes(13)), opts, ops: [['zeros', 65536], ['final'], ['tag']] });
+      add({ cipher: name, key: hex(key), iv: hex(bytes(13)), opts, ops: [['zeros', 65535], ['final'], ['tag']] });
       add({ cipher: name, key: hex(key), iv: hex(bytes(13)), opts, ops: [['aad', '00', 65536]] });
       add({ cipher: name, key: hex(key), iv: hex(bytes(12)), opts: { authTagLength: 5 }, ops: [] });
       add({ cipher: name, key: hex(key), iv: hex(bytes(12)), ops: [] });

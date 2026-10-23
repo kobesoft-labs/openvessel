@@ -24,5 +24,10 @@ export const SSL_CIPHERS: string[] = ${JSON.stringify(b.getSSLCiphers())};
 // Digest names OpenSSL resolves → Node's digest cache id (filled by getHashes() as a side effect)
 export const HASH_ALIASES: Record<string, number> = ${(b.getHashes(), JSON.stringify(b.getCachedAliases()))};
 `;
-fs.writeFileSync(process.argv[2], out);
+const groups = {};
+for (const g of ['modp1', 'modp2', 'modp5', 'modp14', 'modp15', 'modp16', 'modp17', 'modp18']) groups[g] = new b.DiffieHellmanGroup(g).getPrime().toString('hex');
+fs.writeFileSync(process.argv[2], out + `
+// Primes of the DiffieHellmanGroup groups (RFC 2409 / RFC 3526), generator 2.
+export const DH_GROUPS: Record<string, string> = ${JSON.stringify(groups, null, 1).replace(/\n\s*/g, ' ')};
+`);
 console.log(Object.keys(table).length, 'ciphers');

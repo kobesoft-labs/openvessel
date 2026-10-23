@@ -285,6 +285,12 @@ function runScript(s: any) {
             return enc(c.update(fromHex(op[1])));
           case 'updateStr':
             return enc(c.update(op[1], op[2], op[3]));
+          case 'zeros': {
+            const r = c.update(Buffer.alloc(op[1]));
+            const h = new b.Hash('sha256', undefined, -1, cache);
+            h.update(r);
+            return { sha256: h.digest('hex') };
+          }
           case 'final':
             return enc(c.final(op[1]));
           case 'pad':
