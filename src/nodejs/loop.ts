@@ -17,6 +17,8 @@ channel.port1.onmessage = () => {
   const fn = macroQueue.shift();
   fn?.();
 };
+// (under Node, e.g. in unit tests, the port must not keep the process alive)
+(channel.port1 as any).unref?.();
 export function macrotask(fn: () => void) {
   macroQueue.push(fn);
   channel.port2.postMessage(0);

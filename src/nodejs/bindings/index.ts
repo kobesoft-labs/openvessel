@@ -25,6 +25,7 @@ import {
   createUv,
 } from './process.ts';
 import { fromShape } from './shape.ts';
+import { createZlib } from './zlib.ts';
 import { createHttpParser } from './http_parser.ts';
 import { createProcessWrap, createSignalWrap, createSpawnSync } from './process_wrap.ts';
 import { createPipeWrap, createStreamWrap, createTtyWrap } from './stream.ts';
@@ -73,6 +74,7 @@ export const factories: Record<string, BindingFactory> = {
   url: createUrl,
   util: createUtil,
   uv: createUv,
+  zlib: createZlib,
   // only for v8.queryObjects(), which needs heap access
   internal_only_v8: () => ({ queryObjects: () => [] }),
   // WebAssembly.compileStreaming/instantiateStreaming are the browser's own
