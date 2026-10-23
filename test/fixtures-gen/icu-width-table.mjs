@@ -1,7 +1,7 @@
 // Regenerates the column-width table embedded in src/nodejs/bindings/icu.ts from the real Node
 // (ICU's East_Asian_Width, general category and emoji properties as node_i18n.cc combines them).
 //
-//   npx -y node@22.20.0 --expose-internals --no-warnings test/fixtures-gen/icu-width-table.mjs
+//   npx -y node@<version in src/node/version.ts> --expose-internals --no-warnings test/fixtures-gen/icu-width-table.mjs
 //
 // Per code point the class is w0 * 3 + w1 (+ 9 when it is skipped after a ZWJ with
 // expandEmojiSequence = false), where w0 / w1 are its widths with ambiguousAsFullWidth false / true.

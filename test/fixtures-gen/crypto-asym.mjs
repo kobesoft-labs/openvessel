@@ -1,5 +1,5 @@
 // Asymmetric-key fixtures for test/unit/bindings-crypto-asym.test.ts, recorded from real Node.
-// Run with: npx -y node@22.20.0 --expose-internals --no-warnings test/fixtures-gen/crypto-asym.mjs
+// Run with: npx -y node@<version in src/node/version.ts> --expose-internals --no-warnings test/fixtures-gen/crypto-asym.mjs
 
 import crypto from 'node:crypto';
 import { writeFileSync } from 'node:fs';

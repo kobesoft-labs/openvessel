@@ -354,6 +354,9 @@
   "copyArrayBuffer": {
    "__fn": "copyArrayBuffer"
   },
+  "createUnsafeArrayBuffer": {
+   "__fn": "createUnsafeArrayBuffer"
+  },
   "swap16": {
    "__fn": "swap16"
   },
@@ -412,9 +415,6 @@
   },
   "utf8WriteStatic": {
    "__fn": true
-  },
-  "getZeroFillToggle": {
-   "__fn": "getZeroFillToggle"
   }
  },
  "builtins": {
@@ -571,6 +571,7 @@
      "internal/encoding",
      "internal/error_serdes",
      "internal/errors",
+     "internal/errors/error_source",
      "internal/event_target",
      "internal/events/abort_listener",
      "internal/events/symbols",
@@ -709,8 +710,10 @@
      "internal/test_runner/tests_stream",
      "internal/test_runner/utils",
      "internal/timers",
+     "internal/tls/common",
      "internal/tls/secure-context",
      "internal/tls/secure-pair",
+     "internal/tls/wrap",
      "internal/trace_events_async_hooks",
      "internal/tty",
      "internal/url",
@@ -905,6 +908,7 @@
    "internal/encoding",
    "internal/error_serdes",
    "internal/errors",
+   "internal/errors/error_source",
    "internal/event_target",
    "internal/events/abort_listener",
    "internal/events/symbols",
@@ -1064,8 +1068,10 @@
    "internal/test_runner/tests_stream",
    "internal/test_runner/utils",
    "internal/timers",
+   "internal/tls/common",
    "internal/tls/secure-context",
    "internal/tls/secure-pair",
+   "internal/tls/wrap",
    "internal/trace_events_async_hooks",
    "internal/tty",
    "internal/url",
@@ -1142,7 +1148,7 @@
    "worker_threads",
    "zlib"
   ],
-  "config": "{ \"target_defaults\": { \"cflags\": [],\n                       \"configurations\": { \"Debug\": {\"v8_enable_v8_checks\": 0, \"variables\": {}},\n                                           \"Release\": {\"v8_enable_v8_checks\": 1, \"variables\": {}}},\n                       \"default_configuration\": \"Release\",\n                       \"defines\": [\"NODE_OPENSSL_CONF_NAME=nodejs_conf\", \"ICU_NO_USER_DATA_OVERRIDE\"],\n                       \"include_dirs\": [],\n                       \"libraries\": []},\n  \"variables\": { \"asan\": 0,\n                 \"clang\": 0,\n                 \"control_flow_guard\": false,\n                 \"coverage\": false,\n                 \"dcheck_always_on\": 0,\n                 \"debug_nghttp2\": false,\n                 \"debug_node\": false,\n                 \"enable_lto\": false,\n                 \"enable_pgo_generate\": false,\n                 \"enable_pgo_use\": false,\n                 \"error_on_warn\": false,\n                 \"force_dynamic_crt\": 0,\n                 \"gas_version\": \"2.35\",\n                 \"host_arch\": \"x64\",\n                 \"icu_data_in\": \"../../deps/icu-tmp/icudt77l.dat\",\n                 \"icu_endianness\": \"l\",\n                 \"icu_gyp_path\": \"tools/icu/icu-generic.gyp\",\n                 \"icu_path\": \"deps/icu-small\",\n                 \"icu_small\": false,\n                 \"icu_ver_major\": \"77\",\n                 \"libdir\": \"lib\",\n                 \"llvm_version\": \"0.0\",\n                 \"napi_build_version\": \"10\",\n                 \"node_builtin_shareable_builtins\": [ \"deps/cjs-module-lexer/lexer.js\",\n                                                      \"deps/cjs-module-lexer/dist/lexer.js\",\n                                                      \"deps/undici/undici.js\",\n                                                      \"deps/amaro/dist/index.js\"],\n                 \"node_byteorder\": \"little\",\n                 \"node_cctest_sources\": [ \"src/node_snapshot_stub.cc\",\n                                          \"test/cctest/inspector/test_node_protocol.cc\",\n                                          \"test/cctest/node_test_fixture.cc\",\n                                          \"test/cctest/test_aliased_buffer.cc\",\n                                          \"test/cctest/test_base64.cc\",\n                                          \"test/cctest/test_base_object_ptr.cc\",\n                                          \"test/cctest/test_cppgc.cc\",\n                                          \"test/cctest/test_crypto_clienthello.cc\",\n                                          \"test/cctest/test_dataqueue.cc\",\n                                          \"test/cctest/test_environment.cc\",\n                                          \"test/cctest/test_inspector_socket.cc\",\n                                          \"test/cctest/test_inspector_socket_server.cc\",\n                                          \"test/cctest/test_json_utils.cc\",\n                                          \"test/cctest/test_linked_binding.cc\",\n                                          \"test/cctest/test_node_api.cc\",\n                                          \"test/cctest/test_node_crypto.cc\",\n                                          \"test/cctest/test_node_crypto_env.cc\",\n                                          \"test/cctest/test_node_postmortem_metadata.cc\",\n                                          \"test/cctest/test_node_task_runner.cc\",\n                                          \"test/cctest/test_path.cc\",\n                                          \"test/cctest/test_per_process.cc\",\n                                          \"test/cctest/test_platform.cc\",\n                                          \"test/cctest/test_quic_cid.cc\",\n                                          \"test/cctest/test_quic_error.cc\",\n                                          \"test/cctest/test_quic_tokens.cc\",\n                                          \"test/cctest/test_report.cc\",\n                                          \"test/cctest/test_sockaddr.cc\",\n                                          \"test/cctest/test_traced_value.cc\",\n                                          \"test/cctest/test_util.cc\",\n                                          \"test/cctest/node_test_fixture.h\"],\n                 \"node_debug_lib\": false,\n                 \"node_enable_d8\": false,\n                 \"node_enable_v8_vtunejit\": false,\n                 \"node_enable_v8windbg\": false,\n                 \"node_fipsinstall\": false,\n                 \"node_install_corepack\": true,\n                 \"node_install_npm\": true,\n                 \"node_library_files\": [ \"lib/_http_agent.js\",\n                                         \"lib/_http_client.js\",\n                                         \"lib/_http_common.js\",\n                                         \"lib/_http_incoming.js\",\n                                         \"lib/_http_outgoing.js\",\n                                         \"lib/_http_server.js\",\n                                         \"lib/_stream_duplex.js\",\n                                         \"lib/_stream_passthrough.js\",\n                                         \"lib/_stream_readable.js\",\n                                         \"lib/_stream_transform.js\",\n                                         \"lib/_stream_wrap.js\",\n                                         \"lib/_stream_writable.js\",\n                                         \"lib/_tls_common.js\",\n                                         \"lib/_tls_wrap.js\",\n                                         \"lib/assert.js\",\n                                         \"lib/assert/strict.js\",\n                                         \"lib/async_hooks.js\",\n                                         \"lib/buffer.js\",\n                                         \"lib/child_process.js\",\n                                         \"lib/cluster.js\",\n                                         \"lib/console.js\",\n                                         \"lib/constants.js\",\n                                         \"lib/crypto.js\",\n                                         \"lib/dgram.js\",\n                                         \"lib/diagnostics_channel.js\",\n                                         \"lib/dns.js\",\n                                         \"lib/dns/promises.js\",\n                                         \"lib/domain.js\",\n                                         \"lib/events.js\",\n                                         \"lib/fs.js\",\n                                         \"lib/fs/promises.js\",\n                                         \"lib/http.js\",\n                                         \"lib/http2.js\",\n                                         \"lib/https.js\",\n                                         \"lib/inspector.js\",\n                                         \"lib/inspector/promises.js\",\n                                         \"lib/internal/abort_controller.js\",\n                                         \"lib/internal/assert.js\",\n                                         \"lib/internal/assert/assertion_error.js\",\n                                         \"lib/internal/assert/calltracker.js\",\n                                         \"lib/internal/assert/myers_diff.js\",\n                                         \"lib/internal/assert/utils.js\",\n                                         \"lib/internal/async_context_frame.js\",\n                                         \"lib/internal/async_hooks.js\",\n                                         \"lib/internal/async_local_storage/async_context_frame.js\",\n                                         \"lib/internal/async_local_storage/async_hooks.js\",\n                                         \"lib/internal/blob.js\",\n                                         \"lib/internal/blocklist.js\",\n                                         \"lib/internal/bootstrap/node.js\",\n                                         \"lib/internal/bootstrap/realm.js\",\n                                         \"lib/internal/bootstrap/shadow_realm.js\",\n                                         \"lib/internal/bootstrap/switches/does_not_own_process_state.js\",\n                                         \"lib/internal/bootstrap/switches/does_own_process_state.js\",\n                                         \"lib/internal/bootstrap/switches/is_main_thread.js\",\n                                         \"lib/internal/bootstrap/switches/is_not_main_thread.js\",\n                                         \"lib/internal/bootstrap/web/exposed-wildcard.js\",\n                                         \"lib/internal/bootstrap/web/exposed-window-or-worker.js\",\n                                         \"lib/internal/buffer.js\",\n                                         \"lib/internal/child_process.js\",\n                                         \"lib/internal/child_process/serialization.js\",\n                                         \"lib/internal/cli_table.js\",\n                                         \"lib/internal/cluster/child.js\",\n                                         \"lib/internal/cluster/primary.js\",\n                                         \"lib/internal/cluster/round_robin_handle.js\",\n                                         \"lib/internal/cluster/shared_handle.js\",\n                                         \"lib/internal/cluster/utils.js\",\n                                         \"lib/internal/cluster/worker.js\",\n                                         \"lib/internal/console/constructor.js\",\n                                         \"lib/internal/console/global.js\",\n                                         \"lib/internal/constants.js\",\n                                         \"lib/internal/crypto/aes.js\",\n                                         \"lib/internal/crypto/certificate.js\",\n                                         \"lib/internal/crypto/cfrg.js\",\n                                         \"lib/internal/crypto/cipher.js\",\n                                         \"lib/internal/crypto/diffiehellman.js\",\n                                         \"lib/internal/crypto/ec.js\",\n                                         \"lib/internal/crypto/hash.js\",\n                                         \"lib/internal/crypto/hashnames.js\",\n                                         \"lib/internal/crypto/hkdf.js\",\n                                         \"lib/internal/crypto/keygen.js\",\n                                         \"lib/internal/crypto/keys.js\",\n                                         \"lib/internal/crypto/mac.js\",\n                                         \"lib/internal/crypto/pbkdf2.js\",\n                                         \"lib/internal/crypto/random.js\",\n                                         \"lib/internal/crypto/rsa.js\",\n                                         \"lib/internal/crypto/scrypt.js\",\n                                         \"lib/internal/crypto/sig.js\",\n                                         \"lib/internal/crypto/util.js\",\n                                         \"lib/internal/crypto/webcrypto.js\",\n                                         \"lib/internal/crypto/webidl.js\",\n                                         \"lib/internal/crypto/x509.js\",\n                                         \"lib/internal/data_url.js\",\n                                         \"lib/internal/debugger/inspect.js\",\n                                         \"lib/internal/debugger/inspect_client.js\",\n                                         \"lib/internal/debugger/inspect_repl.js\",\n                                         \"lib/internal/dgram.js\",\n                                         \"lib/internal/dns/callback_resolver.js\",\n                                         \"lib/internal/dns/promises.js\",\n                                         \"lib/internal/dns/utils.js\",\n                                         \"lib/internal/encoding.js\",\n                                         \"lib/internal/error_serdes.js\",\n                                         \"lib/internal/errors.js\",\n                                         \"lib/internal/event_target.js\",\n                                         \"lib/internal/events/abort_listener.js\",\n                                         \"lib/internal/events/symbols.js\",\n                                         \"lib/internal/file.js\",\n                                         \"lib/internal/fixed_queue.js\",\n                                         \"lib/internal/freelist.js\",\n                                         \"lib/internal/freeze_intrinsics.js\",\n                                         \"lib/internal/fs/cp/cp-sync.js\",\n                                         \"lib/internal/fs/cp/cp.js\",\n                                         \"lib/internal/fs/dir.js\",\n                                         \"lib/internal/fs/glob.js\",\n                                         \"lib/internal/fs/promises.js\",\n                                         \"lib/internal/fs/read/context.js\",\n                                         \"lib/internal/fs/recursive_watch.js\",\n                                         \"lib/internal/fs/rimraf.js\",\n                                         \"lib/internal/fs/streams.js\",\n                                         \"lib/internal/fs/sync_write_stream.js\",\n                                         \"lib/internal/fs/utils.js\",\n                                         \"lib/internal/fs/watchers.js\",\n                                         \"lib/internal/heap_utils.js\",\n                                         \"lib/internal/histogram.js\",\n                                         \"lib/internal/http.js\",\n                                         \"lib/internal/http2/compat.js\",\n                                         \"lib/internal/http2/core.js\",\n                                         \"lib/internal/http2/util.js\",\n                                         \"lib/internal/inspector/network.js\",\n                                         \"lib/internal/inspector/network_http.js\",\n                                         \"lib/internal/inspector/network_http2.js\",\n                                         \"lib/internal/inspector/network_resources.js\",\n                                         \"lib/internal/inspector/network_undici.js\",\n                                         \"lib/internal/inspector_async_hook.js\",\n                                         \"lib/internal/inspector_network_tracking.js\",\n                                         \"lib/internal/js_stream_socket.js\",\n                                         \"lib/internal/legacy/processbinding.js\",\n                                         \"lib/internal/linkedlist.js\",\n                                         \"lib/internal/main/check_syntax.js\",\n                                         \"lib/internal/main/embedding.js\",\n                                         \"lib/internal/main/eval_stdin.js\",\n                                         \"lib/internal/main/eval_string.js\",\n                                         \"lib/internal/main/inspect.js\",\n                                         \"lib/internal/main/mksnapshot.js\",\n                                         \"lib/internal/main/print_help.js\",\n                                         \"lib/internal/main/prof_process.js\",\n                                         \"lib/internal/main/repl.js\",\n                                         \"lib/internal/main/run_main_module.js\",\n                                         \"lib/internal/main/test_runner.js\",\n                                         \"lib/internal/main/watch_mode.js\",\n                                         \"lib/internal/main/worker_thread.js\",\n                                         \"lib/internal/mime.js\",\n                                         \"lib/internal/modules/cjs/loader.js\",\n                                         \"lib/internal/modules/customization_hooks.js\",\n                                         \"lib/internal/modules/esm/assert.js\",\n                                         \"lib/internal/modules/esm/create_dynamic_module.js\",\n                                         \"lib/internal/modules/esm/formats.js\",\n                                         \"lib/internal/modules/esm/get_format.js\",\n                                         \"lib/internal/modules/esm/hooks.js\",\n                                         \"lib/internal/modules/esm/initialize_import_meta.js\",\n                                         \"lib/internal/modules/esm/load.js\",\n                                         \"lib/internal/modules/esm/loader.js\",\n                                         \"lib/internal/modules/esm/module_job.js\",\n                                         \"lib/internal/modules/esm/module_map.js\",\n                                         \"lib/internal/modules/esm/resolve.js\",\n                                         \"lib/internal/modules/esm/shared_constants.js\",\n                                         \"lib/internal/modules/esm/translators.js\",\n                                         \"lib/internal/modules/esm/utils.js\",\n                                         \"lib/internal/modules/esm/worker.js\",\n                                         \"lib/internal/modules/helpers.js\",\n                                         \"lib/internal/modules/package_json_reader.js\",\n                                         \"lib/internal/modules/run_main.js\",\n                                         \"lib/internal/modules/typescript.js\",\n                                         \"lib/internal/navigator.js\",\n                                         \"lib/internal/net.js\",\n                                         \"lib/internal/options.js\",\n                                         \"lib/internal/per_context/domexception.js\",\n                                         \"lib/internal/per_context/messageport.js\",\n                                         \"lib/internal/per_context/primordials.js\",\n                                         \"lib/internal/perf/event_loop_delay.js\",\n                                         \"lib/internal/perf/event_loop_utilization.js\",\n                                         \"lib/internal/perf/nodetiming.js\",\n                                         \"lib/internal/perf/observe.js\",\n                                         \"lib/internal/perf/performance.js\",\n                                         \"lib/internal/perf/performance_entry.js\",\n                                         \"lib/internal/perf/resource_timing.js\",\n                                         \"lib/internal/perf/timerify.js\",\n                                         \"lib/internal/perf/usertiming.js\",\n                                         \"lib/internal/perf/utils.js\",\n                                         \"lib/internal/priority_queue.js\",\n                                         \"lib/internal/process/execution.js\",\n                                         \"lib/internal/process/finalization.js\",\n                                         \"lib/internal/process/per_thread.js\",\n                                         \"lib/internal/process/permission.js\",\n                                         \"lib/internal/process/pre_execution.js\",\n                                         \"lib/internal/process/promises.js\",\n                                         \"lib/internal/process/report.js\",\n                                         \"lib/internal/process/signal.js\",\n                                         \"lib/internal/process/task_queues.js\",\n                                         \"lib/internal/process/warning.js\",\n                                         \"lib/internal/process/worker_thread_only.js\",\n                                         \"lib/internal/promise_hooks.js\",\n                                         \"lib/internal/querystring.js\",\n                                         \"lib/internal/quic/quic.js\",\n                                         \"lib/internal/quic/state.js\",\n                                         \"lib/internal/quic/stats.js\",\n                                         \"lib/internal/quic/symbols.js\",\n                                         \"lib/internal/readline/callbacks.js\",\n                                         \"lib/internal/readline/emitKeypressEvents.js\",\n                                         \"lib/internal/readline/interface.js\",\n                                         \"lib/internal/readline/promises.js\",\n                                         \"lib/internal/readline/utils.js\",\n                                         \"lib/internal/repl.js\",\n                                         \"lib/internal/repl/await.js\",\n                                         \"lib/internal/repl/history.js\",\n                                         \"lib/internal/repl/utils.js\",\n                                         \"lib/internal/socket_list.js\",\n                                         \"lib/internal/socketaddress.js\",\n                                         \"lib/internal/source_map/prepare_stack_trace.js\",\n                                         \"lib/internal/source_map/source_map.js\",\n                                         \"lib/internal/source_map/source_map_cache.js\",\n                                         \"lib/internal/source_map/source_map_cache_map.js\",\n                                         \"lib/internal/stream_base_commons.js\",\n                                         \"lib/internal/streams/add-abort-signal.js\",\n                                         \"lib/internal/streams/compose.js\",\n                                         \"lib/internal/streams/destroy.js\",\n                                         \"lib/internal/streams/duplex.js\",\n                                         \"lib/internal/streams/duplexify.js\",\n                                         \"lib/internal/streams/duplexpair.js\",\n                                         \"lib/internal/streams/end-of-stream.js\",\n                                         \"lib/internal/streams/from.js\",\n                                         \"lib/internal/streams/lazy_transform.js\",\n                                         \"lib/internal/streams/legacy.js\",\n                                         \"lib/internal/streams/operators.js\",\n                                         \"lib/internal/streams/passthrough.js\",\n                                         \"lib/internal/streams/pipeline.js\",\n                                         \"lib/internal/streams/readable.js\",\n                                         \"lib/internal/streams/state.js\",\n                                         \"lib/internal/streams/transform.js\",\n                                         \"lib/internal/streams/utils.js\",\n                                         \"lib/internal/streams/writable.js\",\n                                         \"lib/internal/test/binding.js\",\n                                         \"lib/internal/test/transfer.js\",\n                                         \"lib/internal/test_runner/assert.js\",\n                                         \"lib/internal/test_runner/coverage.js\",\n                                         \"lib/internal/test_runner/harness.js\",\n                                         \"lib/internal/test_runner/mock/loader.js\",\n                                         \"lib/internal/test_runner/mock/mock.js\",\n                                         \"lib/internal/test_runner/mock/mock_timers.js\",\n                                         \"lib/internal/test_runner/reporter/dot.js\",\n                                         \"lib/internal/test_runner/reporter/junit.js\",\n                                         \"lib/internal/test_runner/reporter/lcov.js\",\n                                         \"lib/internal/test_runner/reporter/spec.js\",\n                                         \"lib/internal/test_runner/reporter/tap.js\",\n                                         \"lib/internal/test_runner/reporter/utils.js\",\n                                         \"lib/internal/test_runner/reporter/v8-serializer.js\",\n                                         \"lib/internal/test_runner/runner.js\",\n                                         \"lib/internal/test_runner/snapshot.js\",\n                                         \"lib/internal/test_runner/test.js\",\n                                         \"lib/internal/test_runner/tests_stream.js\",\n                                         \"lib/internal/test_runner/utils.js\",\n                                         \"lib/internal/timers.js\",\n                                         \"lib/internal/tls/secure-context.js\",\n                                         \"lib/internal/tls/secure-pair.js\",\n                                         \"lib/internal/trace_events_async_hooks.js\",\n                                         \"lib/internal/tty.js\",\n                                         \"lib/internal/url.js\",\n                                         \"lib/internal/util.js\",\n                                         \"lib/internal/util/colors.js\",\n                                         \"lib/internal/util/comparisons.js\",\n                                         \"lib/internal/util/debuglog.js\",\n                                         \"lib/internal/util/diff.js\",\n                                         \"lib/internal/util/inspect.js\",\n                                         \"lib/internal/util/inspector.js\",\n                                         \"lib/internal/util/parse_args/parse_args.js\",\n                                         \"lib/internal/util/parse_args/utils.js\",\n                                         \"lib/internal/util/trace_sigint.js\",\n                                         \"lib/internal/util/types.js\",\n                                         \"lib/internal/v8/startup_snapshot.js\",\n                                         \"lib/internal/v8_prof_polyfill.js\",\n                                         \"lib/internal/v8_prof_processor.js\",\n                                         \"lib/internal/validators.js\",\n                                         \"lib/internal/vm.js\",\n                                         \"lib/internal/vm/module.js\",\n                                         \"lib/internal/wasm_web_api.js\",\n                                         \"lib/internal/watch_mode/files_watcher.js\",\n                                         \"lib/internal/watchdog.js\",\n                                         \"lib/internal/webidl.js\",\n                                         \"lib/internal/webstorage.js\",\n                                         \"lib/internal/webstreams/adapters.js\",\n                                         \"lib/internal/webstreams/compression.js\",\n                                         \"lib/internal/webstreams/encoding.js\",\n                                         \"lib/internal/webstreams/queuingstrategies.js\",\n                                         \"lib/internal/webstreams/readablestream.js\",\n                                         \"lib/internal/webstreams/transfer.js\",\n                                         \"lib/internal/webstreams/transformstream.js\",\n                                         \"lib/internal/webstreams/util.js\",\n                                         \"lib/internal/webstreams/writablestream.js\",\n                                         \"lib/internal/worker.js\",\n                                         \"lib/internal/worker/clone_dom_exception.js\",\n                                         \"lib/internal/worker/io.js\",\n                                         \"lib/internal/worker/js_transferable.js\",\n                                         \"lib/internal/worker/messaging.js\",\n                                         \"lib/module.js\",\n                                         \"lib/net.js\",\n                                         \"lib/os.js\",\n                                         \"lib/path.js\",\n                                         \"lib/path/posix.js\",\n                                         \"lib/path/win32.js\",\n                                         \"lib/perf_hooks.js\",\n                                         \"lib/process.js\",\n                                         \"lib/punycode.js\",\n                                         \"lib/querystring.js\",\n                                         \"lib/readline.js\",\n                                         \"lib/readline/promises.js\",\n                                         \"lib/repl.js\",\n                                         \"lib/sea.js\",\n                                         \"lib/sqlite.js\",\n                                         \"lib/stream.js\",\n                                         \"lib/stream/consumers.js\",\n                                         \"lib/stream/promises.js\",\n                                         \"lib/stream/web.js\",\n                                         \"lib/string_decoder.js\",\n                                         \"lib/sys.js\",\n                                         \"lib/test.js\",\n                                         \"lib/test/reporters.js\",\n                                         \"lib/timers.js\",\n                                         \"lib/timers/promises.js\",\n                                         \"lib/tls.js\",\n                                         \"lib/trace_events.js\",\n                                         \"lib/tty.js\",\n                                         \"lib/url.js\",\n                                         \"lib/util.js\",\n                                         \"lib/util/types.js\",\n                                         \"lib/v8.js\",\n                                         \"lib/vm.js\",\n                                         \"lib/wasi.js\",\n                                         \"lib/worker_threads.js\",\n                                         \"lib/zlib.js\"],\n                 \"node_module_version\": 127,\n                 \"node_no_browser_globals\": false,\n                 \"node_prefix\": \"/\",\n                 \"node_release_urlbase\": \"https://nodejs.org/download/release/\",\n                 \"node_section_ordering_info\": \"\",\n                 \"node_shared\": false,\n                 \"node_shared_ada\": false,\n                 \"node_shared_brotli\": false,\n                 \"node_shared_cares\": false,\n                 \"node_shared_http_parser\": false,\n                 \"node_shared_libuv\": false,\n                 \"node_shared_nghttp2\": false,\n                 \"node_shared_nghttp3\": false,\n                 \"node_shared_ngtcp2\": false,\n                 \"node_shared_openssl\": false,\n                 \"node_shared_simdjson\": false,\n                 \"node_shared_simdutf\": false,\n                 \"node_shared_sqlite\": false,\n                 \"node_shared_uvwasi\": false,\n                 \"node_shared_zlib\": false,\n                 \"node_shared_zstd\": false,\n                 \"node_tag\": \"\",\n                 \"node_target_type\": \"executable\",\n                 \"node_use_amaro\": true,\n                 \"node_use_bundled_v8\": true,\n                 \"node_use_node_code_cache\": true,\n                 \"node_use_node_snapshot\": true,\n                 \"node_use_openssl\": true,\n                 \"node_use_sqlite\": true,\n                 \"node_use_v8_platform\": true,\n                 \"node_with_ltcg\": false,\n                 \"node_without_node_options\": false,\n                 \"node_write_snapshot_as_array_literals\": false,\n                 \"openssl_is_fips\": false,\n                 \"openssl_quic\": false,\n                 \"ossfuzz\": false,\n                 \"shlib_suffix\": \"so.127\",\n                 \"single_executable_application\": true,\n                 \"suppress_all_error_on_warn\": false,\n                 \"target_arch\": \"x64\",\n                 \"ubsan\": 0,\n                 \"use_ccache_win\": 0,\n                 \"use_prefix_to_find_headers\": false,\n                 \"v8_enable_31bit_smis_on_64bit_arch\": 0,\n                 \"v8_enable_extensible_ro_snapshot\": 0,\n                 \"v8_enable_external_code_space\": 0,\n                 \"v8_enable_gdbjit\": 0,\n                 \"v8_enable_hugepage\": 0,\n                 \"v8_enable_i18n_support\": 1,\n                 \"v8_enable_inspector\": 1,\n                 \"v8_enable_javascript_promise_hooks\": 1,\n                 \"v8_enable_lite_mode\": 0,\n                 \"v8_enable_maglev\": 0,\n                 \"v8_enable_object_print\": 1,\n                 \"v8_enable_pointer_compression\": 0,\n                 \"v8_enable_pointer_compression_shared_cage\": 0,\n                 \"v8_enable_sandbox\": 0,\n                 \"v8_enable_shared_ro_heap\": 1,\n                 \"v8_enable_short_builtin_calls\": 1,\n                 \"v8_enable_wasm_simd256_revec\": 1,\n                 \"v8_enable_webassembly\": 1,\n                 \"v8_optimized_debug\": 1,\n                 \"v8_promise_internal_field_count\": 1,\n                 \"v8_random_seed\": 0,\n                 \"v8_trace_maps\": 0,\n                 \"v8_use_siphash\": 1,\n                 \"want_separate_host_toolset\": 0}}\n",
+  "config": "{\n  \"variables\": {\n    \"use_ccache_win\": 0,\n    \"clang\": 0,\n    \"llvm_version\": \"0.0\",\n    \"gas_version\": \"2.35\",\n    \"node_prefix\": \"/\",\n    \"node_install_npm\": true,\n    \"node_install_corepack\": true,\n    \"control_flow_guard\": false,\n    \"node_use_amaro\": true,\n    \"debug_node\": false,\n    \"error_on_warn\": false,\n    \"suppress_all_error_on_warn\": false,\n    \"use_prefix_to_find_headers\": false,\n    \"host_arch\": \"x64\",\n    \"target_arch\": \"x64\",\n    \"node_byteorder\": \"little\",\n    \"want_separate_host_toolset\": 0,\n    \"node_use_node_snapshot\": true,\n    \"node_use_node_code_cache\": true,\n    \"node_write_snapshot_as_array_literals\": false,\n    \"node_enable_v8_vtunejit\": false,\n    \"enable_pgo_generate\": false,\n    \"enable_pgo_use\": false,\n    \"enable_lto\": false,\n    \"single_executable_application\": true,\n    \"node_with_ltcg\": false,\n    \"node_tag\": \"\",\n    \"node_release_urlbase\": \"https://nodejs.org/download/release/\",\n    \"node_debug_lib\": false,\n    \"debug_nghttp2\": false,\n    \"node_no_browser_globals\": false,\n    \"node_shared\": false,\n    \"libdir\": \"lib\",\n    \"node_module_version\": 127,\n    \"shlib_suffix\": \"so.127\",\n    \"asan\": 0,\n    \"ubsan\": 0,\n    \"coverage\": false,\n    \"node_target_type\": \"executable\",\n    \"node_library_files\": [\n      \"lib/_http_agent.js\",\n      \"lib/_http_client.js\",\n      \"lib/_http_common.js\",\n      \"lib/_http_incoming.js\",\n      \"lib/_http_outgoing.js\",\n      \"lib/_http_server.js\",\n      \"lib/_stream_duplex.js\",\n      \"lib/_stream_passthrough.js\",\n      \"lib/_stream_readable.js\",\n      \"lib/_stream_transform.js\",\n      \"lib/_stream_wrap.js\",\n      \"lib/_stream_writable.js\",\n      \"lib/_tls_common.js\",\n      \"lib/_tls_wrap.js\",\n      \"lib/assert.js\",\n      \"lib/assert/strict.js\",\n      \"lib/async_hooks.js\",\n      \"lib/buffer.js\",\n      \"lib/child_process.js\",\n      \"lib/cluster.js\",\n      \"lib/console.js\",\n      \"lib/constants.js\",\n      \"lib/crypto.js\",\n      \"lib/dgram.js\",\n      \"lib/diagnostics_channel.js\",\n      \"lib/dns.js\",\n      \"lib/dns/promises.js\",\n      \"lib/domain.js\",\n      \"lib/events.js\",\n      \"lib/fs.js\",\n      \"lib/fs/promises.js\",\n      \"lib/http.js\",\n      \"lib/http2.js\",\n      \"lib/https.js\",\n      \"lib/inspector.js\",\n      \"lib/inspector/promises.js\",\n      \"lib/internal/abort_controller.js\",\n      \"lib/internal/assert.js\",\n      \"lib/internal/assert/assertion_error.js\",\n      \"lib/internal/assert/calltracker.js\",\n      \"lib/internal/assert/myers_diff.js\",\n      \"lib/internal/assert/utils.js\",\n      \"lib/internal/async_context_frame.js\",\n      \"lib/internal/async_hooks.js\",\n      \"lib/internal/async_local_storage/async_context_frame.js\",\n      \"lib/internal/async_local_storage/async_hooks.js\",\n      \"lib/internal/blob.js\",\n      \"lib/internal/blocklist.js\",\n      \"lib/internal/bootstrap/node.js\",\n      \"lib/internal/bootstrap/realm.js\",\n      \"lib/internal/bootstrap/shadow_realm.js\",\n      \"lib/internal/bootstrap/switches/does_not_own_process_state.js\",\n      \"lib/internal/bootstrap/switches/does_own_process_state.js\",\n      \"lib/internal/bootstrap/switches/is_main_thread.js\",\n      \"lib/internal/bootstrap/switches/is_not_main_thread.js\",\n      \"lib/internal/bootstrap/web/exposed-wildcard.js\",\n      \"lib/internal/bootstrap/web/exposed-window-or-worker.js\",\n      \"lib/internal/buffer.js\",\n      \"lib/internal/child_process.js\",\n      \"lib/internal/child_process/serialization.js\",\n      \"lib/internal/cli_table.js\",\n      \"lib/internal/cluster/child.js\",\n      \"lib/internal/cluster/primary.js\",\n      \"lib/internal/cluster/round_robin_handle.js\",\n      \"lib/internal/cluster/shared_handle.js\",\n      \"lib/internal/cluster/utils.js\",\n      \"lib/internal/cluster/worker.js\",\n      \"lib/internal/console/constructor.js\",\n      \"lib/internal/console/global.js\",\n      \"lib/internal/constants.js\",\n      \"lib/internal/crypto/aes.js\",\n      \"lib/internal/crypto/certificate.js\",\n      \"lib/internal/crypto/cfrg.js\",\n      \"lib/internal/crypto/cipher.js\",\n      \"lib/internal/crypto/diffiehellman.js\",\n      \"lib/internal/crypto/ec.js\",\n      \"lib/internal/crypto/hash.js\",\n      \"lib/internal/crypto/hashnames.js\",\n      \"lib/internal/crypto/hkdf.js\",\n      \"lib/internal/crypto/keygen.js\",\n      \"lib/internal/crypto/keys.js\",\n      \"lib/internal/crypto/mac.js\",\n      \"lib/internal/crypto/pbkdf2.js\",\n      \"lib/internal/crypto/random.js\",\n      \"lib/internal/crypto/rsa.js\",\n      \"lib/internal/crypto/scrypt.js\",\n      \"lib/internal/crypto/sig.js\",\n      \"lib/internal/crypto/util.js\",\n      \"lib/internal/crypto/webcrypto.js\",\n      \"lib/internal/crypto/webidl.js\",\n      \"lib/internal/crypto/x509.js\",\n      \"lib/internal/data_url.js\",\n      \"lib/internal/debugger/inspect.js\",\n      \"lib/internal/debugger/inspect_client.js\",\n      \"lib/internal/debugger/inspect_repl.js\",\n      \"lib/internal/dgram.js\",\n      \"lib/internal/dns/callback_resolver.js\",\n      \"lib/internal/dns/promises.js\",\n      \"lib/internal/dns/utils.js\",\n      \"lib/internal/encoding.js\",\n      \"lib/internal/error_serdes.js\",\n      \"lib/internal/errors.js\",\n      \"lib/internal/errors/error_source.js\",\n      \"lib/internal/event_target.js\",\n      \"lib/internal/events/abort_listener.js\",\n      \"lib/internal/events/symbols.js\",\n      \"lib/internal/file.js\",\n      \"lib/internal/fixed_queue.js\",\n      \"lib/internal/freelist.js\",\n      \"lib/internal/freeze_intrinsics.js\",\n      \"lib/internal/fs/cp/cp-sync.js\",\n      \"lib/internal/fs/cp/cp.js\",\n      \"lib/internal/fs/dir.js\",\n      \"lib/internal/fs/glob.js\",\n      \"lib/internal/fs/promises.js\",\n      \"lib/internal/fs/read/context.js\",\n      \"lib/internal/fs/recursive_watch.js\",\n      \"lib/internal/fs/rimraf.js\",\n      \"lib/internal/fs/streams.js\",\n      \"lib/internal/fs/sync_write_stream.js\",\n      \"lib/internal/fs/utils.js\",\n      \"lib/internal/fs/watchers.js\",\n      \"lib/internal/heap_utils.js\",\n      \"lib/internal/histogram.js\",\n      \"lib/internal/http.js\",\n      \"lib/internal/http2/compat.js\",\n      \"lib/internal/http2/core.js\",\n      \"lib/internal/http2/util.js\",\n      \"lib/internal/inspector/network.js\",\n      \"lib/internal/inspector/network_http.js\",\n      \"lib/internal/inspector/network_http2.js\",\n      \"lib/internal/inspector/network_resources.js\",\n      \"lib/internal/inspector/network_undici.js\",\n      \"lib/internal/inspector_async_hook.js\",\n      \"lib/internal/inspector_network_tracking.js\",\n      \"lib/internal/js_stream_socket.js\",\n      \"lib/internal/legacy/processbinding.js\",\n      \"lib/internal/linkedlist.js\",\n      \"lib/internal/main/check_syntax.js\",\n      \"lib/internal/main/embedding.js\",\n      \"lib/internal/main/eval_stdin.js\",\n      \"lib/internal/main/eval_string.js\",\n      \"lib/internal/main/inspect.js\",\n      \"lib/internal/main/mksnapshot.js\",\n      \"lib/internal/main/print_help.js\",\n      \"lib/internal/main/prof_process.js\",\n      \"lib/internal/main/repl.js\",\n      \"lib/internal/main/run_main_module.js\",\n      \"lib/internal/main/test_runner.js\",\n      \"lib/internal/main/watch_mode.js\",\n      \"lib/internal/main/worker_thread.js\",\n      \"lib/internal/mime.js\",\n      \"lib/internal/modules/cjs/loader.js\",\n      \"lib/internal/modules/customization_hooks.js\",\n      \"lib/internal/modules/esm/assert.js\",\n      \"lib/internal/modules/esm/create_dynamic_module.js\",\n      \"lib/internal/modules/esm/formats.js\",\n      \"lib/internal/modules/esm/get_format.js\",\n      \"lib/internal/modules/esm/hooks.js\",\n      \"lib/internal/modules/esm/initialize_import_meta.js\",\n      \"lib/internal/modules/esm/load.js\",\n      \"lib/internal/modules/esm/loader.js\",\n      \"lib/internal/modules/esm/module_job.js\",\n      \"lib/internal/modules/esm/module_map.js\",\n      \"lib/internal/modules/esm/resolve.js\",\n      \"lib/internal/modules/esm/shared_constants.js\",\n      \"lib/internal/modules/esm/translators.js\",\n      \"lib/internal/modules/esm/utils.js\",\n      \"lib/internal/modules/esm/worker.js\",\n      \"lib/internal/modules/helpers.js\",\n      \"lib/internal/modules/package_json_reader.js\",\n      \"lib/internal/modules/run_main.js\",\n      \"lib/internal/modules/typescript.js\",\n      \"lib/internal/navigator.js\",\n      \"lib/internal/net.js\",\n      \"lib/internal/options.js\",\n      \"lib/internal/per_context/domexception.js\",\n      \"lib/internal/per_context/messageport.js\",\n      \"lib/internal/per_context/primordials.js\",\n      \"lib/internal/perf/event_loop_delay.js\",\n      \"lib/internal/perf/event_loop_utilization.js\",\n      \"lib/internal/perf/nodetiming.js\",\n      \"lib/internal/perf/observe.js\",\n      \"lib/internal/perf/performance.js\",\n      \"lib/internal/perf/performance_entry.js\",\n      \"lib/internal/perf/resource_timing.js\",\n      \"lib/internal/perf/timerify.js\",\n      \"lib/internal/perf/usertiming.js\",\n      \"lib/internal/perf/utils.js\",\n      \"lib/internal/priority_queue.js\",\n      \"lib/internal/process/execution.js\",\n      \"lib/internal/process/finalization.js\",\n      \"lib/internal/process/per_thread.js\",\n      \"lib/internal/process/permission.js\",\n      \"lib/internal/process/pre_execution.js\",\n      \"lib/internal/process/promises.js\",\n      \"lib/internal/process/report.js\",\n      \"lib/internal/process/signal.js\",\n      \"lib/internal/process/task_queues.js\",\n      \"lib/internal/process/warning.js\",\n      \"lib/internal/process/worker_thread_only.js\",\n      \"lib/internal/promise_hooks.js\",\n      \"lib/internal/querystring.js\",\n      \"lib/internal/quic/quic.js\",\n      \"lib/internal/quic/state.js\",\n      \"lib/internal/quic/stats.js\",\n      \"lib/internal/quic/symbols.js\",\n      \"lib/internal/readline/callbacks.js\",\n      \"lib/internal/readline/emitKeypressEvents.js\",\n      \"lib/internal/readline/interface.js\",\n      \"lib/internal/readline/promises.js\",\n      \"lib/internal/readline/utils.js\",\n      \"lib/internal/repl.js\",\n      \"lib/internal/repl/await.js\",\n      \"lib/internal/repl/history.js\",\n      \"lib/internal/repl/utils.js\",\n      \"lib/internal/socket_list.js\",\n      \"lib/internal/socketaddress.js\",\n      \"lib/internal/source_map/prepare_stack_trace.js\",\n      \"lib/internal/source_map/source_map.js\",\n      \"lib/internal/source_map/source_map_cache.js\",\n      \"lib/internal/source_map/source_map_cache_map.js\",\n      \"lib/internal/stream_base_commons.js\",\n      \"lib/internal/streams/add-abort-signal.js\",\n      \"lib/internal/streams/compose.js\",\n      \"lib/internal/streams/destroy.js\",\n      \"lib/internal/streams/duplex.js\",\n      \"lib/internal/streams/duplexify.js\",\n      \"lib/internal/streams/duplexpair.js\",\n      \"lib/internal/streams/end-of-stream.js\",\n      \"lib/internal/streams/from.js\",\n      \"lib/internal/streams/lazy_transform.js\",\n      \"lib/internal/streams/legacy.js\",\n      \"lib/internal/streams/operators.js\",\n      \"lib/internal/streams/passthrough.js\",\n      \"lib/internal/streams/pipeline.js\",\n      \"lib/internal/streams/readable.js\",\n      \"lib/internal/streams/state.js\",\n      \"lib/internal/streams/transform.js\",\n      \"lib/internal/streams/utils.js\",\n      \"lib/internal/streams/writable.js\",\n      \"lib/internal/test/binding.js\",\n      \"lib/internal/test/transfer.js\",\n      \"lib/internal/test_runner/assert.js\",\n      \"lib/internal/test_runner/coverage.js\",\n      \"lib/internal/test_runner/harness.js\",\n      \"lib/internal/test_runner/mock/loader.js\",\n      \"lib/internal/test_runner/mock/mock.js\",\n      \"lib/internal/test_runner/mock/mock_timers.js\",\n      \"lib/internal/test_runner/reporter/dot.js\",\n      \"lib/internal/test_runner/reporter/junit.js\",\n      \"lib/internal/test_runner/reporter/lcov.js\",\n      \"lib/internal/test_runner/reporter/spec.js\",\n      \"lib/internal/test_runner/reporter/tap.js\",\n      \"lib/internal/test_runner/reporter/utils.js\",\n      \"lib/internal/test_runner/reporter/v8-serializer.js\",\n      \"lib/internal/test_runner/runner.js\",\n      \"lib/internal/test_runner/snapshot.js\",\n      \"lib/internal/test_runner/test.js\",\n      \"lib/internal/test_runner/tests_stream.js\",\n      \"lib/internal/test_runner/utils.js\",\n      \"lib/internal/timers.js\",\n      \"lib/internal/tls/common.js\",\n      \"lib/internal/tls/secure-context.js\",\n      \"lib/internal/tls/secure-pair.js\",\n      \"lib/internal/tls/wrap.js\",\n      \"lib/internal/trace_events_async_hooks.js\",\n      \"lib/internal/tty.js\",\n      \"lib/internal/url.js\",\n      \"lib/internal/util.js\",\n      \"lib/internal/util/colors.js\",\n      \"lib/internal/util/comparisons.js\",\n      \"lib/internal/util/debuglog.js\",\n      \"lib/internal/util/diff.js\",\n      \"lib/internal/util/inspect.js\",\n      \"lib/internal/util/inspector.js\",\n      \"lib/internal/util/parse_args/parse_args.js\",\n      \"lib/internal/util/parse_args/utils.js\",\n      \"lib/internal/util/trace_sigint.js\",\n      \"lib/internal/util/types.js\",\n      \"lib/internal/v8/startup_snapshot.js\",\n      \"lib/internal/v8_prof_polyfill.js\",\n      \"lib/internal/v8_prof_processor.js\",\n      \"lib/internal/validators.js\",\n      \"lib/internal/vm.js\",\n      \"lib/internal/vm/module.js\",\n      \"lib/internal/wasm_web_api.js\",\n      \"lib/internal/watch_mode/files_watcher.js\",\n      \"lib/internal/watchdog.js\",\n      \"lib/internal/webidl.js\",\n      \"lib/internal/webstorage.js\",\n      \"lib/internal/webstreams/adapters.js\",\n      \"lib/internal/webstreams/compression.js\",\n      \"lib/internal/webstreams/encoding.js\",\n      \"lib/internal/webstreams/queuingstrategies.js\",\n      \"lib/internal/webstreams/readablestream.js\",\n      \"lib/internal/webstreams/transfer.js\",\n      \"lib/internal/webstreams/transformstream.js\",\n      \"lib/internal/webstreams/util.js\",\n      \"lib/internal/webstreams/writablestream.js\",\n      \"lib/internal/worker.js\",\n      \"lib/internal/worker/clone_dom_exception.js\",\n      \"lib/internal/worker/io.js\",\n      \"lib/internal/worker/js_transferable.js\",\n      \"lib/internal/worker/messaging.js\",\n      \"lib/module.js\",\n      \"lib/net.js\",\n      \"lib/os.js\",\n      \"lib/path.js\",\n      \"lib/path/posix.js\",\n      \"lib/path/win32.js\",\n      \"lib/perf_hooks.js\",\n      \"lib/process.js\",\n      \"lib/punycode.js\",\n      \"lib/querystring.js\",\n      \"lib/readline.js\",\n      \"lib/readline/promises.js\",\n      \"lib/repl.js\",\n      \"lib/sea.js\",\n      \"lib/sqlite.js\",\n      \"lib/stream.js\",\n      \"lib/stream/consumers.js\",\n      \"lib/stream/promises.js\",\n      \"lib/stream/web.js\",\n      \"lib/string_decoder.js\",\n      \"lib/sys.js\",\n      \"lib/test.js\",\n      \"lib/test/reporters.js\",\n      \"lib/timers.js\",\n      \"lib/timers/promises.js\",\n      \"lib/tls.js\",\n      \"lib/trace_events.js\",\n      \"lib/tty.js\",\n      \"lib/url.js\",\n      \"lib/util.js\",\n      \"lib/util/types.js\",\n      \"lib/v8.js\",\n      \"lib/vm.js\",\n      \"lib/wasi.js\",\n      \"lib/worker_threads.js\",\n      \"lib/zlib.js\"\n    ],\n    \"node_cctest_sources\": [\n      \"src/node_snapshot_stub.cc\",\n      \"test/cctest/inspector/test_network_requests_buffer.cc\",\n      \"test/cctest/inspector/test_node_protocol.cc\",\n      \"test/cctest/node_test_fixture.cc\",\n      \"test/cctest/test_aliased_buffer.cc\",\n      \"test/cctest/test_base64.cc\",\n      \"test/cctest/test_base_object_ptr.cc\",\n      \"test/cctest/test_cppgc.cc\",\n      \"test/cctest/test_crypto_clienthello.cc\",\n      \"test/cctest/test_dataqueue.cc\",\n      \"test/cctest/test_environment.cc\",\n      \"test/cctest/test_inspector_socket.cc\",\n      \"test/cctest/test_inspector_socket_server.cc\",\n      \"test/cctest/test_json_utils.cc\",\n      \"test/cctest/test_linked_binding.cc\",\n      \"test/cctest/test_node_api.cc\",\n      \"test/cctest/test_node_crypto.cc\",\n      \"test/cctest/test_node_crypto_env.cc\",\n      \"test/cctest/test_node_postmortem_metadata.cc\",\n      \"test/cctest/test_node_task_runner.cc\",\n      \"test/cctest/test_path.cc\",\n      \"test/cctest/test_per_process.cc\",\n      \"test/cctest/test_platform.cc\",\n      \"test/cctest/test_quic_cid.cc\",\n      \"test/cctest/test_quic_error.cc\",\n      \"test/cctest/test_quic_tokens.cc\",\n      \"test/cctest/test_report.cc\",\n      \"test/cctest/test_sockaddr.cc\",\n      \"test/cctest/test_traced_value.cc\",\n      \"test/cctest/test_util.cc\",\n      \"test/cctest/node_test_fixture.h\"\n    ],\n    \"napi_build_version\": \"10\",\n    \"node_shared_zlib\": false,\n    \"node_shared_http_parser\": false,\n    \"node_shared_libuv\": false,\n    \"node_shared_ada\": false,\n    \"node_shared_simdjson\": false,\n    \"node_shared_simdutf\": false,\n    \"node_shared_brotli\": false,\n    \"node_shared_cares\": false,\n    \"node_shared_nghttp2\": false,\n    \"node_shared_nghttp3\": false,\n    \"node_shared_ngtcp2\": false,\n    \"node_use_sqlite\": true,\n    \"node_shared_sqlite\": false,\n    \"node_shared_uvwasi\": false,\n    \"node_shared_zstd\": false,\n    \"v8_enable_webassembly\": 1,\n    \"v8_enable_javascript_promise_hooks\": 1,\n    \"v8_enable_lite_mode\": 0,\n    \"v8_enable_gdbjit\": 0,\n    \"v8_optimized_debug\": 1,\n    \"dcheck_always_on\": 0,\n    \"v8_enable_object_print\": 1,\n    \"v8_random_seed\": 0,\n    \"v8_promise_internal_field_count\": 1,\n    \"v8_use_siphash\": 1,\n    \"v8_enable_maglev\": 0,\n    \"v8_enable_pointer_compression\": 0,\n    \"v8_enable_sandbox\": 0,\n    \"v8_enable_pointer_compression_shared_cage\": 0,\n    \"v8_enable_external_code_space\": 0,\n    \"v8_enable_31bit_smis_on_64bit_arch\": 0,\n    \"v8_enable_shared_ro_heap\": 1,\n    \"v8_enable_extensible_ro_snapshot\": 0,\n    \"v8_trace_maps\": 0,\n    \"node_use_v8_platform\": true,\n    \"node_use_bundled_v8\": true,\n    \"force_dynamic_crt\": 0,\n    \"node_enable_d8\": false,\n    \"node_enable_v8windbg\": false,\n    \"v8_enable_hugepage\": 0,\n    \"v8_enable_short_builtin_calls\": 1,\n    \"v8_enable_wasm_simd256_revec\": 1,\n    \"node_use_openssl\": true,\n    \"node_shared_openssl\": false,\n    \"openssl_is_fips\": false,\n    \"node_fipsinstall\": false,\n    \"node_without_node_options\": false,\n    \"openssl_quic\": false,\n    \"icu_small\": false,\n    \"v8_enable_i18n_support\": 1,\n    \"icu_gyp_path\": \"tools/icu/icu-generic.gyp\",\n    \"icu_path\": \"deps/icu-small\",\n    \"icu_ver_major\": \"78\",\n    \"icu_endianness\": \"l\",\n    \"icu_data_in\": \"../../deps/icu-tmp/icudt78l.dat\",\n    \"v8_enable_inspector\": 1,\n    \"node_section_ordering_info\": \"\",\n    \"node_builtin_shareable_builtins\": [\n      \"deps/cjs-module-lexer/lexer.js\",\n      \"deps/cjs-module-lexer/dist/lexer.js\",\n      \"deps/undici/undici.js\",\n      \"deps/amaro/dist/index.js\"\n    ],\n    \"ossfuzz\": false\n  },\n  \"target_defaults\": {\n    \"include_dirs\": [],\n    \"libraries\": [],\n    \"defines\": [\n      \"NODE_OPENSSL_CONF_NAME=nodejs_conf\",\n      \"ICU_NO_USER_DATA_OVERRIDE\"\n    ],\n    \"cflags\": [],\n    \"default_configuration\": \"Release\",\n    \"configurations\": {\n      \"Release\": {\n        \"variables\": {},\n        \"v8_enable_v8_checks\": 1\n      },\n      \"Debug\": {\n        \"variables\": {},\n        \"v8_enable_v8_checks\": 0\n      }\n    }\n  }\n}\n",
   "getCacheUsage": {
    "__fn": "getCacheUsage"
   },
@@ -1423,7 +1429,7 @@
    "COPYFILE_FICLONE_FORCE": 4
   },
   "crypto": {
-   "OPENSSL_VERSION_NUMBER": 810549280,
+   "OPENSSL_VERSION_NUMBER": 810549392,
    "SSL_OP_ALL": 2147485776,
    "SSL_OP_ALLOW_NO_DHE_KEX": 1024,
    "SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION": 262144,
@@ -1582,6 +1588,7 @@
    "BROTLI_DECODER_ERROR_FORMAT_PADDING_1": -14,
    "BROTLI_DECODER_ERROR_FORMAT_PADDING_2": -15,
    "BROTLI_DECODER_ERROR_FORMAT_DISTANCE": -16,
+   "BROTLI_DECODER_ERROR_FORMAT_BLOCK_SWITCH": -17,
    "BROTLI_DECODER_ERROR_DICTIONARY_NOT_SET": -19,
    "BROTLI_DECODER_ERROR_INVALID_ARGUMENTS": -20,
    "BROTLI_DECODER_ERROR_ALLOC_CONTEXT_MODES": -21,
@@ -2115,6 +2122,15 @@
   "getUserRootCertificates": {
    "__fn": "getUserRootCertificates"
   },
+  "startLoadingCertificatesOffThread": {
+   "__fn": "startLoadingCertificatesOffThread"
+  },
+  "addBlockedSPKIForTesting": {
+   "__fn": "addBlockedSPKIForTesting"
+  },
+  "clearBlockedSPKIsForTesting": {
+   "__fn": "clearBlockedSPKIsForTesting"
+  },
   "Sign": {
    "__fn": "Sign",
    "proto": [
@@ -2207,8 +2223,8 @@
   "toUnicode": {
    "__fn": "toUnicode"
   },
-  "decodeLatin1": {
-   "__fn": "decodeLatin1"
+  "decodeWindows1252": {
+   "__fn": "decodeWindows1252"
   },
   "encodeIntoResults": {
    "__typed": "Uint32Array",
@@ -2240,6 +2256,9 @@
   },
   "triggerUncaughtException": {
    "__fn": "triggerUncaughtException"
+  },
+  "getErrorSourcePositions": {
+   "__fn": "getErrorSourcePositions"
   },
   "exitCodes": {
    "kNoFailure": 0,
@@ -2482,12 +2501,12 @@
     "4026532542",
     "0",
     "0",
-    "1792756657",
-    "107270006",
-    "1792756657",
-    "107270006",
-    "1792756657",
-    "107270006",
+    "1792767676",
+    "974801013",
+    "1792767676",
+    "974801013",
+    "1792767676",
+    "974801013",
     "0",
     "0",
     "0",
@@ -3067,9 +3086,6 @@
   "getNearestParentPackageJSONType": {
    "__fn": "getNearestParentPackageJSONType"
   },
-  "getNearestParentPackageJSON": {
-   "__fn": "getNearestParentPackageJSON"
-  },
   "getPackageScopeConfig": {
    "__fn": "getPackageScopeConfig"
   },
@@ -3221,14 +3237,14 @@
    "__typed": "Float64Array",
    "length": 8,
    "values": [
-    1792756656896337,
-    69183776534178,
-    69183900476345,
-    69183800545928,
-    69183865344220,
-    69184040849761,
+    1792767676737433,
+    76615361069064,
+    76615490113022,
+    76615373185647,
+    76615431019230,
+    76615664117980,
     -1,
-    69183994121761
+    76615606385897
    ]
   },
   "constants": {
@@ -3815,13 +3831,13 @@
   }
  },
  "types": {
-  "isExternal": {
-   "__fn": true
-  },
-  "isDate": {
-   "__fn": true
-  },
   "isArgumentsObject": {
+   "__fn": true
+  },
+  "isArrayBuffer": {
+   "__fn": true
+  },
+  "isAsyncFunction": {
    "__fn": true
   },
   "isBigIntObject": {
@@ -3830,22 +3846,13 @@
   "isBooleanObject": {
    "__fn": true
   },
-  "isNumberObject": {
+  "isDataView": {
    "__fn": true
   },
-  "isStringObject": {
+  "isDate": {
    "__fn": true
   },
-  "isSymbolObject": {
-   "__fn": true
-  },
-  "isNativeError": {
-   "__fn": true
-  },
-  "isRegExp": {
-   "__fn": true
-  },
-  "isAsyncFunction": {
+  "isExternal": {
    "__fn": true
   },
   "isGeneratorFunction": {
@@ -3854,40 +3861,49 @@
   "isGeneratorObject": {
    "__fn": true
   },
-  "isPromise": {
-   "__fn": true
-  },
   "isMap": {
-   "__fn": true
-  },
-  "isSet": {
    "__fn": true
   },
   "isMapIterator": {
    "__fn": true
   },
+  "isModuleNamespaceObject": {
+   "__fn": true
+  },
+  "isNativeError": {
+   "__fn": true
+  },
+  "isNumberObject": {
+   "__fn": true
+  },
+  "isPromise": {
+   "__fn": true
+  },
+  "isProxy": {
+   "__fn": true
+  },
+  "isRegExp": {
+   "__fn": true
+  },
+  "isSet": {
+   "__fn": true
+  },
   "isSetIterator": {
+   "__fn": true
+  },
+  "isSharedArrayBuffer": {
+   "__fn": true
+  },
+  "isStringObject": {
+   "__fn": true
+  },
+  "isSymbolObject": {
    "__fn": true
   },
   "isWeakMap": {
    "__fn": true
   },
   "isWeakSet": {
-   "__fn": true
-  },
-  "isArrayBuffer": {
-   "__fn": true
-  },
-  "isDataView": {
-   "__fn": true
-  },
-  "isSharedArrayBuffer": {
-   "__fn": true
-  },
-  "isProxy": {
-   "__fn": true
-  },
-  "isModuleNamespaceObject": {
    "__fn": true
   },
   "isAnyArrayBuffer": {
@@ -4019,8 +4035,11 @@
    "module_export_private_symbol": {
     "__symbol": "node:module_export"
    },
-   "module_parent_private_symbol": {
-    "__symbol": "node:module_parent"
+   "module_first_parent_private_symbol": {
+    "__symbol": "node:module_first_parent"
+   },
+   "module_last_parent_private_symbol": {
+    "__symbol": "node:module_last_parent"
    },
    "napi_type_tag": {
     "__symbol": "node:napi:type_tag"

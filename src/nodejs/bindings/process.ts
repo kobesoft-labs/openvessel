@@ -227,6 +227,17 @@ export function createErrors() {
       }
     },
     triggerUncaughtException: (err: unknown, fromPromise: boolean) => loop.triggerUncaughtException(err, fromPromise),
+    /** Where an error was thrown (V8's Message), from the first frame of its stack. */
+    getErrorSourcePositions(error: Error) {
+      const top = String(error?.stack ?? '')
+        .split('\n')
+        .find((l) => /^\s+at /.test(l));
+      const m = top && /\(?((?:file:\/\/|node:|\/)[^():]+|\[eval\][^():]*):(\d+):(\d+)\)?\s*$/.exec(top);
+      if (!m) return { sourceLine: '', scriptResourceName: '', lineNumber: 0, startColumn: 0 };
+      const file = m[1];
+      const lineNumber = Number(m[2]);
+      return { sourceLine: S.sourceLine?.(file, lineNumber) ?? '', scriptResourceName: file, lineNumber, startColumn: Number(m[3]) - 1 };
+    },
   });
 }
 

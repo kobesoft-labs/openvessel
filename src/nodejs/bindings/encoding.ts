@@ -8,6 +8,8 @@ const utf8Enc = new TextEncoder();
 const utf8Dec = new TextDecoder('utf-8', { ignoreBOM: true });
 const utf8Strict = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const NativeURL: typeof URL = globalThis.URL;
+// Windows-1252 for bytes 0x80–0x9F (encoding_binding.cc)
+const WINDOWS_1252 = [0x20ac, 0x0081, 0x201a, 0x0192, 0x201e, 0x2026, 0x2020, 0x2021, 0x02c6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008d, 0x017d, 0x008f, 0x0090, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0x02dc, 0x2122, 0x0161, 0x203a, 0x0153, 0x009d, 0x017e, 0x0178];
 
 function nodeError(Ctor: ErrorConstructor | TypeErrorConstructor, code: string, message: string): Error {
   const e = new Ctor(message) as Error & { code: string };
@@ -219,7 +221,7 @@ export function createEncodingBinding() {
       return punycodeToUnicode(input.toWellFormed?.() ?? input);
     },
 
-    decodeLatin1(input: unknown, ignoreBOM?: boolean, _fatal?: boolean) {
+    decodeWindows1252(input: unknown, ignoreBOM?: boolean, _fatal?: boolean) {
       let data = bufferSourceBytes(input);
       if (data === null) {
         throw nodeError(TypeError, 'ERR_INVALID_ARG_TYPE', 'The "input" argument must be an instance of ArrayBuffer, SharedArrayBuffer, or ArrayBufferView.');
@@ -227,8 +229,18 @@ export function createEncodingBinding() {
       // Mirrors the C++: a leading 0xFF is dropped when ignoreBOM is set.
       if (ignoreBOM === true && data.length > 0 && data[0] === 0xff) data = data.subarray(1);
       if (data.length === 0) return '';
-      // simdutf's latin1 -> utf8 conversion cannot fail, so `fatal` never throws.
-      return latin1(data);
+      // latin1, except 0x80–0x9F, which Windows-1252 maps to other code points
+      let out = '';
+      let from = 0;
+      for (let i = 0; i < data.length; i++) {
+        const b = data[i];
+        if (b >= 0x80 && b <= 0x9f) {
+          if (i > from) out += latin1(data.subarray(from, i));
+          out += String.fromCharCode(WINDOWS_1252[b - 0x80]);
+          from = i + 1;
+        }
+      }
+      return from === 0 ? latin1(data) : out + latin1(data.subarray(from));
     },
   });
 }

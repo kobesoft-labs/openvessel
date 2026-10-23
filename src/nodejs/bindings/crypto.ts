@@ -38,6 +38,9 @@ export function createCrypto() {
     getExtraCACertificates: () => [],
     getUserRootCertificates: () => [],
     resetRootCertStore: () => {},
+    startLoadingCertificatesOffThread: () => {},
+    addBlockedSPKIForTesting: () => {},
+    clearBlockedSPKIsForTesting: () => {},
     // hashes and MACs
     Hash,
     Hmac,

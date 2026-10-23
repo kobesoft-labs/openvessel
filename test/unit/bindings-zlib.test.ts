@@ -1,5 +1,5 @@
 // Differential tests for internalBinding('zlib'): the transcripts in fixtures/zlib.json were recorded
-// from real Node v22.20.0 by test/fixtures-gen/zlib.mjs, driving the binding the way lib/zlib.js
+// from real Node (the pinned version) by test/fixtures-gen/zlib.mjs, driving the binding the way lib/zlib.js
 // does; here the same driver runs against OpenVessel's binding.
 import './zlib-loop-shim.ts';
 import { test } from 'node:test';

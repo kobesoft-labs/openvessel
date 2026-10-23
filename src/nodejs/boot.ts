@@ -85,6 +85,15 @@ function sourceArrow(err: any): string {
   }
 }
 
+S.sourceLine = (file: string, line: number) => {
+  try {
+    const text = file.startsWith('node:') ? sources[file.slice(5)] : new TextDecoder().decode(sys<Uint8Array>('readFile', { p: file.replace(/^file:\/\//, '') }));
+    return text?.split('\n')[line - 1];
+  } catch {
+    return undefined;
+  }
+};
+
 loop.setFatalPrinter((err: unknown) => {
   let text: string;
   try {

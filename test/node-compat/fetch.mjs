@@ -8,6 +8,11 @@ const version = /NODE_VERSION = '([^']+)'/.exec(readFileSync(join(here, '../../s
 const dest = join(here, '.node');
 const git = (...a) => execFileSync('git', a, { cwd: existsSync(dest) ? dest : here, stdio: 'inherit' });
 if (!existsSync(dest)) git('clone', '--depth', '1', '--filter=blob:none', '--sparse', '-b', `v${version}`, 'https://github.com/nodejs/node.git', dest);
+else {
+  // move an existing checkout to the pinned version
+  git('fetch', '--depth', '1', 'origin', 'tag', `v${version}`);
+  git('checkout', '-q', `v${version}`);
+}
 git('sparse-checkout', 'set', 'test/common', 'test/parallel', 'test/fixtures');
 // keep the parent repo's "type": "module" from applying to Node's CommonJS tests
 writeFileSync(join(dest, 'package.json'), '{ "private": true, "type": "commonjs" }\n');

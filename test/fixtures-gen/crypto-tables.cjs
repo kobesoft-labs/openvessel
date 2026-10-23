@@ -1,4 +1,4 @@
-// Run with: npx -y node@22.20.0 --expose-internals --no-warnings test/fixtures-gen/crypto-tables.cjs src/nodejs/bindings/crypto/tables.ts
+// Run with: npx -y node@<version in src/node/version.ts> --expose-internals --no-warnings test/fixtures-gen/crypto-tables.cjs src/nodejs/bindings/crypto/tables.ts
 const b = require('internal/test/binding').internalBinding('crypto');
 const fs = require('fs');
 const supported = (n) => {
@@ -12,7 +12,7 @@ for (const n of ciphers) {
   const info = b.getCipherInfo({}, n);
   table[n.toLowerCase()] = info;
 }
-const out = `// Generated from Node v22.20.0 (OpenSSL 3) by test/fixtures-gen/crypto-tables.cjs. Do not edit.
+const out = `// Generated from Node ${process.version} (OpenSSL ${process.versions.openssl}) by test/fixtures-gen/crypto-tables.cjs. Do not edit.
 // Cipher metadata for the ciphers OpenVessel implements: lookup key is the lower-cased name.
 
 export interface CipherInfo { mode?: string; name: string; nid: number; blockSize?: number; ivLength?: number; keyLength: number }

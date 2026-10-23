@@ -1,38 +1,38 @@
 {
  "versions": {
-  "node": "22.20.0",
-  "acorn": "8.15.0",
+  "node": "22.23.4",
+  "acorn": "8.16.0",
   "ada": "2.9.2",
-  "amaro": "1.1.2",
-  "ares": "1.34.5",
+  "amaro": "1.1.8",
+  "ares": "1.34.9",
   "brotli": "1.1.0",
-  "cjs_module_lexer": "2.1.0",
-  "cldr": "47.0",
-  "icu": "77.1",
-  "llhttp": "9.3.0",
+  "cjs_module_lexer": "2.2.0",
+  "cldr": "48.0",
+  "icu": "78.3",
+  "llhttp": "9.4.3",
   "modules": "127",
   "napi": "10",
-  "nbytes": "0.1.1",
+  "nbytes": "0.1.3",
   "ncrypto": "0.0.1",
-  "nghttp2": "1.64.0",
-  "openssl": "3.5.2",
-  "simdjson": "3.13.0",
+  "nghttp2": "1.69.0",
+  "openssl": "3.5.9",
+  "simdjson": "4.5.0",
   "simdutf": "6.4.2",
-  "sqlite": "3.50.4",
-  "tz": "2025b",
-  "undici": "6.21.2",
-  "unicode": "16.0",
+  "sqlite": "3.53.4",
+  "tz": "2026e",
+  "undici": "6.29.1",
+  "unicode": "17.0",
   "uv": "1.51.0",
   "uvwasi": "0.0.23",
-  "v8": "12.4.254.21-node.33",
-  "zlib": "1.3.1-470d3a2",
+  "v8": "12.4.254.21-node.57",
+  "zlib": "1.3.1-e00f703",
   "zstd": "1.5.7"
  },
  "release": {
   "name": "node",
   "lts": "Jod",
-  "sourceUrl": "https://nodejs.org/download/release/v22.20.0/node-v22.20.0.tar.gz",
-  "headersUrl": "https://nodejs.org/download/release/v22.20.0/node-v22.20.0-headers.tar.gz"
+  "sourceUrl": "https://nodejs.org/download/release/v22.23.4/node-v22.23.4.tar.gz",
+  "headersUrl": "https://nodejs.org/download/release/v22.23.4/node-v22.23.4-headers.tar.gz"
  },
  "features": {
   "inspector": true,
@@ -49,96 +49,46 @@
   "typescript": "strip"
  },
  "config": {
-  "target_defaults": {
-   "cflags": [],
-   "configurations": {
-    "Debug": {
-     "v8_enable_v8_checks": 0,
-     "variables": {}
-    },
-    "Release": {
-     "v8_enable_v8_checks": 1,
-     "variables": {}
-    }
-   },
-   "default_configuration": "Release",
-   "defines": [
-    "NODE_OPENSSL_CONF_NAME=nodejs_conf",
-    "ICU_NO_USER_DATA_OVERRIDE"
-   ],
-   "include_dirs": [],
-   "libraries": []
-  },
   "variables": {
-   "asan": 0,
+   "use_ccache_win": 0,
    "clang": 0,
+   "llvm_version": "0.0",
+   "gas_version": "2.35",
+   "node_prefix": "/",
+   "node_install_npm": true,
+   "node_install_corepack": true,
    "control_flow_guard": false,
-   "coverage": false,
-   "dcheck_always_on": 0,
-   "debug_nghttp2": false,
+   "node_use_amaro": true,
    "debug_node": false,
-   "enable_lto": false,
+   "error_on_warn": false,
+   "suppress_all_error_on_warn": false,
+   "use_prefix_to_find_headers": false,
+   "host_arch": "x64",
+   "target_arch": "x64",
+   "node_byteorder": "little",
+   "want_separate_host_toolset": 0,
+   "node_use_node_snapshot": true,
+   "node_use_node_code_cache": true,
+   "node_write_snapshot_as_array_literals": false,
+   "node_enable_v8_vtunejit": false,
    "enable_pgo_generate": false,
    "enable_pgo_use": false,
-   "error_on_warn": false,
-   "force_dynamic_crt": 0,
-   "gas_version": "2.35",
-   "host_arch": "x64",
-   "icu_data_in": "../../deps/icu-tmp/icudt77l.dat",
-   "icu_endianness": "l",
-   "icu_gyp_path": "tools/icu/icu-generic.gyp",
-   "icu_path": "deps/icu-small",
-   "icu_small": false,
-   "icu_ver_major": "77",
-   "libdir": "lib",
-   "llvm_version": "0.0",
-   "napi_build_version": "10",
-   "node_builtin_shareable_builtins": [
-    "deps/cjs-module-lexer/lexer.js",
-    "deps/cjs-module-lexer/dist/lexer.js",
-    "deps/undici/undici.js",
-    "deps/amaro/dist/index.js"
-   ],
-   "node_byteorder": "little",
-   "node_cctest_sources": [
-    "src/node_snapshot_stub.cc",
-    "test/cctest/inspector/test_node_protocol.cc",
-    "test/cctest/node_test_fixture.cc",
-    "test/cctest/test_aliased_buffer.cc",
-    "test/cctest/test_base64.cc",
-    "test/cctest/test_base_object_ptr.cc",
-    "test/cctest/test_cppgc.cc",
-    "test/cctest/test_crypto_clienthello.cc",
-    "test/cctest/test_dataqueue.cc",
-    "test/cctest/test_environment.cc",
-    "test/cctest/test_inspector_socket.cc",
-    "test/cctest/test_inspector_socket_server.cc",
-    "test/cctest/test_json_utils.cc",
-    "test/cctest/test_linked_binding.cc",
-    "test/cctest/test_node_api.cc",
-    "test/cctest/test_node_crypto.cc",
-    "test/cctest/test_node_crypto_env.cc",
-    "test/cctest/test_node_postmortem_metadata.cc",
-    "test/cctest/test_node_task_runner.cc",
-    "test/cctest/test_path.cc",
-    "test/cctest/test_per_process.cc",
-    "test/cctest/test_platform.cc",
-    "test/cctest/test_quic_cid.cc",
-    "test/cctest/test_quic_error.cc",
-    "test/cctest/test_quic_tokens.cc",
-    "test/cctest/test_report.cc",
-    "test/cctest/test_sockaddr.cc",
-    "test/cctest/test_traced_value.cc",
-    "test/cctest/test_util.cc",
-    "test/cctest/node_test_fixture.h"
-   ],
+   "enable_lto": false,
+   "single_executable_application": true,
+   "node_with_ltcg": false,
+   "node_tag": "",
+   "node_release_urlbase": "https://nodejs.org/download/release/",
    "node_debug_lib": false,
-   "node_enable_d8": false,
-   "node_enable_v8_vtunejit": false,
-   "node_enable_v8windbg": false,
-   "node_fipsinstall": false,
-   "node_install_corepack": true,
-   "node_install_npm": true,
+   "debug_nghttp2": false,
+   "node_no_browser_globals": false,
+   "node_shared": false,
+   "libdir": "lib",
+   "node_module_version": 127,
+   "shlib_suffix": "so.127",
+   "asan": 0,
+   "ubsan": 0,
+   "coverage": false,
+   "node_target_type": "executable",
    "node_library_files": [
     "lib/_http_agent.js",
     "lib/_http_client.js",
@@ -242,6 +192,7 @@
     "lib/internal/encoding.js",
     "lib/internal/error_serdes.js",
     "lib/internal/errors.js",
+    "lib/internal/errors/error_source.js",
     "lib/internal/event_target.js",
     "lib/internal/events/abort_listener.js",
     "lib/internal/events/symbols.js",
@@ -401,8 +352,10 @@
     "lib/internal/test_runner/tests_stream.js",
     "lib/internal/test_runner/utils.js",
     "lib/internal/timers.js",
+    "lib/internal/tls/common.js",
     "lib/internal/tls/secure-context.js",
     "lib/internal/tls/secure-pair.js",
+    "lib/internal/tls/wrap.js",
     "lib/internal/trace_events_async_hooks.js",
     "lib/internal/tty.js",
     "lib/internal/url.js",
@@ -479,80 +432,129 @@
     "lib/worker_threads.js",
     "lib/zlib.js"
    ],
-   "node_module_version": 127,
-   "node_no_browser_globals": false,
-   "node_prefix": "/",
-   "node_release_urlbase": "https://nodejs.org/download/release/",
-   "node_section_ordering_info": "",
-   "node_shared": false,
-   "node_shared_ada": false,
-   "node_shared_brotli": false,
-   "node_shared_cares": false,
+   "node_cctest_sources": [
+    "src/node_snapshot_stub.cc",
+    "test/cctest/inspector/test_network_requests_buffer.cc",
+    "test/cctest/inspector/test_node_protocol.cc",
+    "test/cctest/node_test_fixture.cc",
+    "test/cctest/test_aliased_buffer.cc",
+    "test/cctest/test_base64.cc",
+    "test/cctest/test_base_object_ptr.cc",
+    "test/cctest/test_cppgc.cc",
+    "test/cctest/test_crypto_clienthello.cc",
+    "test/cctest/test_dataqueue.cc",
+    "test/cctest/test_environment.cc",
+    "test/cctest/test_inspector_socket.cc",
+    "test/cctest/test_inspector_socket_server.cc",
+    "test/cctest/test_json_utils.cc",
+    "test/cctest/test_linked_binding.cc",
+    "test/cctest/test_node_api.cc",
+    "test/cctest/test_node_crypto.cc",
+    "test/cctest/test_node_crypto_env.cc",
+    "test/cctest/test_node_postmortem_metadata.cc",
+    "test/cctest/test_node_task_runner.cc",
+    "test/cctest/test_path.cc",
+    "test/cctest/test_per_process.cc",
+    "test/cctest/test_platform.cc",
+    "test/cctest/test_quic_cid.cc",
+    "test/cctest/test_quic_error.cc",
+    "test/cctest/test_quic_tokens.cc",
+    "test/cctest/test_report.cc",
+    "test/cctest/test_sockaddr.cc",
+    "test/cctest/test_traced_value.cc",
+    "test/cctest/test_util.cc",
+    "test/cctest/node_test_fixture.h"
+   ],
+   "napi_build_version": "10",
+   "node_shared_zlib": false,
    "node_shared_http_parser": false,
    "node_shared_libuv": false,
+   "node_shared_ada": false,
+   "node_shared_simdjson": false,
+   "node_shared_simdutf": false,
+   "node_shared_brotli": false,
+   "node_shared_cares": false,
    "node_shared_nghttp2": false,
    "node_shared_nghttp3": false,
    "node_shared_ngtcp2": false,
-   "node_shared_openssl": false,
-   "node_shared_simdjson": false,
-   "node_shared_simdutf": false,
+   "node_use_sqlite": true,
    "node_shared_sqlite": false,
    "node_shared_uvwasi": false,
-   "node_shared_zlib": false,
    "node_shared_zstd": false,
-   "node_tag": "",
-   "node_target_type": "executable",
-   "node_use_amaro": true,
-   "node_use_bundled_v8": true,
-   "node_use_node_code_cache": true,
-   "node_use_node_snapshot": true,
-   "node_use_openssl": true,
-   "node_use_sqlite": true,
-   "node_use_v8_platform": true,
-   "node_with_ltcg": false,
-   "node_without_node_options": false,
-   "node_write_snapshot_as_array_literals": false,
-   "openssl_is_fips": false,
-   "openssl_quic": false,
-   "ossfuzz": false,
-   "shlib_suffix": "so.127",
-   "single_executable_application": true,
-   "suppress_all_error_on_warn": false,
-   "target_arch": "x64",
-   "ubsan": 0,
-   "use_ccache_win": 0,
-   "use_prefix_to_find_headers": false,
-   "v8_enable_31bit_smis_on_64bit_arch": 0,
-   "v8_enable_extensible_ro_snapshot": 0,
-   "v8_enable_external_code_space": 0,
-   "v8_enable_gdbjit": 0,
-   "v8_enable_hugepage": 0,
-   "v8_enable_i18n_support": 1,
-   "v8_enable_inspector": 1,
+   "v8_enable_webassembly": 1,
    "v8_enable_javascript_promise_hooks": 1,
    "v8_enable_lite_mode": 0,
-   "v8_enable_maglev": 0,
+   "v8_enable_gdbjit": 0,
+   "v8_optimized_debug": 1,
+   "dcheck_always_on": 0,
    "v8_enable_object_print": 1,
+   "v8_random_seed": 0,
+   "v8_promise_internal_field_count": 1,
+   "v8_use_siphash": 1,
+   "v8_enable_maglev": 0,
    "v8_enable_pointer_compression": 0,
-   "v8_enable_pointer_compression_shared_cage": 0,
    "v8_enable_sandbox": 0,
+   "v8_enable_pointer_compression_shared_cage": 0,
+   "v8_enable_external_code_space": 0,
+   "v8_enable_31bit_smis_on_64bit_arch": 0,
    "v8_enable_shared_ro_heap": 1,
+   "v8_enable_extensible_ro_snapshot": 0,
+   "v8_trace_maps": 0,
+   "node_use_v8_platform": true,
+   "node_use_bundled_v8": true,
+   "force_dynamic_crt": 0,
+   "node_enable_d8": false,
+   "node_enable_v8windbg": false,
+   "v8_enable_hugepage": 0,
    "v8_enable_short_builtin_calls": 1,
    "v8_enable_wasm_simd256_revec": 1,
-   "v8_enable_webassembly": 1,
-   "v8_optimized_debug": 1,
-   "v8_promise_internal_field_count": 1,
-   "v8_random_seed": 0,
-   "v8_trace_maps": 0,
-   "v8_use_siphash": 1,
-   "want_separate_host_toolset": 0
+   "node_use_openssl": true,
+   "node_shared_openssl": false,
+   "openssl_is_fips": false,
+   "node_fipsinstall": false,
+   "node_without_node_options": false,
+   "openssl_quic": false,
+   "icu_small": false,
+   "v8_enable_i18n_support": 1,
+   "icu_gyp_path": "tools/icu/icu-generic.gyp",
+   "icu_path": "deps/icu-small",
+   "icu_ver_major": "78",
+   "icu_endianness": "l",
+   "icu_data_in": "../../deps/icu-tmp/icudt78l.dat",
+   "v8_enable_inspector": 1,
+   "node_section_ordering_info": "",
+   "node_builtin_shareable_builtins": [
+    "deps/cjs-module-lexer/lexer.js",
+    "deps/cjs-module-lexer/dist/lexer.js",
+    "deps/undici/undici.js",
+    "deps/amaro/dist/index.js"
+   ],
+   "ossfuzz": false
+  },
+  "target_defaults": {
+   "include_dirs": [],
+   "libraries": [],
+   "defines": [
+    "NODE_OPENSSL_CONF_NAME=nodejs_conf",
+    "ICU_NO_USER_DATA_OVERRIDE"
+   ],
+   "cflags": [],
+   "default_configuration": "Release",
+   "configurations": {
+    "Release": {
+     "variables": {},
+     "v8_enable_v8_checks": 1
+    },
+    "Debug": {
+     "variables": {},
+     "v8_enable_v8_checks": 0
+    }
+   }
   }
  },
  "optionValues": {
   "--run": "",
   "--experimental-sea-config": "",
-  "--max-http-header-size": 16384,
-  "--redirect-warnings": "",
   "--no-heap-prof": true,
   "--heap-prof": false,
   "--test-timeout": 0,
@@ -569,6 +571,10 @@
   "--cpu-prof-interval": 1000,
   "--no-cpu-prof": true,
   "--cpu-prof": false,
+  "--no-tls-max-v1.3": true,
+  "--tls-max-v1.3": false,
+  "--no-test-udp-no-try-send": true,
+  "--test-udp-no-try-send": false,
   "--no-trace-tls": true,
   "--trace-tls": false,
   "--no-permission": true,
@@ -576,6 +582,9 @@
   "--experimental-loader": [],
   "--no-experimental-addon-modules": true,
   "--experimental-addon-modules": false,
+  "--test-skip-pattern": [],
+  "--no-use-env-proxy": true,
+  "--use-env-proxy": false,
   "--test-coverage-functions": 0,
   "--heapsnapshot-signal": "",
   "--test-coverage-exclude": [],
@@ -593,7 +602,6 @@
   "--experimental-fetch": true,
   "--no-trace-promises": true,
   "--trace-promises": false,
-  "--test-skip-pattern": [],
   "--test-concurrency": 0,
   "--no-disable-sigusr1": true,
   "--disable-sigusr1": false,
@@ -620,15 +628,9 @@
   "--experimental-async-context-frame": false,
   "--no-experimental-vm-modules": true,
   "--experimental-vm-modules": false,
-  "--no-interactive": true,
-  "--interactive": false,
   "--inspect-publish-uid": "stderr,http",
   "--no-inspect-brk": true,
   "--inspect-brk": false,
-  "--no-experimental-require-module": false,
-  "--experimental-require-module": true,
-  "--no-experimental-default-config-file": true,
-  "--experimental-default-config-file": false,
   "--no-check": true,
   "--check": false,
   "--no-inspect": true,
@@ -641,18 +643,22 @@
   "--report-uncaught-exception": false,
   "--cpu-prof-name": "",
   "--env-file-if-exists": "",
+  "--no-track-heap-objects": true,
+  "--track-heap-objects": false,
+  "--input-type": "",
+  "--no-enable-source-maps": true,
+  "--enable-source-maps": false,
+  "--no-experimental-transform-types": true,
+  "--experimental-transform-types": false,
+  "--no-inspect-wait": true,
+  "--inspect-wait": false,
+  "--max-old-space-size-percentage": "",
   "--build-snapshot-config": "",
   "--no-test-only": true,
   "--test-only": false,
   "--dns-result-order": "",
   "--no-network-family-autoselection": false,
   "--network-family-autoselection": true,
-  "--report-signal": "SIGUSR2",
-  "--abort-on-uncaught-exception": false,
-  "--no-test-force-exit": true,
-  "--test-force-exit": false,
-  "--no-deprecation": false,
-  "--deprecation": true,
   "--no-throw-deprecation": true,
   "--throw-deprecation": false,
   "--no-trace-deprecation": true,
@@ -669,6 +675,7 @@
   "--no-allow-worker": true,
   "--allow-worker": false,
   "--secure-heap-min": 2,
+  "--abort-on-uncaught-exception": false,
   "--no-disable-wasm-trap-handler": true,
   "--disable-wasm-trap-handler": false,
   "--snapshot-blob": "",
@@ -688,7 +695,6 @@
   "--disable-proto": "",
   "--no-zero-fill-buffers": true,
   "--zero-fill-buffers": false,
-  "--require": [],
   "--no-experimental-webstorage": true,
   "--experimental-webstorage": false,
   "--no-openssl-legacy-provider": true,
@@ -698,11 +704,21 @@
   "--force-fips": false,
   "--no-experimental-shadow-realm": true,
   "--experimental-shadow-realm": false,
+  "--no-preserve-symlinks": true,
+  "--preserve-symlinks": false,
+  "--no-completion-bash": true,
+  "--completion-bash": false,
   "--test-reporter-destination": [],
   "--no-trace-env-js-stack": true,
   "--trace-env-js-stack": false,
   "--trace-event-file-pattern": "node_trace.${rotation}.log",
   "--trace-event-categories": "",
+  "--no-trace-env": true,
+  "--trace-env": false,
+  "--experimental-test-isolation": "process",
+  "--test-coverage-lines": 0,
+  "--no-experimental-strip-types": false,
+  "--experimental-strip-types": true,
   "--no-v8-options": true,
   "--v8-options": false,
   "--network-family-autoselection-attempt-timeout": 250,
@@ -758,26 +774,20 @@
   "--no-verify-base-objects": true,
   "--verify-base-objects": false,
   "--use-largepages": "off",
-  "--test-reporter": [],
   "--no-experimental-eventsource": true,
   "--experimental-eventsource": false,
+  "--test-reporter": [],
   "--secure-heap": 0,
-  "--experimental-test-isolation": "process",
-  "--no-trace-env": true,
-  "--trace-env": false,
-  "--no-experimental-strip-types": false,
-  "--experimental-strip-types": true,
-  "--test-coverage-lines": 0,
   "--no-experimental-repl-await": false,
   "--experimental-repl-await": true,
   "--openssl-config": "",
   "--no-trace-uncaught": true,
   "--trace-uncaught": false,
-  "--nohas_env_file_string]": true,
-  "[has_env_file_string]": false,
   "--no-trace-warnings": true,
   "--trace-warnings": false,
   "--watch-kill-signal": "SIGTERM",
+  "--nohas_env_file_string]": true,
+  "[has_env_file_string]": false,
   "--no-prof-process": true,
   "--prof-process": false,
   "--no-global-search-paths": false,
@@ -794,13 +804,19 @@
   "--test": false,
   "--localstorage-file": "",
   "--experimental-config-file": "",
-  "--no-track-heap-objects": true,
-  "--track-heap-objects": false,
+  "--redirect-warnings": "",
+  "--max-http-header-size": 16384,
+  "--no-experimental-default-config-file": true,
+  "--experimental-default-config-file": false,
+  "--no-experimental-require-module": false,
+  "--experimental-require-module": true,
   "--heap-prof-name": "",
   "--no-version": true,
   "--version": false,
   "--no-frozen-intrinsics": true,
   "--frozen-intrinsics": false,
+  "--no-interactive": true,
+  "--interactive": false,
   "--no-watch-preserve-output": true,
   "--watch-preserve-output": false,
   "--no-insecure-http-parser": true,
@@ -811,41 +827,32 @@
   "--report-exclude-env": false,
   "--no-expose-internals": true,
   "--expose-internals": false,
-  "--no-completion-bash": true,
-  "--completion-bash": false,
-  "--no-preserve-symlinks": true,
-  "--preserve-symlinks": false,
-  "--no-test-udp-no-try-send": true,
-  "--test-udp-no-try-send": false,
-  "--no-tls-max-v1.3": true,
-  "--tls-max-v1.3": false,
+  "--require": [],
   "--tls-keylog": "",
   "--no-pending-deprecation": true,
   "--pending-deprecation": false,
   "--no-tls-min-v1.2": true,
   "--tls-min-v1.2": false,
+  "--no-tls-max-v1.2": true,
+  "--tls-max-v1.2": false,
   "--stack-trace-limit": 10,
   "--no-extra-info-on-fatal-exception": false,
   "--extra-info-on-fatal-exception": true,
   "--no-debug-brk": true,
   "--debug-brk": false,
-  "--no-tls-max-v1.2": true,
-  "--tls-max-v1.2": false,
-  "--no-enable-source-maps": true,
-  "--enable-source-maps": false,
-  "--input-type": "",
   "--disable-warning": [],
   "--heapsnapshot-near-heap-limit": 0,
   "--no-force-context-aware": true,
   "--force-context-aware": false,
-  "--no-inspect-wait": true,
-  "--inspect-wait": false,
-  "--no-experimental-transform-types": true,
-  "--experimental-transform-types": false,
   "--no-tls-min-v1.0": true,
   "--tls-min-v1.0": false,
   "--no-inspect-brk-node": true,
-  "--inspect-brk-node": false
+  "--inspect-brk-node": false,
+  "--no-deprecation": false,
+  "--deprecation": true,
+  "--no-test-force-exit": true,
+  "--test-force-exit": false,
+  "--report-signal": "SIGUSR2"
  },
  "optionInfo": {
   "options": [
@@ -863,24 +870,6 @@
     {
      "helpText": "Generate a blob that can be embedded into the single executable application",
      "envVarSettings": 1,
-     "type": 5,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--max-http-header-size",
-    {
-     "helpText": "set the maximum size of HTTP headers (default: 16384 (16KB))",
-     "envVarSettings": 0,
-     "type": 4,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--redirect-warnings",
-    {
-     "helpText": "write warnings to file instead of stderr",
-     "envVarSettings": 0,
      "type": 5,
      "defaultIsTrue": false
     }
@@ -985,6 +974,24 @@
     }
    ],
    [
+    "--tls-max-v1.3",
+    {
+     "helpText": "set default TLS maximum to TLSv1.3 (default: TLSv1.3)",
+     "envVarSettings": 0,
+     "type": 2,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--test-udp-no-try-send",
+    {
+     "helpText": "",
+     "envVarSettings": 1,
+     "type": 2,
+     "defaultIsTrue": false
+    }
+   ],
+   [
     "--trace-tls",
     {
      "helpText": "prints TLS packet trace information to stderr",
@@ -1015,6 +1022,42 @@
     "--experimental-addon-modules",
     {
      "helpText": "experimental import support for addons",
+     "envVarSettings": 0,
+     "type": 2,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--experimental-report",
+    {
+     "helpText": "",
+     "envVarSettings": 0,
+     "type": 0,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--experimental-modules",
+    {
+     "helpText": "",
+     "envVarSettings": 0,
+     "type": 0,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--test-skip-pattern",
+    {
+     "helpText": "run tests whose name do not match this regular expression",
+     "envVarSettings": 0,
+     "type": 7,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--use-env-proxy",
+    {
+     "helpText": "parse proxy settings from HTTP_PROXY/HTTPS_PROXY/NO_PROXYenvironment variables and apply the setting in global HTTP/HTTPS clients",
      "envVarSettings": 0,
      "type": 2,
      "defaultIsTrue": false
@@ -1125,33 +1168,6 @@
      "helpText": "",
      "envVarSettings": 0,
      "type": 0,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--experimental-report",
-    {
-     "helpText": "",
-     "envVarSettings": 0,
-     "type": 0,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--experimental-modules",
-    {
-     "helpText": "",
-     "envVarSettings": 0,
-     "type": 0,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--test-skip-pattern",
-    {
-     "helpText": "run tests whose name do not match this regular expression",
-     "envVarSettings": 0,
-     "type": 7,
      "defaultIsTrue": false
     }
    ],
@@ -1300,24 +1316,6 @@
     }
    ],
    [
-    "--experimental-wasi-unstable-preview1",
-    {
-     "helpText": "",
-     "envVarSettings": 0,
-     "type": 0,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--interactive",
-    {
-     "helpText": "always enter the REPL even if stdin does not appear to be a terminal",
-     "envVarSettings": 1,
-     "type": 2,
-     "defaultIsTrue": false
-    }
-   ],
-   [
     "--inspect-publish-uid",
     {
      "helpText": "comma separated list of destinations for inspector uid(default: stderr,http)",
@@ -1331,24 +1329,6 @@
     {
      "helpText": "activate inspector on host:port and break at start of user script",
      "envVarSettings": 0,
-     "type": 2,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--experimental-require-module",
-    {
-     "helpText": "Allow loading synchronous ES Modules in require().",
-     "envVarSettings": 0,
-     "type": 2,
-     "defaultIsTrue": true
-    }
-   ],
-   [
-    "--experimental-default-config-file",
-    {
-     "helpText": "set config file from default config file",
-     "envVarSettings": 1,
      "type": 2,
      "defaultIsTrue": false
     }
@@ -1408,6 +1388,87 @@
     }
    ],
    [
+    "--experimental-top-level-await",
+    {
+     "helpText": "",
+     "envVarSettings": 0,
+     "type": 0,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--track-heap-objects",
+    {
+     "helpText": "track heap object allocations for heap snapshots",
+     "envVarSettings": 0,
+     "type": 2,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--jitless",
+    {
+     "helpText": "disable runtime allocation of executable memory",
+     "envVarSettings": 0,
+     "type": 1,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--input-type",
+    {
+     "helpText": "set module type for string input",
+     "envVarSettings": 0,
+     "type": 5,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--enable-source-maps",
+    {
+     "helpText": "Source Map V3 support for stack traces",
+     "envVarSettings": 0,
+     "type": 2,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--experimental-transform-types",
+    {
+     "helpText": "enable transformation of TypeScript-onlysyntax into JavaScript code",
+     "envVarSettings": 0,
+     "type": 2,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--inspect-wait",
+    {
+     "helpText": "activate inspector on host:port and wait for debugger to be attached",
+     "envVarSettings": 0,
+     "type": 2,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--perf-prof",
+    {
+     "helpText": "",
+     "envVarSettings": 0,
+     "type": 1,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--max-old-space-size-percentage",
+    {
+     "helpText": "set V8's max old space size as a percentage of available memory (e.g., '50%'). Takes precedence over --max-old-space-size.",
+     "envVarSettings": 0,
+     "type": 5,
+     "defaultIsTrue": false
+    }
+   ],
+   [
     "--build-snapshot-config",
     {
      "helpText": "Generate a snapshot blob when the process exits using aJSON configuration in the specified path.",
@@ -1438,69 +1499,6 @@
     "--network-family-autoselection",
     {
      "helpText": "Disable network address family autodetection algorithm",
-     "envVarSettings": 0,
-     "type": 2,
-     "defaultIsTrue": true
-    }
-   ],
-   [
-    "--report-signal",
-    {
-     "helpText": "causes diagnostic report to be produced on provided signal, unsupported in Windows. (default: SIGUSR2)",
-     "envVarSettings": 0,
-     "type": 5,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--abort-on-uncaught-exception",
-    {
-     "helpText": "aborting instead of exiting causes a core file to be generated for analysis",
-     "envVarSettings": 0,
-     "type": 1,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--max-old-space-size",
-    {
-     "helpText": "",
-     "envVarSettings": 0,
-     "type": 1,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--enable-etw-stack-walking",
-    {
-     "helpText": "provides heap data to ETW Windows native tracing",
-     "envVarSettings": 0,
-     "type": 1,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--perf-basic-prof",
-    {
-     "helpText": "",
-     "envVarSettings": 0,
-     "type": 1,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--test-force-exit",
-    {
-     "helpText": "force test runner to exit upon completion",
-     "envVarSettings": 1,
-     "type": 2,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--deprecation",
-    {
-     "helpText": "silence deprecation warnings",
      "envVarSettings": 0,
      "type": 2,
      "defaultIsTrue": true
@@ -1593,6 +1591,15 @@
      "helpText": "minimum allocation size from the OpenSSL secure heap",
      "envVarSettings": 0,
      "type": 3,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--abort-on-uncaught-exception",
+    {
+     "helpText": "aborting instead of exiting causes a core file to be generated for analysis",
+     "envVarSettings": 0,
+     "type": 1,
      "defaultIsTrue": false
     }
    ],
@@ -1723,24 +1730,6 @@
     }
    ],
    [
-    "--require",
-    {
-     "helpText": "CommonJS module to preload (option can be repeated)",
-     "envVarSettings": 0,
-     "type": 7,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--experimental-top-level-await",
-    {
-     "helpText": "",
-     "envVarSettings": 0,
-     "type": 0,
-     "defaultIsTrue": false
-    }
-   ],
-   [
     "--experimental-webstorage",
     {
      "helpText": "experimental Web Storage API",
@@ -1786,6 +1775,51 @@
     }
    ],
    [
+    "--max-old-space-size",
+    {
+     "helpText": "",
+     "envVarSettings": 0,
+     "type": 1,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--enable-etw-stack-walking",
+    {
+     "helpText": "provides heap data to ETW Windows native tracing",
+     "envVarSettings": 0,
+     "type": 1,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--perf-basic-prof",
+    {
+     "helpText": "",
+     "envVarSettings": 0,
+     "type": 1,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--preserve-symlinks",
+    {
+     "helpText": "preserve symbolic links when resolving",
+     "envVarSettings": 0,
+     "type": 2,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--completion-bash",
+    {
+     "helpText": "print source-able bash completion script",
+     "envVarSettings": 1,
+     "type": 2,
+     "defaultIsTrue": false
+    }
+   ],
+   [
     "--test-reporter-destination",
     {
      "helpText": "report given reporter to the given destination",
@@ -1819,6 +1853,42 @@
      "envVarSettings": 0,
      "type": 5,
      "defaultIsTrue": false
+    }
+   ],
+   [
+    "--trace-env",
+    {
+     "helpText": "Print accesses to the environment variables",
+     "envVarSettings": 0,
+     "type": 2,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--experimental-test-isolation",
+    {
+     "helpText": "configures the type of test isolation used in the test runner",
+     "envVarSettings": 1,
+     "type": 5,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--test-coverage-lines",
+    {
+     "helpText": "the line coverage minimum threshold",
+     "envVarSettings": 0,
+     "type": 4,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--experimental-strip-types",
+    {
+     "helpText": "Experimental type-stripping for TypeScript files.",
+     "envVarSettings": 0,
+     "type": 2,
+     "defaultIsTrue": true
     }
    ],
    [
@@ -2191,15 +2261,6 @@
     }
    ],
    [
-    "--test-reporter",
-    {
-     "helpText": "report test output using the given reporter",
-     "envVarSettings": 0,
-     "type": 7,
-     "defaultIsTrue": false
-    }
-   ],
-   [
     "--experimental-eventsource",
     {
      "helpText": "experimental EventSource API",
@@ -2209,47 +2270,20 @@
     }
    ],
    [
+    "--test-reporter",
+    {
+     "helpText": "report test output using the given reporter",
+     "envVarSettings": 0,
+     "type": 7,
+     "defaultIsTrue": false
+    }
+   ],
+   [
     "--secure-heap",
     {
      "helpText": "total size of the OpenSSL secure heap",
      "envVarSettings": 0,
      "type": 3,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--experimental-test-isolation",
-    {
-     "helpText": "configures the type of test isolation used in the test runner",
-     "envVarSettings": 1,
-     "type": 5,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--trace-env",
-    {
-     "helpText": "Print accesses to the environment variables",
-     "envVarSettings": 0,
-     "type": 2,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--experimental-strip-types",
-    {
-     "helpText": "Experimental type-stripping for TypeScript files.",
-     "envVarSettings": 0,
-     "type": 2,
-     "defaultIsTrue": true
-    }
-   ],
-   [
-    "--test-coverage-lines",
-    {
-     "helpText": "the line coverage minimum threshold",
-     "envVarSettings": 0,
-     "type": 4,
      "defaultIsTrue": false
     }
    ],
@@ -2281,15 +2315,6 @@
     }
    ],
    [
-    "[has_env_file_string]",
-    {
-     "helpText": "",
-     "envVarSettings": 1,
-     "type": 2,
-     "defaultIsTrue": false
-    }
-   ],
-   [
     "--trace-warnings",
     {
      "helpText": "show stack traces on process warnings",
@@ -2304,6 +2329,15 @@
      "helpText": "kill signal to send to the process on watch mode restarts(default: SIGTERM)",
      "envVarSettings": 0,
      "type": 5,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "[has_env_file_string]",
+    {
+     "helpText": "",
+     "envVarSettings": 1,
+     "type": 2,
      "defaultIsTrue": false
     }
    ],
@@ -2407,12 +2441,39 @@
     }
    ],
    [
-    "--track-heap-objects",
+    "--redirect-warnings",
     {
-     "helpText": "track heap object allocations for heap snapshots",
+     "helpText": "write warnings to file instead of stderr",
      "envVarSettings": 0,
+     "type": 5,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--max-http-header-size",
+    {
+     "helpText": "set the maximum size of HTTP headers (default: 16384 (16KB))",
+     "envVarSettings": 0,
+     "type": 4,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--experimental-default-config-file",
+    {
+     "helpText": "set config file from default config file",
+     "envVarSettings": 1,
      "type": 2,
      "defaultIsTrue": false
+    }
+   ],
+   [
+    "--experimental-require-module",
+    {
+     "helpText": "Allow loading synchronous ES Modules in require().",
+     "envVarSettings": 0,
+     "type": 2,
+     "defaultIsTrue": true
     }
    ],
    [
@@ -2448,6 +2509,24 @@
      "helpText": "",
      "envVarSettings": 1,
      "type": 1,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--interactive",
+    {
+     "helpText": "always enter the REPL even if stdin does not appear to be a terminal",
+     "envVarSettings": 1,
+     "type": 2,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--experimental-wasi-unstable-preview1",
+    {
+     "helpText": "",
+     "envVarSettings": 0,
+     "type": 0,
      "defaultIsTrue": false
     }
    ],
@@ -2506,38 +2585,11 @@
     }
    ],
    [
-    "--completion-bash",
+    "--require",
     {
-     "helpText": "print source-able bash completion script",
-     "envVarSettings": 1,
-     "type": 2,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--preserve-symlinks",
-    {
-     "helpText": "preserve symbolic links when resolving",
+     "helpText": "CommonJS module to preload (option can be repeated)",
      "envVarSettings": 0,
-     "type": 2,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--test-udp-no-try-send",
-    {
-     "helpText": "",
-     "envVarSettings": 1,
-     "type": 2,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--tls-max-v1.3",
-    {
-     "helpText": "set default TLS maximum to TLSv1.3 (default: TLSv1.3)",
-     "envVarSettings": 0,
-     "type": 2,
+     "type": 7,
      "defaultIsTrue": false
     }
    ],
@@ -2569,6 +2621,15 @@
     }
    ],
    [
+    "--tls-max-v1.2",
+    {
+     "helpText": "set default TLS maximum to TLSv1.2 (default: TLSv1.3)",
+     "envVarSettings": 0,
+     "type": 2,
+     "defaultIsTrue": false
+    }
+   ],
+   [
     "--stack-trace-limit",
     {
      "helpText": "",
@@ -2592,42 +2653,6 @@
      "helpText": "",
      "envVarSettings": 1,
      "type": 2,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--tls-max-v1.2",
-    {
-     "helpText": "set default TLS maximum to TLSv1.2 (default: TLSv1.3)",
-     "envVarSettings": 0,
-     "type": 2,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--enable-source-maps",
-    {
-     "helpText": "Source Map V3 support for stack traces",
-     "envVarSettings": 0,
-     "type": 2,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--jitless",
-    {
-     "helpText": "disable runtime allocation of executable memory",
-     "envVarSettings": 0,
-     "type": 1,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--input-type",
-    {
-     "helpText": "set module type for string input",
-     "envVarSettings": 0,
-     "type": 5,
      "defaultIsTrue": false
     }
    ],
@@ -2677,33 +2702,6 @@
     }
    ],
    [
-    "--inspect-wait",
-    {
-     "helpText": "activate inspector on host:port and wait for debugger to be attached",
-     "envVarSettings": 0,
-     "type": 2,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--experimental-transform-types",
-    {
-     "helpText": "enable transformation of TypeScript-onlysyntax into JavaScript code",
-     "envVarSettings": 0,
-     "type": 2,
-     "defaultIsTrue": false
-    }
-   ],
-   [
-    "--perf-prof",
-    {
-     "helpText": "",
-     "envVarSettings": 0,
-     "type": 1,
-     "defaultIsTrue": false
-    }
-   ],
-   [
     "--tls-min-v1.0",
     {
      "helpText": "set default TLS minimum to TLSv1.0 (default: TLSv1.2)",
@@ -2718,6 +2716,33 @@
      "helpText": "",
      "envVarSettings": 1,
      "type": 2,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--deprecation",
+    {
+     "helpText": "silence deprecation warnings",
+     "envVarSettings": 0,
+     "type": 2,
+     "defaultIsTrue": true
+    }
+   ],
+   [
+    "--test-force-exit",
+    {
+     "helpText": "force test runner to exit upon completion",
+     "envVarSettings": 1,
+     "type": 2,
+     "defaultIsTrue": false
+    }
+   ],
+   [
+    "--report-signal",
+    {
+     "helpText": "causes diagnostic report to be produced on provided signal, unsupported in Windows. (default: SIGUSR2)",
+     "envVarSettings": 0,
+     "type": 5,
      "defaultIsTrue": false
     }
    ]

@@ -1,4 +1,4 @@
-// Differential tests for internalBinding('crypto'): fixtures recorded from real Node 22.20.0 by
+// Differential tests for internalBinding('crypto'): fixtures recorded from real Node (the pinned version) by
 // test/fixtures-gen/crypto.mjs, replayed here through copies of lib's thin wrappers.
 
 import { test, after } from 'node:test';

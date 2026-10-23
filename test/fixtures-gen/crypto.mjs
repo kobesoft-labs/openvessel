@@ -1,5 +1,5 @@
 // Records what real Node does for internalBinding('crypto') consumers, for test/unit/bindings-crypto.test.ts.
-// Run with: npx -y node@22.20.0 --expose-internals --no-warnings test/fixtures-gen/crypto.mjs
+// Run with: npx -y node@<version in src/node/version.ts> --expose-internals --no-warnings test/fixtures-gen/crypto.mjs
 //
 // Cipher/hash/HMAC cases are "op scripts" (create, update, final, ...) executed here with the public
 // crypto module; the unit test replays the same scripts against our binding through a copy of lib's

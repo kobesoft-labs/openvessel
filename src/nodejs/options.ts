@@ -34,7 +34,11 @@ function expand(arg: string, next: string | undefined): { names: string[]; value
     return { names: ALIASES.get(name + ' <arg>')!.flatMap((a) => ALIASES.get(a) ?? [a]), consumedNext: false };
   }
   const al = ALIASES.get(name);
-  if (al) return { names: al.flatMap((a) => (a !== name && ALIASES.has(a) ? ALIASES.get(a)! : [a])), value, consumedNext: false };
+  if (al) {
+    // aliases chain: -p → --print, and "--print <arg>" → -pe → --print --eval
+    if (al.length === 1 && al[0] !== name && (ALIASES.has(al[0]) || ALIASES.has(al[0] + ' <arg>'))) return expand(al[0] + (value !== undefined ? `=${value}` : ''), next);
+    return { names: al.flatMap((a) => (a !== name && ALIASES.has(a) ? ALIASES.get(a)! : [a])), value, consumedNext: false };
+  }
   return { names: [name], value, consumedNext: false };
 }
 

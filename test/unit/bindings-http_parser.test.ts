@@ -1,4 +1,4 @@
-// Replays the byte streams recorded from real Node 22.20.0 (test/fixtures-gen/http_parser.mjs)
+// Replays the byte streams recorded from real Node (the pinned version) (test/fixtures-gen/http_parser.mjs)
 // against internalBinding('http_parser') and compares callbacks and execute() results.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -102,7 +102,7 @@ test('constants, methods and prototype match Node', () => {
   assert.equal(typeof HTTPParser.prototype.getAsyncId, 'function');
 });
 
-test('byte streams replay like Node 22.20.0', () => {
+test('byte streams replay like the pinned Node', () => {
   const failures: string[] = [];
   for (const c of fixtures.cases as any[]) {
     const got = runCase(c) as any[];

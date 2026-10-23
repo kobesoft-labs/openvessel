@@ -1,5 +1,5 @@
-// Records how real Node 22.20.0's internalBinding('http_parser') reacts to many byte streams.
-// Run: npx -y node@22.20.0 --expose-internals --no-warnings test/fixtures-gen/http_parser.mjs
+// Records how real Node (the pinned version)'s internalBinding('http_parser') reacts to many byte streams.
+// Run: npx -y node@<version in src/node/version.ts> --expose-internals --no-warnings test/fixtures-gen/http_parser.mjs
 // Writes test/unit/fixtures/http_parser.json, replayed by test/unit/bindings-http_parser.test.ts.
 import { createRequire } from 'node:module';
 import { writeFileSync, mkdirSync } from 'node:fs';

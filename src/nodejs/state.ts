@@ -56,6 +56,8 @@ export const S = {
   optionValues: {} as Record<string, unknown>,
   /** What the per_context scripts exported (DOMException, emitMessage, …). */
   perContextExports: {} as Record<string, any>,
+  /** Reads line `line` (1-based) of a file or builtin (node:…), for error source positions. */
+  sourceLine: null as null | ((file: string, line: number) => string | undefined),
   /** Handlers for messages the kernel posts to this worker, by message type. */
   kernelHandlers: new Map<string, (msg: any) => void>(),
 };

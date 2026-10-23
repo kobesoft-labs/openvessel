@@ -48,7 +48,22 @@ if (changed.length) {
 }
 
 // bindings: members and their kinds
-const kind = (v) => (v && typeof v === 'object' ? ('__fn' in v ? (v.proto ? `class(${v.proto.join(',')})` : 'function') : '__symbol' in v ? 'symbol' : '__typed' in v ? `${v.__typed}(${v.length})` : JSON.stringify(v).slice(0, 80)) : JSON.stringify(v));
+const kind = (v) => {
+  if (v && typeof v === 'object') {
+    if ('__fn' in v) return v.proto ? `class(${v.proto.join(',')})` : 'function';
+    if ('__symbol' in v) return 'symbol';
+    if ('__typed' in v) return `${v.__typed}(${v.length})`;
+    const j = JSON.stringify(v);
+    return j.length > 80 ? `object (${j.length} chars, hash ${hash(j)})` : j;
+  }
+  const j = JSON.stringify(v);
+  return typeof v === 'string' && j.length > 80 ? `string (${v.length} chars, hash ${hash(v)})` : j;
+};
+function hash(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(16);
+}
 out.push('## Bindings (C++ surface re-implemented in src/nodejs/bindings)', '');
 let bindingChanges = 0;
 for (const name of [...new Set([...Object.keys(cur.bindings), ...Object.keys(next.bindings)])].sort()) {

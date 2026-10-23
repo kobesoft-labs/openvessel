@@ -6,8 +6,8 @@
 // errno, signal and O_* values match what the kernel uses. Needs Docker.
 // Usage: node scripts/gen-node-data.mjs
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 const root = new URL('..', import.meta.url).pathname;
 const version = /NODE_VERSION = '([^']+)'/.exec(readFileSync(join(root, 'src/node/version.ts'), 'utf8'))[1];
@@ -99,6 +99,13 @@ const { bindings, natives, proc } = dumpNode(version);
 mkdirSync(join(root, 'vendor/node'), { recursive: true });
 mkdirSync(join(root, 'src/node/data'), { recursive: true });
 writeFileSync(join(root, 'vendor/node/natives.json'), JSON.stringify(natives));
+// the same sources as files, for reading and grepping (vendor/node/lib/<id>.js)
+rmSync(join(root, 'vendor/node/lib'), { recursive: true, force: true });
+for (const [id, src] of Object.entries(natives)) {
+  const file = join(root, 'vendor/node/lib', `${id}.js`);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, src);
+}
 writeFileSync(join(root, 'src/node/data/bindings.json'), JSON.stringify(bindings, null, 1));
 writeFileSync(join(root, 'src/node/data/process.json'), JSON.stringify(proc, null, 1));
 const license = execFileSync('curl', ['-fsSL', `https://raw.githubusercontent.com/nodejs/node/v${version}/LICENSE`], { maxBuffer: 1 << 26, encoding: 'utf8' });

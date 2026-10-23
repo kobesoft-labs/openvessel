@@ -443,9 +443,9 @@ class CcmMode implements AeadEngine {
     return pt;
   }
   final() {
-    // OpenSSL never computed a tag: final() fails and getAuthTag() later returns zeros
-    if (this.enc && !this.done) throw OSSL.tagNotSet();
     if (this.broken) throw FAIL;
+    // OpenSSL 3.5.9 (Node 22.23): with no update, encryption finishes as an empty message
+    if (this.enc && !this.done && this.update(new Uint8Array(0)) === null) throw FAIL;
     return new Uint8Array(0);
   }
   tag(len: number) {
@@ -487,6 +487,8 @@ class ChaChaPolyMode implements AeadEngine {
     }
   }
   aad(data: Uint8Array) {
+    // Node 22.23+ rejects AAD once text has gone through (ERR_CRYPTO_INVALID_STATE in lib)
+    if (this.ctLen > 0) return false;
     this.poly.update(data);
     this.aadLen += data.length;
     this.aadPending = true;

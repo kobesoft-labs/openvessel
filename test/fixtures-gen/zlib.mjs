@@ -1,13 +1,14 @@
 // Records how real Node's internalBinding('zlib') behaves, for test/unit/bindings-zlib.test.ts.
-//   npx -y node@22.20.0 --expose-internals --no-warnings test/fixtures-gen/zlib.mjs
+//   npx -y node@<version in src/node/version.ts> --expose-internals --no-warnings test/fixtures-gen/zlib.mjs
 // Writes test/unit/fixtures/zlib.json.
 
 import { createRequire } from 'node:module';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import fs, { writeFileSync, mkdirSync } from 'node:fs';
 import zlib from 'node:zlib';
 import { runSpec } from './zlib-driver.mjs';
 
-if (process.version !== 'v22.20.0') throw new Error(`run with Node v22.20.0 (got ${process.version})`);
+const NODE_VERSION = /NODE_VERSION = '([^']+)'/.exec(fs.readFileSync(new URL('../../src/node/version.ts', import.meta.url), 'utf8'))[1];
+if (process.version !== `v${NODE_VERSION}`) throw new Error(`run with Node v${NODE_VERSION} (got ${process.version})`);
 const require = createRequire(import.meta.url);
 const { internalBinding } = require('internal/test/binding');
 const binding = internalBinding('zlib');
@@ -405,6 +406,6 @@ const dest = new URL('../unit/fixtures/zlib.json', import.meta.url);
 mkdirSync(new URL('.', dest), { recursive: true });
 writeFileSync(dest, JSON.stringify(out));
 console.log(`${results.length} specs, ${crcCases.length} crc32 cases -> ${dest.pathname}`);
-// Node 22.20.0 asserts at teardown on Zstd handles whose init() threw before InitStream
+// Node (seen on 22.20.0) asserts at teardown on Zstd handles whose init() threw before InitStream
 // ("close before init"); the fixture is already written, so skip environment cleanup.
 process.reallyExit(0);

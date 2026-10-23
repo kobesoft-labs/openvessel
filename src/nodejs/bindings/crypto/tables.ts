@@ -1,4 +1,4 @@
-// Generated from Node v22.20.0 (OpenSSL 3) by test/fixtures-gen/crypto-tables.cjs. Do not edit.
+// Generated from Node v22.23.4 (OpenSSL 3.5.9) by test/fixtures-gen/crypto-tables.cjs. Do not edit.
 // Cipher metadata for the ciphers OpenVessel implements: lookup key is the lower-cased name.
 
 export interface CipherInfo { mode?: string; name: string; nid: number; blockSize?: number; ivLength?: number; keyLength: number }

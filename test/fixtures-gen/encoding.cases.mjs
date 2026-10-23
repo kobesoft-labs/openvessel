@@ -35,6 +35,8 @@ const byteSeqs = [
   [0xff],
   [0xff, 0x41],
   [0x00, 0x7f, 0x80, 0x9f, 0xa0, 0xff],
+  // every byte Windows-1252 maps differently from latin1
+  Array.from({ length: 32 }, (_, i) => 0x80 + i),
 ];
 
 const domains = [
@@ -98,7 +100,7 @@ const domains = [
 ];
 
 export function run(binding) {
-  const out = { encodeInto: [], encodeUtf8String: [], decodeUTF8: [], decodeLatin1: [], toASCII: [], toUnicode: [], errors: [] };
+  const out = { encodeInto: [], encodeUtf8String: [], decodeUTF8: [], decodeWindows1252: [], toASCII: [], toUnicode: [], errors: [] };
   for (const s of strings) {
     out.encodeUtf8String.push({ args: [s], r: [...binding.encodeUtf8String(s)] });
     for (const size of [0, 1, 2, 3, 4, 5, 8, 64]) {
@@ -118,7 +120,7 @@ export function run(binding) {
           }
         };
         out.decodeUTF8.push({ args: [bytes, ignoreBOM, fatal], r: call(() => binding.decodeUTF8(Uint8Array.from(bytes), ignoreBOM, fatal)) });
-        out.decodeLatin1.push({ args: [bytes, ignoreBOM, fatal], r: call(() => binding.decodeLatin1(Uint8Array.from(bytes), ignoreBOM, fatal)) });
+        out.decodeWindows1252.push({ args: [bytes, ignoreBOM, fatal], r: call(() => binding.decodeWindows1252(Uint8Array.from(bytes), ignoreBOM, fatal)) });
       }
     }
     // other buffer sources
@@ -126,12 +128,12 @@ export function run(binding) {
     out.decodeUTF8.push({ args: [bytes, 'DataView'], r: binding.decodeUTF8(new DataView(Uint8Array.from([0x41, ...bytes]).buffer, 1), false, false) });
     const sab = new SharedArrayBuffer(bytes.length);
     new Uint8Array(sab).set(bytes);
-    out.decodeLatin1.push({ args: [bytes, 'SharedArrayBuffer'], r: binding.decodeLatin1(sab, false, false) });
+    out.decodeWindows1252.push({ args: [bytes, 'SharedArrayBuffer'], r: binding.decodeWindows1252(sab, false, false) });
   }
   for (const [name, f] of [
     ['decodeUTF8', () => binding.decodeUTF8('str')],
     ['decodeUTF8', () => binding.decodeUTF8(null)],
-    ['decodeLatin1', () => binding.decodeLatin1({})],
+    ['decodeWindows1252', () => binding.decodeWindows1252({})],
   ]) {
     try {
       f();

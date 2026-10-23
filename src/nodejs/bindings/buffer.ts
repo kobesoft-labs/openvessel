@@ -416,6 +416,8 @@ export function createBuffer() {
       return latin1(base64Decode(s));
     },
     getZeroFillToggle: () => new Uint32Array(1),
+    // memory from ArrayBuffer is always zeroed in JS; "unsafe" only skips that in C++
+    createUnsafeArrayBuffer: (size: number) => new ArrayBuffer(size),
     // removed by bootstrap/node.js right after the call (so it is not in the recorded shape)
     setBufferPrototype(proto: object) {
       bufferPrototype = proto;

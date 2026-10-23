@@ -1,5 +1,5 @@
 // Differential tests for the asymmetric half of internalBinding('crypto'): fixtures from
-// test/fixtures-gen/crypto-asym.mjs (real Node 22.20.0), driven the way lib/internal/crypto does.
+// test/fixtures-gen/crypto-asym.mjs (real Node (the pinned version)), driven the way lib/internal/crypto does.
 
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
