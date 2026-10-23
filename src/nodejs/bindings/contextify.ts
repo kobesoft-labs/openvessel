@@ -146,9 +146,11 @@ export function createContextify() {
         return isEsmSyntaxError(e) && looksLikeModule(code);
       }
     },
-    makeContext(contextObject: object) {
+    makeContext(contextObject: object | symbol) {
       // contexts are approximated: the object itself is the global used by runInContext
-      (contextObject as any)[S.privateSymbols.contextify_context_private_symbol] = contextObject;
+      const obj = typeof contextObject === 'symbol' ? {} : contextObject;
+      Object.defineProperty(obj, S.privateSymbols.contextify_context_private_symbol, { value: obj, enumerable: false, configurable: true });
+      return obj;
     },
     startSigintWatchdog: () => {},
     stopSigintWatchdog: () => false,

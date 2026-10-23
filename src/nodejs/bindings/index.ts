@@ -27,6 +27,7 @@ import {
   createUv,
 } from './process.ts';
 import { fromShape } from './shape.ts';
+import { createReport } from './report.ts';
 import { createCrypto } from './crypto.ts';
 import { createBlob } from './blob.ts';
 import { createWorkerBinding } from './worker.ts';
@@ -77,6 +78,7 @@ export const factories: Record<string, BindingFactory> = {
   process_methods: createProcessMethods,
   process_wrap: createProcessWrap,
   serdes: createSerdes,
+  report: createReport,
   signal_wrap: createSignalWrap,
   spawn_sync: createSpawnSync,
   stream_wrap: createStreamWrap,
