@@ -25,6 +25,7 @@ import {
   createUv,
 } from './process.ts';
 import { fromShape } from './shape.ts';
+import { createCaresWrap, createTcpWrap } from './net.ts';
 import { createZlib } from './zlib.ts';
 import { createHttpParser } from './http_parser.ts';
 import { createProcessWrap, createSignalWrap, createSpawnSync } from './process_wrap.ts';
@@ -43,6 +44,7 @@ export const factories: Record<string, BindingFactory> = {
   async_wrap: createAsyncWrap,
   buffer: createBuffer,
   builtins: () => S.builtinsBinding,
+  cares_wrap: createCaresWrap,
   config: createConfig,
   contextify: createContextify,
   credentials: createCredentials,
@@ -67,6 +69,7 @@ export const factories: Record<string, BindingFactory> = {
   string_decoder: createStringDecoder,
   symbols: createSymbols,
   task_queue: createTaskQueue,
+  tcp_wrap: createTcpWrap,
   timers: createTimers,
   trace_events: createTraceEvents,
   tty_wrap: createTtyWrap,

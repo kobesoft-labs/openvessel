@@ -2,6 +2,7 @@
 
 import type { Kernel } from './kernel.ts';
 import type { Proc } from './proc.ts';
+import { TcpBridge } from './tcp.ts';
 
 export interface HttpResponder {
   head(status: number, statusText: string, headers: [string, string][]): void;
@@ -33,11 +34,17 @@ export class NetRouter {
   private nextRid = 1;
   private pending = new Map<number, Pending>();
 
-  constructor(private kernel: Kernel) {}
+  readonly tcp: TcpBridge;
+
+  constructor(private kernel: Kernel) {
+    this.tcp = new TcpBridge(kernel);
+  }
 
   /** Starts a request; returns a handle to stream the body / ws messages, or null if nobody listens. */
   request(port: number, init: HttpRequestInit, responder: HttpResponder) {
     const rec = this.kernel.ports.get(port);
+    // listeners of the ported Node take byte streams
+    if (rec?.host === 'raw') return this.tcp.request(rec, init, responder);
     const proc = rec ? this.kernel.procs.get(rec.pid) : undefined;
     if (!rec || !proc || proc.state !== 'running' || rec.host === 'tcp-only') {
       responder.error(`connect ECONNREFUSED 127.0.0.1:${port}`);

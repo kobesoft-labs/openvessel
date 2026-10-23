@@ -485,8 +485,8 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         const existing = kernel.ports.get(port);
         if (existing && existing.pid !== proc.pid) throw kerr('EADDRINUSE');
         if (existing) throw kerr('EADDRINUSE');
-        kernel.ports.set(port, { port, pid: proc.pid, tid: thread.tid, host: a.kind === 'http' ? (a.host || '') : 'tcp-only' });
-        if (a.kind === 'http') kernel.hooks.onListen?.(port, proc.pid);
+        kernel.ports.set(port, { port, pid: proc.pid, tid: thread.tid, host: a.kind === 'http' ? (a.host || '') : a.kind === 'raw' ? 'raw' : 'tcp-only' });
+        if (a.kind === 'http' || a.kind === 'raw') kernel.hooks.onListen?.(port, proc.pid);
         return port;
       }
       case 'unlisten': {
@@ -496,6 +496,13 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
           kernel.hooks.onUnlisten?.(a.port, proc.pid);
         }
         return null;
+      }
+      case 'tcpConnect': {
+        const rec = kernel.ports.get(Number(a.port));
+        if (!rec || rec.host !== 'raw') throw kerr('ECONNREFUSED');
+        const end = net.tcp.connect(rec, { address: '127.0.0.1', port: 0 });
+        if (!end) throw kerr('ECONNREFUSED');
+        return proc.allocFd(end, 3);
       }
       case 'portInfo':
         return kernel.ports.has(a.port);
