@@ -5,3 +5,4 @@ corpus/sites/
 test/node-compat/.node/
 test/node-compat/results/logs/
 vendor/
+test/node-compat/results/
