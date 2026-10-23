@@ -27,6 +27,7 @@ import {
   createUv,
 } from './process.ts';
 import { fromShape } from './shape.ts';
+import { createBlob } from './blob.ts';
 import { createWorkerBinding } from './worker.ts';
 import { createCaresWrap, createTcpWrap } from './net.ts';
 import { createZlib } from './zlib.ts';
@@ -45,6 +46,7 @@ export type BindingFactory = () => any;
 /** Name → factory. Other modules (and the parallel binding work) register here. */
 export const factories: Record<string, BindingFactory> = {
   async_wrap: createAsyncWrap,
+  blob: createBlob,
   buffer: createBuffer,
   builtins: () => S.builtinsBinding,
   cares_wrap: createCaresWrap,
