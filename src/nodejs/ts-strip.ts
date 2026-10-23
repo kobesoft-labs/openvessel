@@ -12,3 +12,6 @@ import { transform } from 'sucrase';
   });
   return { code: r.code, map: r.sourceMap ? JSON.stringify(r.sourceMap) : undefined };
 };
+
+// the raw transform, for require(esm) (ESM → CommonJS shape, see module_wrap.ts)
+(globalThis as any).__ovSucrase = { transform };

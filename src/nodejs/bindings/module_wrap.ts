@@ -10,8 +10,9 @@
 import { parse as parseEsm } from 'es-module-lexer/js';
 import { sys } from '../../node/sys.ts';
 import * as loop from '../loop.ts';
-import { S } from '../state.ts';
+import { S, lib } from '../state.ts';
 import { fromShape } from './shape.ts';
+import { sucrase } from '../typescript.ts';
 
 const kUninstantiated = 0;
 const kInstantiating = 1;
@@ -74,7 +75,11 @@ export class ModuleWrap {
   #registered = false;
   #evaluation: Promise<unknown> | null = null;
   #setters: ((i: number, v: unknown) => void) | null = null;
-  #pendingExports = new Map<number, unknown>();
+  /** synthetic export values, by index (also feeds the namespace made by evaluateSync) */
+  #values: unknown[] = [];
+  /** set while/after the module was evaluated synchronously (require(esm)) */
+  #syncExports: Record<string, unknown> | null = null;
+  #tla: boolean | undefined;
   #meta: object | null = null;
 
   constructor(url: string, context: unknown, sourceOrNames: string | string[], lineOffsetOrSteps?: number | (() => void), _columnOffset?: number, hostDefinedOption?: unknown) {
@@ -186,6 +191,17 @@ export class ModuleWrap {
     );
   }
 
+  /** A module that re-exports what evaluateSync produced, so the browser doesn't run the code twice. */
+  #facadeSource(): string {
+    const names = Object.keys(this.#syncExports!).filter((n) => n !== '__esModule');
+    const lit = JSON.stringify(this.id);
+    let out = `const $ov = globalThis.__ovSyncNamespace(${lit});\n`;
+    names.forEach((n, i) => {
+      out += `const $ov${i} = $ov[${JSON.stringify(n)}];\nexport { $ov${i} as ${n === 'default' || ID_RE.test(n) ? n : JSON.stringify(n)} };\n`;
+    });
+    return out;
+  }
+
   servedUrl(): string {
     return moduleUrl(this.id);
   }
@@ -194,7 +210,8 @@ export class ModuleWrap {
     if (seen.has(this)) return;
     seen.add(this);
     if (!this.#registered) {
-      sys('esmRegister', { id: this.id, source: this.#exportNames ? this.#syntheticSource() : this.#rewritten() });
+      const source = this.#syncExports ? this.#facadeSource() : this.#exportNames ? this.#syntheticSource() : this.#rewritten();
+      sys('esmRegister', { id: this.id, source });
       this.#registered = true;
     }
     for (const m of this.#linked) if (m) m.#register(seen);
@@ -210,13 +227,6 @@ export class ModuleWrap {
   instantiate() {
     if (this.#status >= kInstantiated) return;
     this.#status = kInstantiating;
-    try {
-      this.#register();
-    } catch (e) {
-      this.#status = kErrored;
-      this.#error = e;
-      throw e;
-    }
     this.#walk((m) => {
       if (m.#status < kInstantiated) m.#status = kInstantiated;
     });
@@ -231,6 +241,17 @@ export class ModuleWrap {
     if (this.#evaluation) return this.#evaluation;
     if (this.#status === kErrored) return Promise.reject(this.#error);
     if (this.#status < kInstantiated) this.instantiate();
+    if (this.#syncExports) {
+      this.#evaluation = Promise.resolve(undefined);
+      return this.#evaluation;
+    }
+    try {
+      this.#register();
+    } catch (e) {
+      this.#status = kErrored;
+      this.#error = e;
+      return Promise.reject(e);
+    }
     this.#status = kEvaluating;
     const done = loop.startReq('ModuleEvaluation');
     this.#evaluation = import(/* @vite-ignore */ this.servedUrl()).then(
@@ -252,11 +273,75 @@ export class ModuleWrap {
     return this.#evaluation;
   }
 
-  /** require(esm) — the browser can't evaluate a module graph synchronously. */
-  evaluateSync(): never {
-    const e = new Error(`require() of ES module ${this.url} is not supported in OpenVessel yet; use import()`) as Error & { code: string };
-    e.code = 'ERR_REQUIRE_ASYNC_MODULE';
-    throw e;
+  /**
+   * require(esm). The browser can't evaluate a module graph synchronously, so the graph's source
+   * modules run as CommonJS-shaped functions (sucrase's imports transform) and synthetic modules
+   * run their evaluation steps directly.
+   */
+  evaluateSync(_filename?: string, _parentFilename?: string): object {
+    if (this.#status === kErrored) throw this.#error;
+    try {
+      const ns = this.#evaluateSyncGraph();
+      this.#walk((m) => {
+        if (m.#status < kEvaluated && (m.#syncExports || m.#namespace)) m.#status = kEvaluated;
+      });
+      return ns;
+    } catch (e) {
+      this.#status = kErrored;
+      this.#error = e;
+      throw e;
+    }
+  }
+
+  #evaluateSyncGraph(): any {
+    if (this.#namespace) return this.#namespace;
+    if (this.#syncExports) return this.#syncExports;
+    if (this.#exportNames) {
+      const exportsObj: Record<string, unknown> = Object.create(null);
+      this.#syncExports = exportsObj;
+      this.#exportNames.forEach((n, i) => Object.defineProperty(exportsObj, n, { enumerable: true, get: () => this.#values[i] }));
+      Object.defineProperty(exportsObj, '__esModule', { value: true });
+      if (this.#evaluationSteps) {
+        const steps = this.#evaluationSteps;
+        this.#evaluationSteps = null;
+        steps.call(this);
+      }
+      this.#namespace = exportsObj;
+      return exportsObj;
+    }
+    const exportsObj: Record<string, unknown> = {};
+    this.#syncExports = exportsObj;
+    // import.meta and import() go through our hooks first; then ESM syntax becomes require/exports
+    const prepared = this.#rewrittenForSync();
+    const code = sucrase().transform(prepared, { transforms: ['imports'], keepUnusedImports: true, filePath: this.url }).code;
+    const requireLinked = (spec: string) => {
+      const i = this.#requests.findIndex((r) => r.specifier === spec);
+      const target = i >= 0 ? this.#linked[i] : undefined;
+      if (!target) throw new Error(`module ${this.url} is not linked (${spec})`);
+      return target.#evaluateSyncGraph();
+    };
+    const module = { exports: exportsObj };
+    const fn = (0, eval)(`(function (exports, require, module) {${code}\n})\n//# sourceURL=${this.url}`);
+    fn.call(undefined, exportsObj, requireLinked, module);
+    if (module.exports !== exportsObj) Object.assign(exportsObj, module.exports);
+    Object.defineProperty(exportsObj, Symbol.toStringTag, { value: 'Module' });
+    this.#namespace = exportsObj;
+    return exportsObj;
+  }
+
+  #rewrittenForSync(): string {
+    const src = this.#source!;
+    const edits: { s: number; e: number; text: string }[] = [];
+    for (const m of this.#metaRanges) edits.push({ s: m.start, e: m.end, text: `globalThis.__ovImportMeta(${JSON.stringify(this.id)})` });
+    for (const d of this.#dynamicRanges) edits.push({ s: d.kwStart, e: d.kwEnd, text: `globalThis.__ovDynamicImport.bind(null, ${JSON.stringify(this.id)})` });
+    edits.sort((a, b) => a.s - b.s);
+    let out = '';
+    let last = 0;
+    for (const ed of edits) {
+      out += src.slice(last, ed.s) + ed.text;
+      last = ed.e;
+    }
+    return out + src.slice(last);
   }
 
   getNamespace() {
@@ -287,9 +372,29 @@ export class ModuleWrap {
   }
 
   hasTopLevelAwait(): boolean {
-    if (!this.#source) return false;
-    // cheap check: an await at statement level outside any function (good enough for warnings)
-    return /(^|[;\n{}])\s*(for\s+)?await\b/.test(this.#source) && /^[^\n]*\bawait\b/m.test(this.#source);
+    if (this.#tla !== undefined) return this.#tla;
+    if (!this.#source || !/\bawait\b/.test(this.#source)) return (this.#tla = false);
+    try {
+      const acorn = lib('internal/deps/acorn/acorn/dist/acorn');
+      const walk = lib('internal/deps/acorn/acorn-walk/dist/walk');
+      const ast = acorn.parse(this.#source, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true });
+      let found = false;
+      walk.recursive(ast, null, {
+        Function() {},
+        AwaitExpression() {
+          found = true;
+        },
+        ForOfStatement(node: any, st: unknown, c: (n: unknown, s: unknown) => void) {
+          if (node.await) found = true;
+          c(node.left, st);
+          c(node.right, st);
+          c(node.body, st);
+        },
+      });
+      return (this.#tla = found);
+    } catch {
+      return (this.#tla = false);
+    }
   }
 
   setExport(name: string, value: unknown) {
@@ -298,8 +403,8 @@ export class ModuleWrap {
       const e = new ReferenceError(`Export '${name}' is not defined in module`);
       throw e;
     }
+    this.#values[i] = value;
     if (this.#setters) this.#setters(i, value);
-    else this.#pendingExports.set(i, value);
   }
 
   createCachedData() {
@@ -309,13 +414,17 @@ export class ModuleWrap {
   /** @internal called from the generated synthetic module when the browser evaluates it */
   _bindSynthetic(setters: (i: number, v: unknown) => void) {
     this.#setters = setters;
-    for (const [i, v] of this.#pendingExports) setters(i, v);
-    this.#pendingExports.clear();
+    this.#values.forEach((v, i) => setters(i, v));
     if (this.#evaluationSteps) {
       const steps = this.#evaluationSteps;
       this.#evaluationSteps = null;
       steps.call(this);
     }
+  }
+
+  /** @internal */
+  _syncNamespace() {
+    return this.#syncExports;
   }
 
   /** @internal */
@@ -349,6 +458,7 @@ export function createModuleWrap() {
     __ovSynthetic: { value: (id: string, setters: (i: number, v: unknown) => void) => byId.get(id)?._bindSynthetic(setters), configurable: true },
     __ovImportMeta: { value: (id: string) => byId.get(id)?._importMeta(), configurable: true },
     __ovDynamicImport: { value: (id: string, s: unknown, o?: any) => byId.get(id)!._dynamicImport(s, o), configurable: true },
+    __ovSyncNamespace: { value: (id: string) => byId.get(id)?._syncNamespace(), configurable: true },
   });
   return Object.assign(b, {
     ModuleWrap,

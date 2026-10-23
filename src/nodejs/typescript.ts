@@ -16,6 +16,12 @@ function load() {
   return transform!;
 }
 
+/** sucrase's transform (loaded on first use). */
+export function sucrase(): { transform: (source: string, options: object) => { code: string } } {
+  load();
+  return (globalThis as any).__ovSucrase;
+}
+
 Object.defineProperty(globalThis, '__ovAmaro', {
   value: {
     transformSync(source: string, options: { mode?: string; sourceMap?: boolean; filename?: string } = {}) {
