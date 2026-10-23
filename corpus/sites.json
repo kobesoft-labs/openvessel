@@ -755,5 +755,383 @@
     "sha": null,
     "astro": 5,
     "stars": 1
+  },
+  {
+    "id": "astro-7-examples__advanced-routing",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/advanced-routing",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__basics",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/basics",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__blog",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/blog",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__container-with-vitest",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/container-with-vitest",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__framework-alpine",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/framework-alpine",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__framework-multiple",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/framework-multiple",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__framework-preact",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/framework-preact",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__framework-react",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/framework-react",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__framework-solid",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/framework-solid",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__framework-svelte",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/framework-svelte",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__framework-vue",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/framework-vue",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__hackernews",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/hackernews",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__minimal",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/minimal",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__portfolio",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/portfolio",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__ssr",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/ssr",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__starlog",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/starlog",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__toolbar-app",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/toolbar-app",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__with-markdoc",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/with-markdoc",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__with-mdx",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/with-mdx",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__with-nanostores",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/with-nanostores",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__with-tailwindcss",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/with-tailwindcss",
+    "astro": 7
+  },
+  {
+    "id": "astro-7-examples__with-vitest",
+    "repo": "withastro/astro",
+    "ref": "astro@7.4.2",
+    "path": "examples/with-vitest",
+    "astro": 7
+  },
+  {
+    "id": "arthelokyo__astrowind",
+    "repo": "arthelokyo/astrowind",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 6059
+  },
+  {
+    "id": "satnaing__astro-paper",
+    "repo": "satnaing/astro-paper",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 5144
+  },
+  {
+    "id": "CuteLeaf__Firefly",
+    "repo": "CuteLeaf/Firefly",
+    "ref": "master",
+    "sha": null,
+    "astro": 7,
+    "stars": 2362
+  },
+  {
+    "id": "surjithctly__astroship",
+    "repo": "surjithctly/astroship",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 1990
+  },
+  {
+    "id": "mearashadowfax__ScrewFast",
+    "repo": "mearashadowfax/ScrewFast",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 1426
+  },
+  {
+    "id": "zeon-studio__astroplate",
+    "repo": "zeon-studio/astroplate",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 1216
+  },
+  {
+    "id": "JustGoodUI__dante-astro-theme",
+    "repo": "JustGoodUI/dante-astro-theme",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 518
+  },
+  {
+    "id": "themefisher__bookworm-light-astro",
+    "repo": "themefisher/bookworm-light-astro",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 389
+  },
+  {
+    "id": "unfolding-io__nebulix",
+    "repo": "unfolding-io/nebulix",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 316
+  },
+  {
+    "id": "oxygenna-themes__foxi-astro-theme",
+    "repo": "oxygenna-themes/foxi-astro-theme",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 287
+  },
+  {
+    "id": "lin-stephanie__astro-antfustyle-theme",
+    "repo": "lin-stephanie/astro-antfustyle-theme",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 275
+  },
+  {
+    "id": "davidvkimball__astro-modular",
+    "repo": "davidvkimball/astro-modular",
+    "ref": "master",
+    "sha": null,
+    "astro": 7,
+    "stars": 235
+  },
+  {
+    "id": "themefisher__pinwheel-astro",
+    "repo": "themefisher/pinwheel-astro",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 230
+  },
+  {
+    "id": "cxro__astro-whono",
+    "repo": "cxro/astro-whono",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 175
+  },
+  {
+    "id": "themefisher__bigspring-light-astro",
+    "repo": "themefisher/bigspring-light-astro",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 174
+  },
+  {
+    "id": "unfolding-io__StarFunnel",
+    "repo": "unfolding-io/StarFunnel",
+    "ref": "master",
+    "sha": null,
+    "astro": 7,
+    "stars": 173
+  },
+  {
+    "id": "mearashadowfax__DataNova",
+    "repo": "mearashadowfax/DataNova",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 166
+  },
+  {
+    "id": "louisescher__spectre",
+    "repo": "louisescher/spectre",
+    "ref": "master",
+    "sha": null,
+    "astro": 7,
+    "stars": 164
+  },
+  {
+    "id": "netlify-templates__astro-platform-starter",
+    "repo": "netlify-templates/astro-platform-starter",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 157
+  },
+  {
+    "id": "psephopaiktes__astro-i18n-starter",
+    "repo": "psephopaiktes/astro-i18n-starter",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 150
+  },
+  {
+    "id": "CloudCannon__sendit-astro-template",
+    "repo": "CloudCannon/sendit-astro-template",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 137
+  },
+  {
+    "id": "JustGoodUI__ovidius-astro-theme",
+    "repo": "JustGoodUI/ovidius-astro-theme",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 116
+  },
+  {
+    "id": "itsyujay__astro-sassify-template",
+    "repo": "itsyujay/astro-sassify-template",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 103
+  },
+  {
+    "id": "RATIU5__zaggonaut",
+    "repo": "RATIU5/zaggonaut",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 98
+  },
+  {
+    "id": "izmttk__astro-mecure",
+    "repo": "izmttk/astro-mecure",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 80
+  },
+  {
+    "id": "maiobarbero__astro_academia",
+    "repo": "maiobarbero/astro_academia",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 73
+  },
+  {
+    "id": "FjellOverflow__nordlys",
+    "repo": "FjellOverflow/nordlys",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 68
+  },
+  {
+    "id": "themefisher__dockit-astro",
+    "repo": "themefisher/dockit-astro",
+    "ref": "main",
+    "sha": null,
+    "astro": 7,
+    "stars": 56
   }
 ]

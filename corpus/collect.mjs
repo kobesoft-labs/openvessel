@@ -1,5 +1,6 @@
-// Collects Astro 5/6 sites from GitHub into corpus/sites/ and writes corpus/sites.json.
-// Requires an authenticated `gh` CLI. Usage: node corpus/collect.mjs [target=100]
+// Collects Astro 5/6/7 sites from GitHub into corpus/sites/ and writes corpus/sites.json.
+// Requires an authenticated `gh` CLI. Usage: node corpus/collect.mjs [target=100] [majors=5,6,7]
+// (majors limits which Astro majors the community search accepts)
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -7,6 +8,7 @@ import { join } from 'node:path';
 const root = new URL('.', import.meta.url).pathname;
 const sitesDir = join(root, 'sites');
 const target = Number(process.argv[2] ?? 100);
+const majors = new Set((process.argv[3] ?? '5,6,7').split(',').map(Number));
 mkdirSync(sitesDir, { recursive: true });
 
 const gh = (args, opts = {}) => execFileSync('gh', args, { encoding: opts.encoding ?? 'utf8', maxBuffer: 1 << 30, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -53,7 +55,7 @@ const add = (s) => {
 };
 
 // 1) official examples from tagged Astro releases (one tag per major)
-const astroTags = { 6: 'astro@6.4.8', 5: 'astro@5.18.2' };
+const astroTags = { 7: 'astro@7.4.2', 6: 'astro@6.4.8', 5: 'astro@5.18.2' };
 for (const [major, tag] of Object.entries(astroTags)) {
   const tmp = join(root, '.tmp-astro-' + major);
   if (!existsSync(tmp)) {
@@ -100,7 +102,7 @@ outer: for (const q of queries) {
       if (have.has(id)) continue;
       const pkg = readPkgAt(repo, r.default_branch);
       const major = astroMajor(pkg);
-      if (major !== 5 && major !== 6) continue;
+      if (!majors.has(major)) continue;
       if (!pkg.scripts?.build) continue;
       if (r.size > 200_000) continue; // skip >200MB repos
       try {
