@@ -4,6 +4,7 @@
 //   node test/node-compat/run.mjs --baseline        # real Node (npx node@<version>) → results/baseline.json
 //   node test/node-compat/run.mjs [prefix...]       # OpenVessel → results/ov.json + results/logs/
 //   node test/node-compat/run.mjs --report          # summary of failures grouped by cause
+//   --port   run on the ported Node runtime (src/nodejs) instead of the legacy one; results go to results/port/
 //
 // Only tests that pass on real Node count. Tests that need V8/internal flags are skipped.
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, statSync, mkdtempSync } from 'node:fs';
@@ -14,7 +15,8 @@ import { spawn, execFileSync } from 'node:child_process';
 const here = new URL('.', import.meta.url).pathname;
 const nodeRoot = join(here, '.node');
 const parallel = join(nodeRoot, 'test/parallel');
-const resultsDir = join(here, 'results');
+const resultsDir = join(here, process.argv.includes('--port') ? 'results/port' : 'results');
+const baselineFile = join(here, 'results', 'baseline.json');
 mkdirSync(join(resultsDir, 'logs'), { recursive: true });
 const NODE_VERSION = /NODE_VERSION = '([^']+)'/.exec(readFileSync(join(here, '../../src/node/version.ts'), 'utf8'))[1];
 
@@ -60,7 +62,7 @@ const firstError = (out) => {
 async function baseline(tests) {
   const nodeBin = execFileSync('npx', ['-y', `node@${NODE_VERSION}`, '-p', 'process.execPath'], { encoding: 'utf8' }).trim();
   console.log('baseline with', nodeBin);
-  const res = loadJson(join(resultsDir, 'baseline.json'), {});
+  const res = loadJson(baselineFile, {});
   let i = 0;
   const run = (t) =>
     new Promise((resolve) => {
@@ -85,7 +87,7 @@ async function baseline(tests) {
       }
     }),
   );
-  writeFileSync(join(resultsDir, 'baseline.json'), JSON.stringify(res, null, 1));
+  writeFileSync(baselineFile, JSON.stringify(res, null, 1));
   const pass = Object.values(res).filter((r) => r.pass).length;
   console.log(`baseline: ${pass}/${tests.length} pass on real Node`);
 }
@@ -128,7 +130,7 @@ async function mount(page, files) {
 
 async function runOv(tests) {
   const { startServer, openBrowser } = await import('../e2e/harness.mjs');
-  const base = loadJson(join(resultsDir, 'baseline.json'), null);
+  const base = loadJson(baselineFile, null);
   if (base) tests = tests.filter((t) => base[t.file]?.pass);
   console.log(`running ${tests.length} tests in OpenVessel`);
   const res = loadJson(join(resultsDir, 'ov.json'), {});
@@ -150,6 +152,7 @@ async function runOv(tests) {
       }
     }
     await session.page.evaluate(() => window.ov.network.setPolicy({ mode: 'allow-all' }));
+    if (flag('--port')) await session.page.evaluate(() => window.ov.exec('mkdir -p /etc/openvessel && echo port > /etc/openvessel/node'));
     await mount(session.page, files);
   };
   await boot();
@@ -224,7 +227,7 @@ function classify(file, r) {
 }
 
 function report() {
-  const base = loadJson(join(resultsDir, 'baseline.json'), {});
+  const base = loadJson(baselineFile, {});
   const res = loadJson(join(resultsDir, 'ov.json'), {});
   const byMod = {};
   const causes = { crash: {}, value: {}, timeout: {}, shape: {} };

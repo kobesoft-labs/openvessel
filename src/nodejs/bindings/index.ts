@@ -27,7 +27,11 @@ import {
 import { fromShape } from './shape.ts';
 import { createPipeWrap, createStreamWrap, createTtyWrap } from './stream.ts';
 import { createTypes, createUtil } from './util.ts';
-import { createUrlInterim } from './url-interim.ts';
+import { createUrl } from './url.ts';
+import { createEncodingBinding } from './encoding.ts';
+import { createIcu } from './icu.ts';
+import { createModules } from './modules.ts';
+import { createStringDecoder } from './string_decoder.ts';
 
 export type BindingFactory = () => any;
 
@@ -39,24 +43,28 @@ export const factories: Record<string, BindingFactory> = {
   config: createConfig,
   contextify: createContextify,
   credentials: createCredentials,
+  encoding_binding: createEncodingBinding,
   errors: createErrors,
   fs: createFs,
+  icu: createIcu,
   messaging: createMessaging,
   mksnapshot: createMksnapshot,
   module_wrap: createModuleWrap,
+  modules: createModules,
   options: createOptions,
   os: createOs,
   performance: createPerformance,
   pipe_wrap: createPipeWrap,
   process_methods: createProcessMethods,
   stream_wrap: createStreamWrap,
+  string_decoder: createStringDecoder,
   symbols: createSymbols,
   task_queue: createTaskQueue,
   timers: createTimers,
   trace_events: createTraceEvents,
   tty_wrap: createTtyWrap,
   types: createTypes,
-  url: createUrlInterim,
+  url: createUrl,
   util: createUtil,
   uv: createUv,
   // WebAssembly.compileStreaming/instantiateStreaming are the browser's own

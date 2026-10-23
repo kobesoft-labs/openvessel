@@ -13,7 +13,12 @@ function originAllowed(origin: string) {
 }
 
 async function waitForController(): Promise<ServiceWorker> {
-  const reg = await navigator.serviceWorker.register(new URL('./sw.js', location.href), { scope: './' });
+  const reg = await navigator.serviceWorker.register(new URL('./sw.js', location.href), { scope: './', updateViaCache: 'none' });
+  // a page loaded under an older worker must not start the kernel against it
+  await reg.update().catch(() => {});
+  if (reg.installing || reg.waiting) {
+    await new Promise((resolve) => navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true }));
+  }
   await navigator.serviceWorker.ready;
   if (navigator.serviceWorker.controller) return navigator.serviceWorker.controller;
   return new Promise((resolve) => {
@@ -46,6 +51,8 @@ async function start(hostPort: MessagePort, init: { policy?: unknown }) {
   }
   kernel = new Worker(new URL('./kernel.js', location.href), { type: 'module', name: 'openvessel-kernel' });
   kernel.onerror = (e) => fail(`kernel failed: ${e.message}`);
+  // a later update of the worker takes over the page: hand it the kernel connection too
+  navigator.serviceWorker.addEventListener('controllerchange', connectSw);
   if (init.policy) kernel.postMessage({ t: 'policy', policy: init.policy });
   connectSw();
   navigator.serviceWorker.addEventListener('message', (ev) => {
