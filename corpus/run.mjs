@@ -1,19 +1,20 @@
 // Runs `npm install && npm run build` for each corpus site in headless Chrome.
-//   node corpus/run.mjs [filter...]      results → corpus/results/
+//   node corpus/run.mjs [--port] [filter...]      results → corpus/results/ (--port: the ported Node runtime, results/port/)
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { startServer, openBrowser, exec } from '../test/e2e/harness.mjs';
 import { mountProject } from '../test/e2e/project.mjs';
 
 const root = new URL('.', import.meta.url).pathname;
-const outDir = join(root, 'results');
+const port = process.argv.includes('--port');
+const outDir = join(root, port ? 'results/port' : 'results');
 mkdirSync(join(outDir, 'logs'), { recursive: true });
 const sites = JSON.parse(readFileSync(join(root, 'sites.json'), 'utf8'));
-const filters = process.argv.slice(2);
+const filters = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const todo = sites.filter((s) => !filters.length || filters.some((f) => s.id.includes(f)));
 const resultsPath = join(outDir, 'results.json');
 const results = existsSync(resultsPath) ? JSON.parse(readFileSync(resultsPath, 'utf8')) : {};
-const env = 'export CI=1 ASTRO_TELEMETRY_DISABLED=1;';
+const env = (port ? 'mkdir -p /etc/openvessel && echo port > /etc/openvessel/node; ' : '') + 'export CI=1 ASTRO_TELEMETRY_DISABLED=1;';
 
 /** The package manager the project asks for (packageManager field, then lockfile). */
 function packageManagerOf(dir) {
