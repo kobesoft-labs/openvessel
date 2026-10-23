@@ -31,12 +31,19 @@ async function proxyFetch(url: string, req: Request, body: ArrayBuffer | null): 
     'x-ov-method': req.method,
   };
   if (req.redirect) headers['x-ov-redirect'] = req.redirect;
-  const res = await nativeFetch(`${S.runtimeOrigin}/__ov/net?url=${encodeURIComponent(url)}`, {
-    method: req.method === 'GET' || req.method === 'HEAD' ? req.method : 'POST',
-    headers,
-    body: req.method === 'GET' || req.method === 'HEAD' ? undefined : body,
-    signal: req.signal,
-  });
+  // the browser's fetch is no libuv handle: count it as a request so the loop doesn't think it's idle
+  const done = loop.startReq('FetchRequest');
+  let res: Response;
+  try {
+    res = await nativeFetch(`${S.runtimeOrigin}/__ov/net?url=${encodeURIComponent(url)}`, {
+      method: req.method === 'GET' || req.method === 'HEAD' ? req.method : 'POST',
+      headers,
+      body: req.method === 'GET' || req.method === 'HEAD' ? undefined : body,
+      signal: req.signal,
+    });
+  } finally {
+    done();
+  }
   const err = res.headers.get('x-ov-error');
   if (err) {
     const msg = decodeURIComponent(res.headers.get('x-ov-message') ?? err);
@@ -48,10 +55,33 @@ async function proxyFetch(url: string, req: Request, body: ArrayBuffer | null): 
     outHeaders = JSON.parse(decodeURIComponent(res.headers.get('x-ov-rh') ?? '[]'));
   } catch {}
   const nullBody = status === 204 || status === 205 || status === 304 || req.method === 'HEAD';
-  const r = new NativeResponse(nullBody ? null : res.body, { status: status || 200, statusText: decodeURIComponent(res.headers.get('x-ov-status-text') ?? ''), headers: outHeaders });
+  const r = new NativeResponse(nullBody ? null : countedBody(res.body), { status: status || 200, statusText: decodeURIComponent(res.headers.get('x-ov-status-text') ?? ''), headers: outHeaders });
   Object.defineProperty(r, 'url', { value: decodeURIComponent(res.headers.get('x-ov-url') ?? url) });
   Object.defineProperty(r, 'redirected', { value: res.headers.get('x-ov-redirected') === '1' });
   return r;
+}
+
+/** The body, counted as a request while a read is waiting for data (like a reading socket). */
+function countedBody(body: ReadableStream<Uint8Array> | null): ReadableStream<Uint8Array> | null {
+  if (!body) return null;
+  const reader = body.getReader();
+  return new NativeReadableStream<Uint8Array>({
+    async pull(c) {
+      const done = loop.startReq('FetchBody');
+      try {
+        const { done: end, value } = await reader.read();
+        if (end) c.close();
+        else c.enqueue(value);
+      } catch (e) {
+        c.error(e);
+      } finally {
+        done();
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
 }
 
 /** A request to a virtual port, made with Node's http module (so it is a real TCP connection). */
