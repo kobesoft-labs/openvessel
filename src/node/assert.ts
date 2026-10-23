@@ -80,6 +80,20 @@ function matchesExpected(err: any, expected: any): boolean {
   return false;
 }
 
+/** Like Node: a class that doesn't match rethrows the error; any other mismatch is an AssertionError. */
+function checkThrown(e: any, expected: any, message: string | Error | undefined, operator: string, fn: Function) {
+  if (matchesExpected(e, expected)) return;
+  if (typeof expected === 'function' && expected.prototype !== undefined && (expected === Error || Error.isPrototypeOf(expected))) throw e;
+  if (expected && typeof expected === 'object' && !(expected instanceof RegExp)) {
+    for (const k of Object.keys(expected)) {
+      const v = expected[k];
+      const ok = v instanceof RegExp && typeof e?.[k] === 'string' ? v.test(e[k]) : deepEqual(e?.[k], v, true, new Map());
+      if (!ok) fail_(e?.[k], v, message ?? `Expected values to be strictly deep-equal:\n+ actual - expected\n\n  Comparison {\n+   ${k}: ${inspect(e?.[k])}\n-   ${k}: ${inspect(v)}\n  }`, operator, fn);
+    }
+  }
+  fail_(e, expected, message ?? `The ${typeof expected === 'function' ? `"validate" validation function` : 'error'} is expected to match the expected value.\n\nActual message: "${e?.message}"`, operator, fn);
+}
+
 export function throws(fn: () => unknown, expected?: any, message?: string | Error) {
   if (typeof expected === 'string') {
     message = expected;
@@ -88,7 +102,7 @@ export function throws(fn: () => unknown, expected?: any, message?: string | Err
   try {
     fn();
   } catch (e) {
-    if (!matchesExpected(e, expected)) throw e;
+    checkThrown(e, expected, message, 'throws', throws);
     return;
   }
   fail_(undefined, expected, message ?? 'Missing expected exception.', 'throws', throws);
@@ -106,7 +120,7 @@ export async function rejects(p: Promise<unknown> | (() => Promise<unknown>), ex
   try {
     await (typeof p === 'function' ? p() : p);
   } catch (e) {
-    if (!matchesExpected(e, expected)) throw e;
+    checkThrown(e, expected, message, 'rejects', rejects);
     return;
   }
   fail_(undefined, expected, message ?? 'Missing expected rejection.', 'rejects', rejects);

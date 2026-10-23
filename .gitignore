@@ -2,3 +2,5 @@ node_modules/
 dist/
 corpus/sites/
 .DS_Store
+test/node-compat/.node/
+test/node-compat/results/logs/

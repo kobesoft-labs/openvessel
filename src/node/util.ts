@@ -99,7 +99,8 @@ export function inspect(value: unknown, opts?: InspectOptions | boolean, depthAr
     if (v === undefined) return stylize('undefined', 'undefined');
     switch (typeof v) {
       case 'string':
-        return stylize(quote(v.length > ctx.maxStringLength ? v.slice(0, ctx.maxStringLength) + `... ${v.length - ctx.maxStringLength} more characters` : v, inObject || level > 0), 'string');
+        if (v.length > ctx.maxStringLength) return stylize(quote(v.slice(0, ctx.maxStringLength), true), 'string') + `... ${v.length - ctx.maxStringLength} more character${v.length - ctx.maxStringLength > 1 ? 's' : ''}`;
+        return stylize(quote(v, true), 'string');
       case 'number':
         return stylize(Object.is(v, -0) ? '-0' : String(v), 'number');
       case 'bigint':

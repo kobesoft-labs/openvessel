@@ -153,7 +153,7 @@ function defineBuiltins() {
     'fs/promises': () => fsMod.promises,
     path: () => pathMod,
     'path/posix': () => pathMod,
-    'path/win32': () => pathMod,
+    'path/win32': () => (pathMod as any).win32,
     events: () => EventEmitter,
     stream: () => streamMod,
     'stream/promises': () => streamPromises,
