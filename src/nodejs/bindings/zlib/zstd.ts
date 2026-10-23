@@ -137,8 +137,19 @@ abstract class ZstdContext implements CompressionContext {
     return null;
   }
 
-  close() {}
+  #closed = false;
+  close() {
+    if (this.#closed) return;
+    this.#closed = true;
+    if (this.ctx) this.destroy(this.ctx);
+    this.ctx = 0;
+    this.inBuf.release();
+    this.outBuf.release();
+    this.cache.clear();
+    loadZstd.release(this.w);
+  }
 
+  protected abstract destroy(ctx: number): void;
   abstract init(pledgedSrcSize: bigint, dictionary?: Uint8Array): CompressionError | null;
   abstract setParameter(key: number, value: number): CompressionError | null;
   abstract work(): void;
@@ -146,6 +157,10 @@ abstract class ZstdContext implements CompressionContext {
 }
 
 export class ZstdCompressContext extends ZstdContext {
+  protected destroy(ctx: number) {
+    this.w.zc_free(ctx);
+  }
+
   private pledgedSrcSize = ZSTD_CONTENTSIZE_UNKNOWN;
 
   init(pledgedSrcSize: bigint, dictionary?: Uint8Array): CompressionError | null {
@@ -188,6 +203,10 @@ export class ZstdCompressContext extends ZstdContext {
 }
 
 export class ZstdDecompressContext extends ZstdContext {
+  protected destroy(ctx: number) {
+    this.w.zd_free(ctx);
+  }
+
   init(_pledgedSrcSize: bigint, dictionary?: Uint8Array): CompressionError | null {
     const w = this.w;
     if (this.ctx) w.zd_free(this.ctx);

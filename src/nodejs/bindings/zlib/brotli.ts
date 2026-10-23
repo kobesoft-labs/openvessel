@@ -32,6 +32,16 @@ abstract class BrotliContext implements CompressionContext {
 
   constructor(protected mode: Mode) {}
 
+  /** Frees this stream's buffers and gives the instance back (after the state is destroyed). */
+  protected releaseWasm() {
+    if (!this.w) return;
+    this.inBuf.release();
+    this.outBuf.release();
+    this.cache.clear();
+    loadBrotli.release(this.w);
+    this.w = null;
+  }
+
   protected wasm(): WasmExports {
     if (!this.w) {
       this.w = loadBrotli();
@@ -132,6 +142,7 @@ export class BrotliEncoderContext extends BrotliContext {
     if (this.state) this.w!.enc_destroy(this.state);
     this.state = 0;
     this.mode = Mode.NONE;
+    this.releaseWasm();
   }
 }
 
@@ -176,5 +187,6 @@ export class BrotliDecoderContext extends BrotliContext {
     if (this.state) this.w!.dec_destroy(this.state);
     this.state = 0;
     this.mode = Mode.NONE;
+    this.releaseWasm();
   }
 }

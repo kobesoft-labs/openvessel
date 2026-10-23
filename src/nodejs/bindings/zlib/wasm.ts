@@ -1,7 +1,8 @@
 // Loads the brotli / zstd WebAssembly modules built by wasm/build.mjs. They are embedded as
 // raw-deflated base64 so the bundle stays smaller; decoding and compiling happen once, on first
-// use, synchronously (new WebAssembly.Module). Each compression stream gets its own Instance, so
-// its heap is released when the stream is dropped.
+// use, synchronously (new WebAssembly.Module). Each compression stream gets its own Instance; a
+// closed stream gives it back for the next one (a browser only allows so many live wasm memories,
+// and a loop of short streams would otherwise run out before GC frees them).
 
 import { inflateRaw } from 'pako';
 
@@ -30,15 +31,25 @@ function decode(b64: string, size: number): Uint8Array<ArrayBuffer> {
 
 const imports = { env: { log2: Math.log2, log: Math.log } };
 
+const kPoolSize = 8;
+
 export function wasmLoader(load: () => { WASM_SIZE: number; WASM_DEFLATED_B64: string }) {
   let mod: WebAssembly.Module | null = null;
-  return (): WasmExports => {
+  const idle: WasmExports[] = [];
+  const acquire = (): WasmExports => {
+    const w = idle.pop();
+    if (w) return w;
     if (!mod) {
       const { WASM_SIZE, WASM_DEFLATED_B64 } = load();
       mod = new WebAssembly.Module(decode(WASM_DEFLATED_B64, WASM_SIZE));
     }
     return new WebAssembly.Instance(mod, imports).exports as unknown as WasmExports;
   };
+  /** Takes back an instance whose stream freed everything it allocated. */
+  const release = (w: WasmExports) => {
+    if (idle.length < kPoolSize && !idle.includes(w)) idle.push(w);
+  };
+  return Object.assign(acquire, { release });
 }
 
 /** A grow-only scratch buffer inside an instance's heap. */
@@ -46,6 +57,11 @@ export class Scratch {
   ptr = 0;
   cap = 0;
   constructor(private w: WasmExports) {}
+  release() {
+    if (this.ptr) this.w.free(this.ptr);
+    this.ptr = 0;
+    this.cap = 0;
+  }
   reserve(n: number): number {
     if (n > this.cap) {
       if (this.ptr) this.w.free(this.ptr);
