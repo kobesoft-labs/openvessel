@@ -220,6 +220,8 @@ function scheduleImmediates(force = false) {
     immediateQueued = false;
     if (S.exiting || !immediateInfo) return;
     if (immediateInfo[kCount] === 0 && immediateInfo[kHasOutstanding] === 0) return;
+    // only unref'd immediates and nothing else alive: the loop ends without running them
+    if (started && immediateInfo[kRefCount] === 0 && !alive()) return scheduleAliveCheck();
     scope(processImmediate!, S.process);
   });
 }
