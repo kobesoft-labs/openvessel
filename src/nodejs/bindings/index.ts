@@ -25,6 +25,7 @@ import {
   createUv,
 } from './process.ts';
 import { fromShape } from './shape.ts';
+import { createWorkerBinding } from './worker.ts';
 import { createCaresWrap, createTcpWrap } from './net.ts';
 import { createZlib } from './zlib.ts';
 import { createHttpParser } from './http_parser.ts';
@@ -77,6 +78,7 @@ export const factories: Record<string, BindingFactory> = {
   url: createUrl,
   util: createUtil,
   uv: createUv,
+  worker: createWorkerBinding,
   zlib: createZlib,
   // only for v8.queryObjects(), which needs heap access
   internal_only_v8: () => ({ queryObjects: () => [] }),

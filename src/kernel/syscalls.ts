@@ -472,6 +472,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         const t = proc.threads.get(thread.tid);
         proc.threads.delete(thread.tid);
         setTimeout(() => t?.worker.terminate(), 0);
+        if (t?.parentTid !== undefined) proc.threads.get(t.parentTid)?.worker.postMessage({ t: 'thread-exit', tid: thread.tid, code: a.code ?? 0 });
         return null;
       }
 
@@ -599,6 +600,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
             workerData: msg.workerData,
             envData: msg.envData,
             port: msg.port,
+            name: msg.name,
           },
           [msg.port, ...(msg.transfer ?? [])],
           thread.tid,
@@ -612,6 +614,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         if (t) {
           t.worker.terminate();
           proc.threads.delete(msg.tid);
+          thread.worker.postMessage({ t: 'thread-exit', tid: msg.tid, code: 1, terminated: true });
         }
         return;
       }
