@@ -204,14 +204,17 @@ export function setImmediateInfo(info: Uint32Array) {
   immediateInfo = info;
 }
 
-export function toggleImmediateRef(_refed: boolean) {
-  scheduleImmediates();
+export function toggleImmediateRef(refed: boolean) {
+  // lib refs a new Immediate before counting it (kCount is still 0 here). Inside a callback scope
+  // afterCallback looks again (keeping immediates behind the browser's unhandledrejection task);
+  // outside one (e.g. after a top-level await) nothing would: take the turn now
+  if (refed && scopeDepth === 0) scheduleImmediates(true);
   scheduleAliveCheck();
 }
 
-function scheduleImmediates() {
+function scheduleImmediates(force = false) {
   if (immediateQueued || !immediateInfo || !processImmediate) return;
-  if (immediateInfo[kCount] === 0 && immediateInfo[kHasOutstanding] === 0) return;
+  if (!force && immediateInfo[kCount] === 0 && immediateInfo[kHasOutstanding] === 0) return;
   immediateQueued = true;
   macrotask(() => {
     immediateQueued = false;
