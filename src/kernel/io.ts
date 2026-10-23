@@ -310,6 +310,21 @@ export function createPipe(): { pipe: Pipe; r: OpenFile; w: OpenFile } {
   return { pipe, r, w };
 }
 
+/** Two connected duplex ends (like socketpair(2)), used for the Node IPC channel. */
+export function createSocketPair(): [OpenFile, OpenFile] {
+  const a = createPipe();
+  const b = createPipe();
+  const end = (r: OpenFile, w: OpenFile) => {
+    const f = new OpenFile('socket', O_RDWR, { reader: r.opts.reader, writer: w.opts.writer });
+    f.onClose = () => {
+      r.unref();
+      w.unref();
+    };
+    return f;
+  };
+  return [end(a.r, b.w), end(b.r, a.w)];
+}
+
 // ---------------------------------------------------------------------------
 // TTY with a small line discipline.
 

@@ -4,7 +4,7 @@ import { KernelError, kerr } from '../shared/errno.ts';
 import * as path from '../shared/path.ts';
 import { CJS_CONDITIONS, ESM_CONDITIONS } from '../shared/resolve.ts';
 import type { EsmService } from './esm.ts';
-import { O_ACCMODE, O_RDONLY, O_WRONLY, OpenFile, createPipe } from './io.ts';
+import { O_ACCMODE, O_RDONLY, O_WRONLY, OpenFile, createPipe, createSocketPair } from './io.ts';
 import type { Kernel } from './kernel.ts';
 import type { NetRouter } from './net.ts';
 import { type NodeThread, type Proc, exitCodeOf, signalName } from './proc.ts';
@@ -51,7 +51,12 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       } else if (s === 'inherit') {
         child.push(proc.fds.get(i) ?? null);
         parentFds.push(null);
-      } else if (s === 'ignore' || s === null || s === undefined || s === 'ipc') {
+      } else if (s === 'ipc') {
+        const [mine, theirs] = createSocketPair();
+        child.push(theirs);
+        parentFds.push(proc.allocFd(mine, 3));
+        toClose.push(theirs);
+      } else if (s === 'ignore' || s === null || s === undefined) {
         const f = kernel.openFile(proc, '/dev/null', i === 0 ? O_RDONLY : O_WRONLY);
         child.push(f);
         toClose.push(f);

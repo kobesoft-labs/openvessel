@@ -142,6 +142,7 @@ export class ChildProcess extends EventEmitter {
     } catch (e) {
       const code = e instanceof SysError ? e.code : 'ENOENT';
       const err = Object.assign(new Error(`spawn ${argv[0]} ${code}`), { errno: code === 'ENOENT' ? -2 : -13, code, syscall: `spawn ${argv[0]}`, path: argv[0], spawnargs: argv.slice(1) });
+      this.stdio = [this.stdin, this.stdout, this.stderr];
       this.handle.activate();
       nextTick(() => {
         this.handle.deactivate();
