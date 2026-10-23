@@ -120,7 +120,7 @@ function errorResponse(kind: string, message: string) {
 sw.addEventListener('fetch', (ev) => {
   const url = new URL(ev.request.url);
   if (url.origin !== sw.location.origin) return;
-  if (url.pathname.startsWith('/__ov/esm/') || url.pathname.startsWith('/__ov/builtin/')) {
+  if (url.pathname.startsWith('/__ov/esm/') || url.pathname.startsWith('/__ov/builtin/') || url.pathname.startsWith('/__ov/mw/')) {
     ev.respondWith(
       ask({ k: 'esm', pathname: url.pathname, search: url.search }).then(
         (r) => new Response(r.body, { status: r.status, headers: { 'content-type': `${r.type}; charset=utf-8`, 'cache-control': 'no-store', 'cross-origin-resource-policy': 'same-origin' } }),

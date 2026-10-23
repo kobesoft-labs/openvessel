@@ -5,6 +5,7 @@
 import * as loop from '../loop.ts';
 import { S } from '../state.ts';
 import { fromShape } from './shape.ts';
+import { NativeBlob, NativeBroadcastChannel, NativeMessageChannel, NativeMessagePort, nativeStructuredClone } from '../web.ts';
 
 const kNative = Symbol('native');
 const kToken = Symbol('construct');
@@ -18,9 +19,9 @@ const wrappers = new WeakMap<object, NodeMessagePort>();
 function unwrap(v: unknown, depth = 0): unknown {
   if (depth > 32 || v === null || typeof v !== 'object') return v;
   if (v instanceof NodeMessagePort) return v[kNative];
-  if (ArrayBuffer.isView(v) || v instanceof ArrayBuffer || v instanceof Date || v instanceof RegExp || v instanceof Blob) return v;
+  if (ArrayBuffer.isView(v) || v instanceof ArrayBuffer || v instanceof Date || v instanceof RegExp || v instanceof NativeBlob) return v;
   if (typeof SharedArrayBuffer !== 'undefined' && v instanceof SharedArrayBuffer) return v;
-  if (v instanceof WebAssembly.Module || v instanceof WebAssembly.Memory || v instanceof MessagePort) return v;
+  if (v instanceof WebAssembly.Module || v instanceof WebAssembly.Memory || v instanceof NativeMessagePort) return v;
   if (Array.isArray(v)) {
     let changed = false;
     const out = v.map((x) => {
@@ -47,7 +48,7 @@ function unwrap(v: unknown, depth = 0): unknown {
 /** Replaces received native ports with wrappers. */
 function rewrap(v: unknown, depth = 0): unknown {
   if (depth > 32 || v === null || typeof v !== 'object') return v;
-  if (v instanceof MessagePort) return NodeMessagePort.wrap(v);
+  if (v instanceof NativeMessagePort) return NodeMessagePort.wrap(v);
   if (Array.isArray(v)) {
     for (let i = 0; i < v.length; i++) v[i] = rewrap(v[i], depth + 1);
     return v;
@@ -180,7 +181,7 @@ export function createMessaging() {
     port1: NodeMessagePort;
     port2: NodeMessagePort;
     constructor() {
-      const ch = new globalThis.MessageChannel();
+      const ch = new NativeMessageChannel();
       this.port1 = NodeMessagePort.wrap(ch.port1);
       this.port2 = NodeMessagePort.wrap(ch.port2);
     }
@@ -189,7 +190,7 @@ export function createMessaging() {
     MessagePort: NodeMessagePort,
     MessageChannel,
     DOMException: S.perContextExports.DOMException,
-    broadcastChannel: (name: string) => NodeMessagePort.wrap(new BroadcastChannel(name)),
+    broadcastChannel: (name: string) => NodeMessagePort.wrap(new NativeBroadcastChannel(name)),
     stopMessagePort: (port: NodeMessagePort) => port.stop(),
     drainMessagePort: (port: NodeMessagePort) => port.drain(),
     // a synchronous receive needs the shared-memory mirror the worker binding sets up
@@ -212,7 +213,7 @@ export function createMessaging() {
     structuredClone(value: unknown, options?: { transfer?: unknown[] }) {
       const list = transferList(options);
       try {
-        return rewrap(globalThis.structuredClone(unwrap(value), { transfer: list }));
+        return rewrap(nativeStructuredClone(unwrap(value), { transfer: list }));
       } catch (e: any) {
         if (e?.name === 'DataCloneError') throw new S.perContextExports.DOMException(e.message, 'DataCloneError');
         throw e;

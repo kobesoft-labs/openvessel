@@ -2,6 +2,7 @@
 // the callback scope that runs process.nextTick work, and process exit.
 
 import { S } from './state.ts';
+import { nativeQueueMicrotask } from './web.ts';
 
 const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
 const nativeClearTimeout = globalThis.clearTimeout.bind(globalThis);
@@ -111,7 +112,7 @@ let tickMicrotaskQueued = false;
 export function onTickScheduled() {
   if (inTicks || scopeDepth > 0 || tickMicrotaskQueued) return;
   tickMicrotaskQueued = true;
-  queueMicrotask(() => {
+  nativeQueueMicrotask(() => {
     tickMicrotaskQueued = false;
     if (scopeDepth === 0) {
       runTicks();

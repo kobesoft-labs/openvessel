@@ -82,6 +82,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
     return kernel.spawn({ argv: a.argv, env, cwd, stdio, ppid: proc.pid });
   };
 
+  const registeredPids = new Set<number>();
   kernel.syscall = (proc: Proc, thread: NodeThread, op: string, a: any, bin: Uint8Array | undefined) => {
     switch (op) {
       // ---------------- files ----------------
@@ -309,6 +310,16 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         return esm.resolver.formatOf(abs(proc, a.p));
 
       // ---------------- process ----------------
+      case 'esmRegister':
+        esm.register(proc.pid, a.id, a.source);
+        if (!registeredPids.has(proc.pid)) {
+          registeredPids.add(proc.pid);
+          proc.onExit.add(() => {
+            esm.dropProcess(proc.pid);
+            registeredPids.delete(proc.pid);
+          });
+        }
+        return null;
       case 'getcwd':
         return proc.cwd;
       case 'umask': {

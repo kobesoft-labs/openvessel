@@ -16,6 +16,8 @@ import { isDir } from './vfs.ts';
 export const ESM_PREFIX = '/__ov/esm';
 export const BUILTIN_PREFIX = '/__ov/builtin/';
 export const ERROR_PREFIX = '/__ov/esm-error';
+/** Module sources registered by a process (the ported Node's ModuleWrap): /__ov/mw/<pid>/<id>.mjs */
+export const MW_PREFIX = '/__ov/mw/';
 
 const dec = new TextDecoder();
 const ID = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -64,6 +66,17 @@ export class EsmService {
   resolver: Resolver;
   private ready: Promise<void>;
   private cache = new Map<string, { v: string; body: string }>();
+  /** Sources registered by processes, keyed by "<pid>/<id>". */
+  registered = new Map<string, string>();
+
+  register(pid: number, id: string, source: string) {
+    this.registered.set(`${pid}/${id}`, source);
+  }
+
+  dropProcess(pid: number) {
+    const prefix = `${pid}/`;
+    for (const k of this.registered.keys()) if (k.startsWith(prefix)) this.registered.delete(k);
+  }
   private sucrase?: typeof import('sucrase');
 
   constructor(public kernel: Kernel) {
@@ -80,6 +93,12 @@ export class EsmService {
       const ids = names.filter((n) => n !== 'default');
       if (ids.length) body += `let ${ids.map((n, i) => `__x${i}`).join(', ')};\nexport { ${ids.map((n, i) => `__x${i} as ${ID.test(n) && !RESERVED.has(n) ? n : JSON.stringify(n)}`).join(', ')} };\n`;
       if (names.includes('default')) body += 'export default undefined;\n';
+      return { status: 200, type: 'text/javascript', body };
+    }
+    if (pathname.startsWith(MW_PREFIX)) {
+      const key = pathname.slice(MW_PREFIX.length).replace(/\.mjs$/, '');
+      const body = this.registered.get(key);
+      if (body === undefined) return { status: 200, type: 'text/javascript', body: throwingModule('ERR_INTERNAL_ASSERTION', `module ${key} is not registered`) };
       return { status: 200, type: 'text/javascript', body };
     }
     if (pathname.startsWith(BUILTIN_PREFIX)) {

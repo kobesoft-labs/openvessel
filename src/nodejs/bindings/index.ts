@@ -5,7 +5,9 @@
 import nodeData from '../../node/data/process.json';
 import { S } from '../state.ts';
 import { createBuffer } from './buffer.ts';
+import { createContextify } from './contextify.ts';
 import { createFs } from './fs.ts';
+import { createModuleWrap } from './module_wrap.ts';
 import { createMessaging } from './messaging.ts';
 import {
   createAsyncWrap,
@@ -23,7 +25,9 @@ import {
   createUv,
 } from './process.ts';
 import { fromShape } from './shape.ts';
+import { createPipeWrap, createStreamWrap, createTtyWrap } from './stream.ts';
 import { createTypes, createUtil } from './util.ts';
+import { createUrlInterim } from './url-interim.ts';
 
 export type BindingFactory = () => any;
 
@@ -33,20 +37,26 @@ export const factories: Record<string, BindingFactory> = {
   buffer: createBuffer,
   builtins: () => S.builtinsBinding,
   config: createConfig,
+  contextify: createContextify,
   credentials: createCredentials,
   errors: createErrors,
   fs: createFs,
   messaging: createMessaging,
   mksnapshot: createMksnapshot,
+  module_wrap: createModuleWrap,
   options: createOptions,
   os: createOs,
   performance: createPerformance,
+  pipe_wrap: createPipeWrap,
   process_methods: createProcessMethods,
+  stream_wrap: createStreamWrap,
   symbols: createSymbols,
   task_queue: createTaskQueue,
   timers: createTimers,
   trace_events: createTraceEvents,
+  tty_wrap: createTtyWrap,
   types: createTypes,
+  url: createUrlInterim,
   util: createUtil,
   uv: createUv,
   // WebAssembly.compileStreaming/instantiateStreaming are the browser's own

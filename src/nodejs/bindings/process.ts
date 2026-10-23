@@ -6,6 +6,7 @@ import * as loop from '../loop.ts';
 import { S } from '../state.ts';
 import { fromShape, shapeOf } from './shape.ts';
 import { perfNow, timeOrigin } from '../../node/native.ts';
+import { hardwareConcurrency, nativeQueueMicrotask } from '../web.ts';
 
 const enc = new TextEncoder();
 const t0 = perfNow();
@@ -173,7 +174,7 @@ export function createTaskQueue() {
   let rejectHandler: ((type: number, promise: Promise<unknown>, reason?: unknown) => void) | null = null;
   Object.assign(b, {
     tickInfo,
-    enqueueMicrotask: (fn: () => void) => queueMicrotask(fn),
+    enqueueMicrotask: (fn: () => void) => nativeQueueMicrotask(fn),
     runMicrotasks: () => {},
     setTickCallback(fn: () => void) {
       loop.setTickCallback(fn, raw);
@@ -357,7 +358,7 @@ export function createOs() {
     getTotalMem: () => 8 * 1024 ** 3,
     getFreeMem: () => 4 * 1024 ** 3,
     getCPUs() {
-      const n = navigator.hardwareConcurrency || 4;
+      const n = hardwareConcurrency;
       const out: unknown[] = [];
       for (let i = 0; i < n; i++) out.push('OpenVessel Virtual CPU', 2400, 1000, 0, 500, 10000, 0);
       return out;
@@ -367,7 +368,7 @@ export function createOs() {
     getUserInfo: () => ({ uid: 1000, gid: 1000, username: 'user', homedir: S.init.env.HOME ?? '/home/user', shell: '/bin/sh' }),
     setPriority: () => 0,
     getPriority: () => 0,
-    getAvailableParallelism: () => navigator.hardwareConcurrency || 4,
+    getAvailableParallelism: () => hardwareConcurrency,
     getOSInformation: () => ['Linux', '6.8.0-openvessel', '#1 SMP OpenVessel', 'x86_64'],
     isBigEndian: false,
   });
