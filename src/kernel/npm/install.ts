@@ -307,8 +307,9 @@ export class Installer {
       if (own === undefined) continue;
       const theirs = this.findVisible(n, pn);
       const mine = this.findVisible(dependent, pn);
-      if (mine && theirs && mine !== theirs) return false;
-      if (!mine && theirs && !this.satisfiesNode(theirs, own)) return false;
+      // the dependent's own copy may not be placed yet: what it sees now only counts if it fits its range
+      if (theirs && !this.satisfiesNode(theirs, own)) return false;
+      if (mine && theirs && mine !== theirs && this.satisfiesNode(mine, own)) return false;
     }
     return true;
   }
@@ -355,7 +356,7 @@ export class Installer {
         const own = fromDeps[pn];
         if (own === undefined) return false;
         const mine = this.findVisible(from, pn);
-        if (mine) return v !== mine;
+        if (mine && this.satisfiesNode(mine, own)) return v !== mine;
         return !!v && !this.satisfiesNode(v, own);
       })) break;
       cur = parent;

@@ -45,6 +45,7 @@ import { createStringDecoder } from './string_decoder.ts';
 import { createSerdes } from './serdes.ts';
 import { createV8 } from './v8.ts';
 import { createHeapUtils } from './heap_utils.ts';
+import { createWasiBinding } from './wasi.ts';
 
 export type BindingFactory = () => any;
 
@@ -96,6 +97,7 @@ export const factories: Record<string, BindingFactory> = {
   worker: createWorkerBinding,
   zlib: createZlib,
   v8: createV8,
+  wasi: createWasiBinding,
   // HTTP/2 needs TLS sessions, which a browser process can't hold; the module still has to load
   http2: () =>
     Object.assign(fromShape('http2'), {

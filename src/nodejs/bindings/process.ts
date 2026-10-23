@@ -249,7 +249,20 @@ export function createSymbols() {
 
 export function createAsyncWrap() {
   const b = fromShape('async_wrap');
+  // like Environment::AsyncHooks: lib keeps the JS array itself (and fills it before calling
+  // pushAsyncContext), the native side has its own list for resources pushed from C++
   const resources: unknown[] = [];
+  const native: unknown[] = [];
+  // the dump was taken inside a callback: start from AsyncHooks' initial state instead
+  const C = b.constants;
+  (b.async_hook_fields as Uint32Array).fill(0);
+  (b.async_hook_fields as Uint32Array)[C.kCheck] = 1;
+  (b.async_ids_stack as Float64Array).fill(0);
+  const ids = b.async_id_fields as Float64Array;
+  ids[C.kExecutionAsyncId] = 1;
+  ids[C.kTriggerAsyncId] = 0;
+  ids[C.kAsyncIdCounter] = 1;
+  ids[C.kDefaultTriggerAsyncId] = -1;
   return Object.assign(b, {
     setupHooks: () => {},
     setCallbackTrampoline: () => {},
@@ -265,7 +278,7 @@ export function createAsyncWrap() {
       f[b.constants.kStackLength]++;
       ids[0] = asyncId;
       ids[1] = triggerId;
-      resources[offset] = resource;
+      native[offset] = resource;
     },
     popAsyncContext(asyncId: number) {
       const f = b.async_hook_fields as Uint32Array;
@@ -280,16 +293,18 @@ export function createAsyncWrap() {
       ids[0] = stack[2 * offset];
       ids[1] = stack[2 * offset + 1];
       f[b.constants.kStackLength] = offset;
-      resources.length = offset;
+      if (native.length > offset) native.length = offset;
+      if (resources.length > offset) resources.length = offset;
       return offset > 0;
     },
-    executionAsyncResource: (i: number) => resources[i],
+    executionAsyncResource: (i: number) => native[i],
     clearAsyncIdStack() {
       const f = b.async_hook_fields as Uint32Array;
       const ids = b.async_id_fields as Float64Array;
       ids[0] = 0;
       ids[1] = 0;
       f[b.constants.kStackLength] = 0;
+      native.length = 0;
       resources.length = 0;
     },
     queueDestroyAsyncId: () => {},

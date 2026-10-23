@@ -15,4 +15,5 @@ export const NativeBlob: typeof Blob = g.Blob;
 export const nativeStructuredClone: typeof structuredClone = g.structuredClone.bind(g);
 export const nativeQueueMicrotask: typeof queueMicrotask = g.queueMicrotask.bind(g);
 export const nativeFetch: typeof fetch = g.fetch.bind(g);
+export const NativeXMLHttpRequest: typeof XMLHttpRequest = g.XMLHttpRequest;
 export const hardwareConcurrency: number = g.navigator?.hardwareConcurrency || 4;

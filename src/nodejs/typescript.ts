@@ -2,12 +2,13 @@
 // The transform lives in ts-strip.js, fetched synchronously the first time TypeScript is loaded.
 
 import { S } from './state.ts';
+import { NativeXMLHttpRequest } from './web.ts';
 
 let transform: ((source: string, options: object) => { code: string; map?: string }) | null = null;
 
 function load() {
   if (transform) return transform;
-  const xhr = new XMLHttpRequest();
+  const xhr = new NativeXMLHttpRequest();
   xhr.open('GET', `${S.runtimeOrigin}/ts-strip.js`, false);
   xhr.send();
   if (xhr.status !== 200) throw new Error(`could not load the TypeScript transform (${xhr.status})`);

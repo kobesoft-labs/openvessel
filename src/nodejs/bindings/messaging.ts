@@ -150,6 +150,7 @@ export class NodeMessagePort {
   #stopped = false;
   #closed = false;
   #queue: MessageEvent[] = [];
+  #flushPending = false;
   /** rings for receiveMessageOnPort (only on MessageChannel ports) */
   sendRing: Ring | null = null;
   recvRing: Ring | null = null;
@@ -189,11 +190,26 @@ export class NodeMessagePort {
       this.#adoptRings(e.ports, msg.r);
       e = { data: msg.d, ports: e.ports } as MessageEvent;
     }
-    if (!this.#started || this.#stopped) {
+    if (!this.#started || this.#stopped || this.#queue.length) {
       this.#queue.push(e);
+      if (this.#started && !this.#stopped) this.#scheduleFlush();
       return;
     }
     this.#deliver(e.data, e.ports, 'message');
+  }
+
+  /** Delivers what was queued before start(), on a later turn like MessagePort::Start's uv_async:
+   *  lib calls start() from 'newListener', before the listener is attached. */
+  #scheduleFlush() {
+    if (this.#flushPending || !this.#queue.length) return;
+    this.#flushPending = true;
+    loop.macrotask(() => {
+      this.#flushPending = false;
+      while (this.#queue.length && this.#started && !this.#stopped && !this.#closed) {
+        const e = this.#queue.shift()!;
+        this.#deliver(e.data, e.ports, 'message');
+      }
+    });
   }
 
   /** Discards ring records up to seq (they were delivered asynchronously). */
@@ -260,9 +276,7 @@ export class NodeMessagePort {
     this.#started = true;
     this.#stopped = false;
     (this[kNative] as MessagePort).start?.();
-    const q = this.#queue;
-    this.#queue = [];
-    for (const e of q) this.#deliver(e.data, e.ports, 'message');
+    this.#scheduleFlush();
   }
 
   /** stopMessagePort: hold messages until start() again. */
