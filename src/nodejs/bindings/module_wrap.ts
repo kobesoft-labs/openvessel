@@ -140,10 +140,13 @@ export class ModuleWrap {
     return this.#requests.map((r) => ({ specifier: r.specifier, attributes: r.attributes }));
   }
 
-  link(specifiers: string[], modules: ModuleWrap[]) {
+  /** link(modules) since Node 22.23; link(specifiers, modules) before. Aligned with getModuleRequests(). */
+  link(...args: [ModuleWrap[]] | [string[], ModuleWrap[]]) {
     if (this.#exportNames) return;
+    const modules = (args.length === 1 ? args[0] : args[1]) as ModuleWrap[];
+    const specifiers = args.length === 1 ? null : (args[0] as string[]);
     for (let i = 0; i < this.#requests.length; i++) {
-      if (specifiers[i] !== this.#requests[i].specifier) {
+      if (specifiers && specifiers[i] !== this.#requests[i].specifier) {
         const e = new Error(`linking mismatch for ${this.url}: ${specifiers[i]} != ${this.#requests[i].specifier}`) as Error & { code: string };
         e.code = 'ERR_VM_MODULE_LINK_FAILURE';
         throw e;
