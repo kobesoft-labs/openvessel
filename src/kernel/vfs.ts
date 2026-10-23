@@ -518,7 +518,8 @@ export class VFS {
     const node = this.lookup(path, follow);
     node.mode = (node.mode & S_IFMT) | (mode & 0o7777);
     node.ctimeMs = Date.now();
-    this.generation++;
+    // IN_ATTRIB: watchers see a chmod as a 'change'
+    this.emit('change', path);
   }
 
   chown(path: string, uid: number, gid: number, follow = true) {

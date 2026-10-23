@@ -7,8 +7,12 @@ import * as loop from '../loop.ts';
 import { S, lib } from '../state.ts';
 import { Enc, decode, encode, encodingOf } from './buffer.ts';
 import { fromShape } from './shape.ts';
+import { HandleWrap } from './stream.ts';
 
-interface StatData {
+const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
+const nativeClearTimeout = globalThis.clearTimeout.bind(globalThis);
+
+export interface StatData {
   dev: number;
   ino: number;
   mode: number;
@@ -28,6 +32,9 @@ interface StatData {
 const S_IFMT = 0o170000;
 const S_IFDIR = 0o040000;
 const S_IFREG = 0o100000;
+const S_IFLNK = 0o120000;
+const S_IFSOCK = 0o140000;
+const S_IFIFO = 0o010000;
 const DIRENT: Record<number, number> = { 0o100000: 1, 0o040000: 2, 0o120000: 3, 0o010000: 4, 0o140000: 5, 0o020000: 6, 0o060000: 7 };
 
 let uvCodes: Record<string, number> | null = null;
@@ -51,14 +58,14 @@ export function uvError(e: unknown, syscall: string, path?: unknown, dest?: unkn
   return new UVException(ctx);
 }
 
-function pathString(p: unknown): string {
+export function pathString(p: unknown): string {
   if (typeof p === 'string') return p;
   if (p instanceof Uint8Array) return decode(p, Enc.UTF8);
   if (p instanceof URL) return decodeURIComponent(p.pathname);
   return String(p);
 }
 
-function fillStats(arr: Float64Array | BigInt64Array, offset: number, st: StatData) {
+export function fillStats(arr: Float64Array | BigInt64Array, offset: number, st: StatData) {
   const ns = (ms: number) => [Math.floor(ms / 1000), Math.round((ms % 1000) * 1e6)];
   const [as, an] = ns(st.atimeMs);
   const [ms, mn] = ns(st.mtimeMs);
@@ -70,7 +77,7 @@ function fillStats(arr: Float64Array | BigInt64Array, offset: number, st: StatDa
   return arr;
 }
 
-function encodeOut(s: string, encoding: unknown): string | Uint8Array {
+export function encodeOut(s: string, encoding: unknown): string | Uint8Array {
   if (encoding === 'buffer') return lib('buffer').Buffer.from(s);
   if (encoding === undefined || encoding === null || encoding === 'utf8' || encoding === 'utf-8') return s;
   return decode(encode(s, Enc.UTF8), encodingOf(encoding));
@@ -162,6 +169,76 @@ export function createFs() {
     }
   }
 
+  const ZERO_STAT: StatData = { dev: 0, ino: 0, mode: 0, nlink: 0, uid: 0, gid: 0, rdev: 0, size: 0, blksize: 0, blocks: 0, atimeMs: 0, mtimeMs: 0, ctimeMs: 0, birthtimeMs: 0 };
+  // statbuf_eq() in libuv's fs-poll.c (atime and nlink are not compared)
+  const sameStat = (a: StatData, b: StatData) =>
+    a.ctimeMs === b.ctimeMs && a.mtimeMs === b.mtimeMs && a.birthtimeMs === b.birthtimeMs && a.size === b.size && a.mode === b.mode && a.uid === b.uid && a.gid === b.gid && a.ino === b.ino && a.dev === b.dev;
+
+  /**
+   * node_stat_watcher.cc (uv_fs_poll_t): stats the path every `interval` ms and calls
+   * onchange(status, stats) with the current stats at [0, 18) and the previous ones at [18, 36) of
+   * the shared stat array. The first successful poll only records a baseline; an error is reported
+   * once (with zeroed current stats) until the result changes again.
+   */
+  class StatWatcher extends HandleWrap {
+    onchange: ((status: number, stats: Float64Array | BigInt64Array) => void) | null = null;
+    #bigint: boolean;
+    #path = '';
+    #interval = 0;
+    #timer: ReturnType<typeof setTimeout> | null = null;
+    #prev: StatData = ZERO_STAT;
+    // libuv's busy_polling: 0 before the first result, 1 after a success, the error code after a failure
+    #busy = 0;
+    constructor(bigint: boolean) {
+      super('StatWatcher');
+      this.#bigint = !!bigint;
+    }
+    start(path: unknown, interval: number): number {
+      if (this.#timer !== null || this._closed) return 0;
+      this.#path = pathString(path);
+      this.#interval = Math.max(1, interval >>> 0);
+      this.setActive(true);
+      // uv_fs_poll_start issues the first stat right away (on the thread pool)
+      this.#timer = nativeSetTimeout(() => this.#poll(), 0);
+      return 0;
+    }
+    #poll() {
+      this.#timer = null;
+      if (this._closed) return;
+      const started = loop.now();
+      let cur: StatData | null = null;
+      let status = 0;
+      try {
+        cur = st(this.#path, false);
+      } catch (e) {
+        status = e instanceof SysError ? errnoOf(e.code) : errnoOf('EIO');
+      }
+      const prev = this.#prev;
+      let notify = false;
+      if (cur === null) {
+        notify = this.#busy !== status;
+        this.#busy = status;
+      } else {
+        notify = this.#busy !== 0 && (this.#busy < 0 || !sameStat(prev, cur));
+        this.#prev = cur;
+        this.#busy = 1;
+      }
+      if (notify && typeof this.onchange === 'function') {
+        const arr = this.#bigint ? bigintStatValues : statValues;
+        fillStats(arr, 0, cur ?? ZERO_STAT);
+        fillStats(arr, 18, prev);
+        loop.scope(this.onchange, this, status, arr);
+      }
+      if (this._closed) return;
+      const elapsed = loop.now() - started;
+      this.#timer = nativeSetTimeout(() => this.#poll(), Math.max(1, this.#interval - (elapsed % this.#interval)));
+    }
+    protected override _onClose() {
+      if (this.#timer !== null) nativeClearTimeout(this.#timer);
+      this.#timer = null;
+    }
+  }
+
   class FileHandle {
     #fd: number;
     #closing = false;
@@ -193,6 +270,7 @@ export function createFs() {
   Object.assign(b, {
     FSReqCallback,
     FileHandle,
+    StatWatcher,
     access: (path: unknown, mode: number, req?: unknown) => run(req, 'access', path, undefined, () => void sys('access', { p: pathString(path), mode })),
     existsSync(path: unknown) {
       try {
@@ -384,53 +462,181 @@ export function createFs() {
         return 0;
       }
     },
-    cpSyncCheckPaths(src: string, dest: string, dereference: boolean, recursive: boolean) {
+    // fs.cpSync's native half (node_file.cc CpSyncCheckPaths / CpSyncOverrideFile / CpSyncCopyDir),
+    // including its quirks: the source is stat'ed with lstat only when dereference is set, errors are
+    // plain Errors with an ERR_FS_CP_* code, and copied symlinks get absolute, resolved targets.
+    cpSyncCheckPaths(src: unknown, dest: unknown, dereference: boolean, recursive: boolean) {
+      let srcPath = pathString(src);
+      const destPath = pathString(dest);
       let s: StatData;
       try {
-        s = st(src, !dereference);
+        s = st(srcPath, !!dereference);
       } catch (e) {
-        throw uvError(e, 'cp', src);
+        throw uvError(e, dereference ? 'stat' : 'lstat', srcPath);
       }
-      if ((s.mode & S_IFMT) === S_IFDIR && !recursive) {
-        const { codes } = lib('internal/errors');
-        throw new codes.ERR_FS_EISDIR({ message: `Recursive option is required to copy a directory: ${src}`, path: src, syscall: 'cp', errno: 21, code: 'EISDIR' });
-      }
-      const resolvedSrc = sys<string>('realpath', { p: src });
-      let resolvedDest = dest;
+      let d: StatData | null = null;
       try {
-        resolvedDest = sys<string>('realpath', { p: dest });
+        d = st(destPath, !dereference);
       } catch {}
-      if (resolvedSrc === resolvedDest) {
-        const { codes } = lib('internal/errors');
-        throw new codes.ERR_FS_CP_EINVAL({ message: 'src and dest cannot be the same', path: dest, syscall: 'cp', errno: 22, code: 'EINVAL' });
+      const srcIsDir = (s.mode & S_IFMT) === S_IFDIR || (!!dereference && (s.mode & S_IFMT) === S_IFLNK);
+      if (d) {
+        if (sameFile(srcPath, destPath)) throw cpError('ERR_FS_CP_EINVAL', `src and dest cannot be the same ${destPath}`);
+        const destIsDir = (d.mode & S_IFMT) === S_IFDIR;
+        if (srcIsDir && !destIsDir) throw cpError('ERR_FS_CP_DIR_TO_NON_DIR', `Cannot overwrite non-directory ${destPath} with directory ${srcPath}`);
+        if (!srcIsDir && destIsDir) throw cpError('ERR_FS_CP_NON_DIR_TO_DIR', `Cannot overwrite directory ${destPath} with non-directory ${srcPath}`);
       }
-      if ((resolvedDest + '/').startsWith(resolvedSrc + '/')) {
-        const { codes } = lib('internal/errors');
-        throw new codes.ERR_FS_CP_EINVAL({ message: `cannot copy ${src} to a subdirectory of self ${dest}`, path: dest, syscall: 'cp', errno: 22, code: 'EINVAL' });
+      if (!srcPath.endsWith('/')) srcPath += '/';
+      if (srcIsDir && destPath.startsWith(srcPath)) throw cpError('ERR_FS_CP_EINVAL', `Cannot copy ${srcPath} to a subdirectory of self ${destPath}`);
+      const pathMod = lib('path');
+      const srcParent = pathMod.dirname(srcPath.slice(0, -1) || '/');
+      for (let p = pathMod.dirname(destPath); p !== srcParent; p = pathMod.dirname(p)) {
+        if (sameFile(srcPath, p)) throw cpError('ERR_FS_CP_EINVAL', `Cannot copy ${srcPath} to a subdirectory of self ${destPath}`);
+        if (p === '/') break;
+      }
+      if (srcIsDir && !recursive) throw cpError('ERR_FS_EISDIR', `Recursive option not enabled, cannot copy a directory: ${srcPath}`);
+      const t = s.mode & S_IFMT;
+      if (t === S_IFSOCK) throw cpError('ERR_FS_CP_SOCKET', `Cannot copy a socket file: ${pathString(src)}`);
+      if (t === S_IFIFO) throw cpError('ERR_FS_CP_FIFO_PIPE', `Cannot copy a FIFO pipe: ${pathString(src)}`);
+      if (!d) {
+        try {
+          sys('mkdir', { p: pathMod.dirname(destPath), mode: 0o777, recursive: true });
+        } catch {}
       }
     },
-    cpSyncOverrideFile(src: string, dest: string, mode: number, preserveTimestamps: boolean) {
+    cpSyncOverrideFile(src: unknown, dest: unknown, mode: number, preserveTimestamps: boolean) {
+      const from = pathString(src);
+      const to = pathString(dest);
       try {
-        sys('unlink', { p: dest });
-        sys('copyFile', { from: src, to: dest, excl: !!(mode & 1) });
-        if (preserveTimestamps) {
-          const s = st(src, false);
-          sys('utimes', { p: dest, atime: s.atimeMs, mtime: s.mtimeMs });
+        sys('unlink', { p: to });
+      } catch (e) {
+        throw uvError(e, 'unlink', to);
+      }
+      try {
+        sys('copyFile', { from, to, excl: !!(mode & 1) });
+      } catch (e) {
+        throw uvError(e, 'cp', from, to);
+      }
+      if (preserveTimestamps) copyUtimes(from, to);
+    },
+    cpSyncCopyDir(src: unknown, dest: unknown, force: boolean, dereference: boolean, errorOnExist: boolean, verbatimSymlinks: boolean, preserveTimestamps: boolean) {
+      const pathMod = lib('path');
+      const srcRoot = pathString(src);
+      const destRoot = pathString(dest);
+      try {
+        sys('mkdir', { p: destRoot, mode: 0o777, recursive: true });
+      } catch (e) {
+        throw uvError(e, 'cp', destRoot);
+      }
+      const isSubPath = (child: string, parent: string) => child === parent || child.startsWith(parent.endsWith('/') ? parent : parent + '/');
+      const copyDir = (from: string, to: string) => {
+        let entries: [string, number][];
+        try {
+          entries = sys<[string, number][]>('readdir', { p: from, types: true });
+        } catch (e) {
+          throw uvError(e, 'cp', from);
         }
-      } catch (e) {
-        throw uvError(e, 'cp', src, dest);
-      }
-    },
-    cpSyncCopyDir(src: string, dest: string, force: boolean, dereference: boolean, errorOnExist: boolean, verbatimSymlinks: boolean, preserveTimestamps: boolean) {
-      void verbatimSymlinks;
-      void preserveTimestamps;
-      try {
-        sys('cp', { from: src, to: dest, force, errorOnExist, dereference });
-      } catch (e) {
-        throw uvError(e, 'cp', src, dest);
-      }
+        for (const [name, mode] of entries) {
+          const srcItem = pathMod.join(from, name);
+          const destItem = pathMod.join(to, name);
+          const type = mode & S_IFMT;
+          if (type === S_IFLNK) {
+            try {
+              if (verbatimSymlinks) {
+                sys('symlink', { target: sys<string>('readlink', { p: srcItem }), p: destItem });
+                continue;
+              }
+              const target = sys<string>('readlink', { p: srcItem });
+              let destLink: StatData | null = null;
+              try {
+                destLink = st(destItem, true);
+              } catch {}
+              if (destLink && (destLink.mode & S_IFMT) === S_IFLNK) {
+                const current = sys<string>('readlink', { p: destItem });
+                let targetIsDir = false;
+                try {
+                  targetIsDir = (st(srcItem, false).mode & S_IFMT) === S_IFDIR;
+                } catch {}
+                if (!dereference && targetIsDir && isSubPath(target, current)) throw cpError('ERR_FS_CP_EINVAL', `Cannot copy ${target} to a subdirectory of self ${current}`);
+                let destIsDir = false;
+                try {
+                  destIsDir = (st(destItem, false).mode & S_IFMT) === S_IFDIR;
+                } catch {}
+                if (destIsDir && isSubPath(current, target)) throw cpError('ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY', `cannot overwrite ${current} with ${target}`);
+                // the existing link is replaced even without force (as node_file.cc does)
+                sys('unlink', { p: destItem });
+              } else if (destLink && (destLink.mode & S_IFMT) === S_IFREG && (!dereference || (!force && errorOnExist))) {
+                throw new SysError('EEXIST', 'file already exists');
+              }
+              // weakly_canonical(absolute(src / target))
+              const resolved = pathMod.resolve(from, target);
+              let canonical = resolved;
+              try {
+                canonical = sys<string>('realpath', { p: resolved });
+              } catch {}
+              sys('symlink', { target: canonical, p: destItem });
+            } catch (e) {
+              throw uvError(e, 'cp', srcItem, destItem);
+            }
+          } else if (type === S_IFDIR) {
+            try {
+              sys('mkdir', { p: destItem, mode: 0o777 });
+            } catch (e) {
+              if (!(e instanceof SysError && e.code === 'EEXIST')) throw uvError(e, 'cp', srcItem, destItem);
+            }
+            copyDir(srcItem, destItem);
+          } else if (type === S_IFREG) {
+            let exists = false;
+            try {
+              st(destItem, false);
+              exists = true;
+            } catch {}
+            if (!exists || force) {
+              try {
+                if (exists) sys('unlink', { p: destItem });
+                sys('copyFile', { from: srcItem, to: destItem, excl: false });
+              } catch (e) {
+                throw uvError(e, 'cp', srcItem, destItem);
+              }
+            } else if (errorOnExist) {
+              throw cpError('ERR_FS_CP_EEXIST', `[ERR_FS_CP_EEXIST]: Target already exists: cp returned EEXIST (${destItem} already exists)`);
+            }
+            if (preserveTimestamps) copyUtimes(srcItem, destItem);
+          }
+        }
+      };
+      copyDir(srcRoot, destRoot);
     },
   });
-  void S_IFREG;
   return b;
+}
+
+/** THROW_ERR_FS_CP_*: a plain Error with a code (no syscall/path). */
+function cpError(code: string, message: string): Error {
+  return Object.assign(new Error(message), { code });
+}
+
+/** std::filesystem::equivalent: both exist and are the same inode. */
+function sameFile(a: string, b: string): boolean {
+  try {
+    const x = sys<StatData>('stat', { p: a, l: false });
+    const y = sys<StatData>('stat', { p: b, l: false });
+    return x.ino === y.ino && x.dev === y.dev;
+  } catch {
+    return false;
+  }
+}
+
+/** CopyUtimes in node_file.cc */
+function copyUtimes(src: string, dest: string) {
+  let s: StatData;
+  try {
+    s = sys<StatData>('stat', { p: src, l: false });
+  } catch (e) {
+    throw uvError(e, 'stat', src);
+  }
+  try {
+    sys('utimes', { p: dest, atime: s.atimeMs, mtime: s.mtimeMs });
+  } catch (e) {
+    throw uvError(e, 'utime', dest);
+  }
 }

@@ -7,6 +7,8 @@ import { S } from '../state.ts';
 import { createBuffer } from './buffer.ts';
 import { createContextify } from './contextify.ts';
 import { createFs } from './fs.ts';
+import { createFsDir } from './fs_dir.ts';
+import { createFsEventWrap } from './fs_event_wrap.ts';
 import { createModuleWrap } from './module_wrap.ts';
 import { createMessaging } from './messaging.ts';
 import {
@@ -48,6 +50,8 @@ export const factories: Record<string, BindingFactory> = {
   encoding_binding: createEncodingBinding,
   errors: createErrors,
   fs: createFs,
+  fs_dir: createFsDir,
+  fs_event_wrap: createFsEventWrap,
   http_parser: createHttpParser,
   icu: createIcu,
   messaging: createMessaging,
