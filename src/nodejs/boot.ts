@@ -3,10 +3,11 @@
 // node bootstraps, then the main script — and runs the event loop until the process exits.
 
 // @ts-ignore generated at build time by scripts/gen-nodelib.mjs
-import { fns, ids } from './nodelib.js';
+import { ids, params, sources } from './nodelib.js';
 import nodeData from '../node/data/process.json';
 import { initSys, post, sys } from '../node/sys.ts';
 import { getInternalBinding, getLinkedBinding } from './bindings/index.ts';
+import { lineOneOffset } from './bindings/contextify.ts';
 import { fromShape } from './bindings/shape.ts';
 import * as loop from './loop.ts';
 import { parseCommandLine } from './options.ts';
@@ -70,11 +71,12 @@ function sourceArrow(err: any): string {
   const arrowSym = S.privateSymbols.arrow_message_private_symbol;
   if (err && typeof err === 'object' && arrowSym && typeof err[arrowSym] === 'string') return err[arrowSym];
   const stack = typeof err?.stack === 'string' ? err.stack : '';
-  const m = /\(?((?:\/|file:\/\/)[^():]+):(\d+):(\d+)\)?/.exec(stack.split('\n').find((l: string) => /^\s+at /.test(l)) ?? '');
+  const m = /\(?((?:\/|file:\/\/|node:)[^():]+):(\d+):(\d+)\)?/.exec(stack.split('\n').find((l: string) => /^\s+at /.test(l)) ?? '');
   if (!m) return '';
   try {
     const file = m[1].replace(/^file:\/\//, '');
-    const line = new TextDecoder().decode(sys<Uint8Array>('readFile', { p: file })).split('\n')[Number(m[2]) - 1];
+    const text = file.startsWith('node:') ? sources[file.slice(5)] : new TextDecoder().decode(sys<Uint8Array>('readFile', { p: file }));
+    const line = text?.split('\n')[Number(m[2]) - 1];
     if (line === undefined) return '';
     return `${file}:${m[2]}\n${line}\n${' '.repeat(Math.max(0, Number(m[3]) - 1))}^\n\n`;
   } catch {
@@ -158,6 +160,67 @@ function createProcessObject(init: InitMsg) {
 // -----------------------------------------------------------------------------
 // bootstrap
 
+/**
+ * V8 calls the C++ PrepareStackTraceCallback in Node, which runs Node's JS callback (it honours
+ * Error.prepareStackTrace and Node's internal overrides). A browser's V8 calls
+ * Error.prepareStackTrace directly, so that slot gets a function doing what the C++ does; frames of
+ * the runtime itself (the "C++" side) are left out.
+ */
+/**
+ * Code compiled with eval reports its top-level frame as "eval (file:line:col)"; under Node, V8
+ * compiles builtins, modules and scripts directly, so those read "file:line:col" (a CommonJS
+ * module's wrapper: "Object.<anonymous> (file:line:col)"). Line 1 of a CommonJS file also carries
+ * the wrapper's columns, which are taken off again.
+ */
+const kMapped = Symbol('ov.mappedFrame');
+function asCompiledFrame(cs: any) {
+  if (!cs?.isEval?.() || cs[kMapped]) return cs;
+  const file = cs.getScriptNameOrSourceURL?.() || cs.getFileName?.();
+  if (!file) return cs;
+  const line = cs.getLineNumber();
+  let col = cs.getColumnNumber();
+  const shift = line === 1 ? (lineOneOffset.get(file) ?? 0) : 0;
+  col -= shift;
+  const name = cs.getFunctionName?.();
+  let text: string;
+  if (!name || name === 'eval') text = cs.getTypeName?.() === 'Object' ? `Object.<anonymous> (${file}:${line}:${col})` : `${file}:${line}:${col}`;
+  else if (shift) text = String(cs).replace(`:${line}:${col + shift}`, `:${line}:${col}`);
+  else return cs;
+  return new Proxy(cs, {
+    get(target, k) {
+      if (k === kMapped) return true;
+      if (k === 'toString') return () => text;
+      if (k === 'getColumnNumber') return () => col;
+      if (k === 'getFileName') return () => file;
+      const v = target[k];
+      return typeof v === 'function' ? v.bind(target) : v;
+    },
+  });
+}
+
+function installStackTraceHook() {
+  const nodePrepare = (Error as any).prepareStackTrace as (e: Error, t: any[]) => unknown;
+  const runtimeFile = new URL(import.meta.url).pathname;
+  let inCallback = false;
+  function prepareStackTrace(error: Error, trace: any[]) {
+    const frames = trace.filter((cs) => {
+      const f = cs?.getFileName?.();
+      if (typeof f === 'string' && f.endsWith(runtimeFile)) return false;
+      // the boundary of an indirect eval that compiled a module or script
+      if (!f && !cs?.getScriptNameOrSourceURL?.() && cs?.getFunctionName?.() === 'eval') return false;
+      return true;
+    }).map(asCompiledFrame);
+    if (inCallback || !S.prepareStackTrace) return nodePrepare(error, frames);
+    inCallback = true;
+    try {
+      return S.prepareStackTrace(globalThis, error, frames);
+    } finally {
+      inCallback = false;
+    }
+  }
+  Object.defineProperty(Error, 'prepareStackTrace', { value: prepareStackTrace, writable: true, enumerable: false, configurable: true });
+}
+
 function selectMain(values: Record<string, unknown>, argv: string[], hasEval: boolean): string {
   if (!S.isMainThread) return 'internal/main/worker_thread';
   if (values['--help']) return 'internal/main/print_help';
@@ -178,8 +241,22 @@ const marks: [string, number][] = [];
 const mark = (name: string) => marks.push([name, performance.now()]);
 mark('script loaded');
 
+const indirectEval = eval;
+const compiled = new Map<string, Function>();
+/** Compiles a builtin the way node_builtins.cc does: a function of its parameters, named node:<id>. */
+function compileBuiltin(id: string): Function | undefined {
+  let fn = compiled.get(id);
+  if (!fn) {
+    const src: string | undefined = sources[id];
+    if (src === undefined) return undefined;
+    fn = indirectEval(`(function (${params[id]}) {${src}\n})\n//# sourceURL=node:${id}`) as Function;
+    compiled.set(id, fn);
+  }
+  return fn;
+}
+
 function run(id: string, ...args: unknown[]) {
-  const fn = fns[id];
+  const fn = compileBuiltin(id);
   if (!fn) throw new Error(`missing builtin ${id}`);
   return fn.apply(undefined, args);
 }
@@ -243,7 +320,7 @@ function boot(init: InitMsg) {
   S.builtinsBinding = Object.assign(fromShape('builtins'), {
     builtinIds: ids,
     compileFunction(id: string) {
-      const fn = fns[id];
+      const fn = compileBuiltin(id);
       if (!fn) {
         const e = new Error(`No such built-in module: ${id}`) as Error & { code: string };
         e.code = 'ERR_UNKNOWN_BUILTIN_MODULE';
@@ -258,10 +335,10 @@ function boot(init: InitMsg) {
     hasCachedBuiltins: () => true,
     getCacheUsage: () => ({ compiledWithCache: [], compiledWithoutCache: [], compiledInSnapshot: [] }),
     natives: new Proxy(Object.create(null), {
-      get: (_t, k) => (typeof k === 'string' && fns[k] ? String(fns[k]) : undefined),
-      has: (_t, k) => typeof k === 'string' && !!fns[k],
+      get: (_t, k) => (typeof k === 'string' ? sources[k] : undefined),
+      has: (_t, k) => typeof k === 'string' && k in sources,
       ownKeys: () => ids,
-      getOwnPropertyDescriptor: (_t, k) => (typeof k === 'string' && fns[k] ? { value: String(fns[k]), enumerable: true, configurable: true } : undefined),
+      getOwnPropertyDescriptor: (_t, k) => (typeof k === 'string' && k in sources ? { value: sources[k], enumerable: true, configurable: true } : undefined),
     }),
   });
 
@@ -269,6 +346,7 @@ function boot(init: InitMsg) {
   S.process = process;
 
   run('internal/bootstrap/realm', process, getLinkedBinding, getInternalBinding, primordials);
+  installStackTraceHook();
   mark('realm');
   const require = S.requireBuiltin;
   const internalBinding = S.internalBinding;

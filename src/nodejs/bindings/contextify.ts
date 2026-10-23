@@ -68,10 +68,15 @@ function sourceMapInfo(code: string) {
   return { sourceMapURL: sm?.[1], sourceURL: su?.[1] };
 }
 
+/** How many columns the wrapper adds to line 1 of a compiled file (stack traces subtract it). */
+export const lineOneOffset = new Map<string, number>();
+
 function compileWrapper(code: string, filename: string, params: string[], symbol: unknown): Function {
   const body = routeDynamicImport(code, symbol, filename);
   // keep the code on the wrapper's first line so line numbers match the file
-  return indirectEval(`(function (${params.join(', ')}) {${body}\n})\n//# sourceURL=${filename}`);
+  const head = `(function (${params.join(', ')}) {`;
+  lineOneOffset.set(filename, head.length);
+  return indirectEval(`${head}${body}\n})\n//# sourceURL=${filename}`);
 }
 
 const CJS_PARAMS = ['exports', 'require', 'module', '__filename', '__dirname'];
