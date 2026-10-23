@@ -3,6 +3,7 @@
 // through the event loop. Members not listed here keep the recorded shape's ERR_NOT_IMPLEMENTED stubs.
 
 import { fromShape } from './shape.ts';
+import { SecureContext } from './tls_wrap.ts';
 import { CipherBase, getCipherInfo, getCiphers, getSSLCiphers } from './crypto/cipher.ts';
 import { Hash, HashJob, Hmac, HmacJob, getCachedAliases, getHashes, oneShotDigest } from './crypto/hash.ts';
 import { HKDFJob, PBKDF2Job, ScryptJob } from './crypto/kdf.ts';
@@ -34,6 +35,7 @@ export function createCrypto() {
   return Object.assign(fromShape('crypto'), {
     // certificate stores: TLS runs in the browser (fetch), so the process holds none
     getBundledRootCertificates: () => [],
+    SecureContext,
     getSystemCACertificates: () => [],
     getExtraCACertificates: () => [],
     getUserRootCertificates: () => [],

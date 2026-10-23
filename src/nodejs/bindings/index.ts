@@ -46,6 +46,7 @@ import { createSerdes } from './serdes.ts';
 import { createV8 } from './v8.ts';
 import { createHeapUtils } from './heap_utils.ts';
 import { createWasiBinding } from './wasi.ts';
+import { createTlsWrap } from './tls_wrap.ts';
 
 export type BindingFactory = () => any;
 
@@ -87,6 +88,7 @@ export const factories: Record<string, BindingFactory> = {
   symbols: createSymbols,
   task_queue: createTaskQueue,
   tcp_wrap: createTcpWrap,
+  tls_wrap: createTlsWrap,
   timers: createTimers,
   trace_events: createTraceEvents,
   tty_wrap: createTtyWrap,

@@ -8,6 +8,7 @@ import { O_ACCMODE, O_RDONLY, O_WRONLY, OpenFile, createPipe, createSocketPair }
 import type { Kernel } from './kernel.ts';
 import type { NetRouter } from './net.ts';
 import { type NodeThread, type Proc, exitCodeOf, signalName } from './proc.ts';
+import { connectOutbound, markOutboundTls } from './outbound.ts';
 import { S_IFCHR, S_IFIFO, S_IFREG, S_IFSOCK, isDir } from './vfs.ts';
 
 const enc = new TextEncoder();
@@ -504,6 +505,15 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         const end = net.tcp.connect(rec, { address: '127.0.0.1', port: 0 });
         if (!end) throw kerr('ECONNREFUSED');
         return proc.allocFd(end, 3);
+      }
+      case 'tcpConnectOut': {
+        // not a virtual port: HTTP over the policy-checked proxy (see outbound.ts)
+        const end = connectOutbound(self.location.origin, { host: String(a.host), port: Number(a.port), tls: !!a.tls }, `${proc.pid} ${proc.argv.slice(0, 3).join(' ')}`.slice(0, 200));
+        return proc.allocFd(end, 3);
+      }
+      case 'tcpSetTls': {
+        const f = proc.fds.get(a.fd);
+        return f ? markOutboundTls(f, a.servername) : false;
       }
       case 'shutdown': {
         const f = proc.fds.get(a.fd);

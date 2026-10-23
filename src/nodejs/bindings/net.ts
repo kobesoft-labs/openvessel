@@ -87,8 +87,14 @@ class TCPWrap extends LibuvStreamWrap {
 
   connect(req: { oncomplete?: (status: number, handle: TCPWrap, req: unknown, readable: boolean, writable: boolean) => void }, address: string, port: number) {
     if (!isLoopback(address)) {
-      // only virtual ports exist; outbound connections go through fetch (not raw TCP)
-      return this.#completeConnect(req, errno('ECONNREFUSED'));
+      // no sockets in a browser: the kernel speaks HTTP for us through the network policy (kernel/outbound.ts)
+      try {
+        const fd = sys<number>('tcpConnectOut', { host: hostnameForAddress(address) ?? address, port });
+        this._attach(fd, { address: isV6(address) ? '::' : '0.0.0.0', port: 0 }, { address, port });
+      } catch (e) {
+        return this.#completeConnect(req, e instanceof SysError ? errno(e.code) : errno('ECONNREFUSED'));
+      }
+      return this.#completeConnect(req, 0);
     }
     let fd: number;
     try {
