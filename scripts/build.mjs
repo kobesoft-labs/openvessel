@@ -38,6 +38,7 @@ const configs = [
   { ...common, entryPoints: { runtime: 'src/runtime/runtime.ts', sw: 'src/runtime/sw.ts' }, outdir: join(dist, 'runtime'), format: 'iife' },
   // the ported Node.js (src/nodejs); nodelib.js is generated next to it
   { ...common, plugins: [...common.plugins, nodelibExternal], entryPoints: { 'node-process': 'src/nodejs/boot.ts' }, outdir: join(dist, 'runtime'), format: 'esm', alias: {} },
+  { ...common, entryPoints: { 'ts-strip': 'src/nodejs/ts-strip.ts' }, outdir: join(dist, 'runtime'), format: 'iife', alias: {} },
   { ...common, entryPoints: { sw: 'src/preview/sw.ts', relay: 'src/preview/relay.ts', inject: 'src/preview/inject.ts' }, outdir: join(dist, 'preview/__ov'), format: 'iife' },
   { ...common, entryPoints: { index: 'src/host/index.ts' }, outdir: join(dist, 'host'), format: 'esm' },
   { ...common, entryPoints: { app: 'playground/app.ts' }, outdir: join(dist, 'playground'), format: 'esm', loader: { '.css': 'css' } },
