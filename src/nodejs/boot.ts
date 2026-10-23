@@ -221,6 +221,34 @@ function installStackTraceHook() {
   Object.defineProperty(Error, 'prepareStackTrace', { value: prepareStackTrace, writable: true, enumerable: false, configurable: true });
 }
 
+/**
+ * Makes the global object look like Node's: names a Worker has but Node doesn't (postMessage,
+ * location, indexedDB, onmessage, addEventListener…) are hidden, and enumerability follows Node.
+ * Prototypes are left alone (EventTarget.prototype is shared with AbortSignal, MessagePort…);
+ * inherited names are shadowed on the global itself.
+ */
+function shapeGlobal() {
+  const nodeGlobals = nodeData.globals as Record<string, boolean>;
+  const g = globalThis as any;
+  const seen = new Set<string>();
+  for (let obj = g; obj && obj !== Object.prototype; obj = Object.getPrototypeOf(obj)) {
+    for (const name of Object.getOwnPropertyNames(obj)) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      const own = obj === g;
+      const d = Object.getOwnPropertyDescriptor(obj, name)!;
+      try {
+        if (name in nodeGlobals) {
+          if (own && d.configurable && d.enumerable !== nodeGlobals[name]) Object.defineProperty(g, name, { enumerable: nodeGlobals[name] });
+          continue;
+        }
+        if (own && d.configurable) delete g[name];
+        else if (!own) Object.defineProperty(g, name, { value: undefined, writable: true, configurable: true, enumerable: false });
+      } catch {}
+    }
+  }
+}
+
 function selectMain(values: Record<string, unknown>, argv: string[], hasEval: boolean): string {
   if (!S.isMainThread) return 'internal/main/worker_thread';
   if (values['--help']) return 'internal/main/print_help';
@@ -364,6 +392,7 @@ function boot(init: InitMsg) {
     run('internal/bootstrap/switches/does_not_own_process_state', process, require, internalBinding, primordials);
   }
 
+  shapeGlobal();
   mark('web + switches');
   const main = selectMain(S.optionValues, S.argv, S.hasEval);
   loop.scope(() => {

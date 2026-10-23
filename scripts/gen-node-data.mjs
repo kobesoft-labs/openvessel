@@ -74,6 +74,8 @@ const proc = {
   embedderOptions: opts.getEmbedderOptions(),
   envSettings: opts.envSettings, types: opts.types,
   builtinCategories: internalBinding('builtins').builtinCategories,
+  // the global object after bootstrap: name → enumerable (the runtime hides everything else)
+  globals: Object.fromEntries(Object.getOwnPropertyNames(globalThis).map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k).enumerable])),
 };
 process.stdout.write(JSON.stringify({ bindings, natives, proc }));
 `;
@@ -87,6 +89,8 @@ const ov = proc.optionValues;
 Object.assign(ov, { '--expose-internals': false, '--warnings': true, '--require': [] });
 if ('--no-expose-internals' in ov) ov['--no-expose-internals'] = true;
 if ('--no-warnings' in ov) ov['--no-warnings'] = false;
+// globals the dumper's own script made (stdin scripts get module/require/… as globals)
+for (const k of ['__filename', '__dirname', 'module', 'exports', 'require', 'shape']) delete proc.globals[k];
 return { bindings, natives, proc };
 }
 
