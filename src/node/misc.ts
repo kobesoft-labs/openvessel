@@ -7,6 +7,7 @@ import * as loop from './loop.ts';
 import { StdReadStream, StdWriteStream } from './process.ts';
 import { sys } from './sys.ts';
 import { format, formatWithOptions, inspect } from './util.ts';
+import { perfNow } from './native.ts';
 
 // -----------------------------------------------------------------------------
 // console
@@ -45,17 +46,17 @@ export function makeConsole(stdout: any, stderr?: any, opts: { colorMode?: boole
       write(out, `${label}: ${n}`);
     },
     countReset: (label = 'default') => counts.delete(label),
-    time: (label = 'default') => timers.set(label, performance.now()),
+    time: (label = 'default') => timers.set(label, perfNow()),
     timeEnd: (label = 'default') => {
       const t = timers.get(label);
       if (t === undefined) return;
       timers.delete(label);
-      write(out, `${label}: ${fmtMs(performance.now() - t)}`);
+      write(out, `${label}: ${fmtMs(perfNow() - t)}`);
     },
     timeLog: (label = 'default', ...a: unknown[]) => {
       const t = timers.get(label);
       if (t === undefined) return;
-      write(out, `${label}: ${fmtMs(performance.now() - t)}${a.length ? ' ' + fmt(a) : ''}`);
+      write(out, `${label}: ${fmtMs(perfNow() - t)}${a.length ? ' ' + fmt(a) : ''}`);
     },
     group: (...a: unknown[]) => {
       if (a.length) write(out, fmt(a));
@@ -391,7 +392,7 @@ export const asyncHooks = {
 
 export const perfHooks = {
   performance: Object.assign(Object.create(null), {
-    now: () => performance.now(),
+    now: () => perfNow(),
     timeOrigin: performance.timeOrigin,
     mark: (...a: any[]) => (performance.mark as any)(...a),
     measure: (...a: any[]) => (performance.measure as any)(...a),
@@ -402,7 +403,7 @@ export const perfHooks = {
     clearMeasures: (n?: string) => performance.clearMeasures(n),
     timerify: <F extends (...a: any[]) => any>(fn: F) => fn,
     eventLoopUtilization: () => ({ idle: 0, active: 0, utilization: 0 }),
-    nodeTiming: { name: 'node', entryType: 'node', startTime: 0, duration: performance.now(), nodeStart: 0, v8Start: 0, environment: 0, bootstrapComplete: 0, loopStart: 0, loopExit: -1, idleTime: 0 },
+    nodeTiming: { name: 'node', entryType: 'node', startTime: 0, duration: perfNow(), nodeStart: 0, v8Start: 0, environment: 0, bootstrapComplete: 0, loopStart: 0, loopExit: -1, idleTime: 0 },
     toJSON: () => ({ timeOrigin: performance.timeOrigin }),
   }),
   PerformanceObserver: (globalThis as any).PerformanceObserver ?? class {

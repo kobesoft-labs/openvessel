@@ -2,6 +2,7 @@
 
 import * as path from '../shared/path.ts';
 import { SysError, sys } from './sys.ts';
+import { getRandomValues, perfNow, timeOrigin } from './native.ts';
 
 const ERRNO: Record<string, number> = {
   E2BIG: 1, EACCES: 2, EADDRINUSE: 3, EAGAIN: 6, EBADF: 8, EBUSY: 10, ECANCELED: 11, ECHILD: 12, ECONNREFUSED: 14, ECONNRESET: 15, EEXIST: 20, EFAULT: 21, EFBIG: 22, EINTR: 27,
@@ -203,7 +204,7 @@ export class WASI {
         return ESUCCESS;
       }),
       clock_time_get: wrap((id, _prec, ptr) => {
-        const ns = id === 0 ? BigInt(Date.now()) * 1000000n : BigInt(Math.floor((performance.timeOrigin + performance.now()) * 1e6));
+        const ns = id === 0 ? BigInt(Date.now()) * 1000000n : BigInt(Math.floor((timeOrigin + perfNow()) * 1e6));
         self.view().setBigUint64(ptr, ns, true);
         return ESUCCESS;
       }),
@@ -480,7 +481,7 @@ export class WASI {
           if (tag === 0) {
             const t = v.getBigUint64(base + 24, true);
             const abs = v.getUint16(base + 40, true) & 1;
-            const ns = abs ? Number(t) - (performance.timeOrigin + performance.now()) * 1e6 : Number(t);
+            const ns = abs ? Number(t) - (timeOrigin + perfNow()) * 1e6 : Number(t);
             timeout = Math.min(timeout, Math.max(0, ns / 1e6));
             const ev = outPtr + events * 32;
             v.setBigUint64(ev, userdata, true);
@@ -509,7 +510,7 @@ export class WASI {
       sched_yield: () => ESUCCESS,
       random_get: wrap((buf, len) => {
         const tmp = new Uint8Array(len);
-        for (let i = 0; i < len; i += 65536) crypto.getRandomValues(tmp.subarray(i, Math.min(len, i + 65536)));
+        for (let i = 0; i < len; i += 65536) getRandomValues(tmp.subarray(i, Math.min(len, i + 65536)));
         self.bytes().set(tmp, buf);
         return ESUCCESS;
       }),

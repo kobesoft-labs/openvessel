@@ -275,6 +275,12 @@ function installGlobals() {
       }
     }
   }
+  // fallback for rewritten code that runs detached from its module (fn.toString() → new Function)
+  Object.defineProperty(g, '__ov_di', {
+    value: (s: unknown, o?: unknown) => dimport(s, o, pathToFileURLString(proc.cwd() + '/[eval]')),
+    configurable: true,
+    writable: true,
+  });
   g.__ov = {
     builtin,
     requireForImport: (file: string) => loadFile(file, null, false),

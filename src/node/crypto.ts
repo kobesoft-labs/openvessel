@@ -9,6 +9,7 @@ import { sha224, sha256, sha384, sha512, sha512_256 } from '@noble/hashes/sha2.j
 import { sha3_256, sha3_512, sha3_224, sha3_384, shake128, shake256 } from '@noble/hashes/sha3.js';
 import { blake2b, blake2s } from '@noble/hashes/blake2.js';
 import { Transform } from './stream.ts';
+import { getRandomValues as nativeRandom, nativeCrypto, randomUUID as nativeUUID } from './native.ts';
 
 type NobleHash = { create(opts?: any): any; outputLen: number; blockLen: number };
 
@@ -157,7 +158,7 @@ export function getCurves() {
 
 export function randomBytes(n: number, cb?: (e: Error | null, b: Buffer) => void): any {
   const b = Buffer.alloc(n);
-  for (let i = 0; i < n; i += 65536) crypto.getRandomValues(b.subarray(i, Math.min(n, i + 65536)));
+  for (let i = 0; i < n; i += 65536) nativeRandom(b.subarray(i, Math.min(n, i + 65536)));
   if (cb) {
     queueMicrotask(() => cb(null, b));
     return;
@@ -171,7 +172,7 @@ export const rng = randomBytes;
 export function randomFillSync<T extends ArrayBufferView>(buf: T, offset = 0, size?: number): T {
   const view = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
   const end = size === undefined ? view.length : offset + size;
-  for (let i = offset; i < end; i += 65536) crypto.getRandomValues(view.subarray(i, Math.min(end, i + 65536)));
+  for (let i = offset; i < end; i += 65536) nativeRandom(view.subarray(i, Math.min(end, i + 65536)));
   return buf;
 }
 
@@ -182,7 +183,7 @@ export function randomFill(buf: ArrayBufferView, ...args: any[]) {
 }
 
 export function randomUUID() {
-  return crypto.randomUUID();
+  return nativeUUID();
 }
 
 export function randomInt(min: number, max?: number, cb?: (e: Error | null, n: number) => void): any {
@@ -196,7 +197,7 @@ export function randomInt(min: number, max?: number, cb?: (e: Error | null, n: n
   }
   const range = max - min;
   const v = new Uint32Array(2);
-  crypto.getRandomValues(v);
+  nativeRandom(v);
   const n = min + Math.floor(((v[0] * 2 ** 21 + (v[1] >>> 11)) / 2 ** 53) * range);
   if (cb) {
     queueMicrotask(() => cb!(null, n));
@@ -205,9 +206,9 @@ export function randomInt(min: number, max?: number, cb?: (e: Error | null, n: n
   return n;
 }
 
-export const getRandomValues = (a: any) => crypto.getRandomValues(a);
-export const webcrypto = globalThis.crypto;
-export const subtle = globalThis.crypto?.subtle;
+export const getRandomValues = (a: any) => nativeRandom(a);
+export const webcrypto = nativeCrypto;
+export const subtle = nativeCrypto?.subtle;
 
 export function timingSafeEqual(a: ArrayBufferView, b: ArrayBufferView) {
   if (a.byteLength !== b.byteLength) {

@@ -499,7 +499,8 @@ export class Worker extends EventEmitter {
         file = (globalThis as any).process.cwd() + '/' + file;
       }
     }
-    const transfer: Transferable[] = [ch.port2, ...((opts.transferList ?? []) as any[]).map((t: any) => (t instanceof NodeMessagePort ? (t as any)[kNative] : t))];
+    const userTransfer: Transferable[] = ((opts.transferList ?? []) as any[]).map((t: any) => (t instanceof NodeMessagePort ? (t as any)[kNative] : t));
+    const transfer: Transferable[] = [ch.port2, ...userTransfer];
     const env = opts.env === SHARE_ENV || opts.env === undefined ? { ...(globalThis as any).process.env } : Object.fromEntries(Object.entries(opts.env).map(([k, v]) => [k, String(v)]));
     const reqId = nextReq++;
     this.threadId = sys<number>('threadReserve', {});
@@ -517,6 +518,7 @@ export class Worker extends EventEmitter {
         workerData: unwrap(opts.workerData),
         envData: [...envData],
         port: ch.port2,
+        transfer: userTransfer,
         name: opts.name,
       },
       transfer,

@@ -277,7 +277,8 @@ class Npm {
     env.npm_package_name = pkg.name ?? '';
     env.npm_package_version = pkg.version ?? '';
     env.npm_package_json = path.join(dir, 'package.json');
-    env.npm_config_user_agent = this.userAgent();
+    // npx inside another manager's script keeps that manager's user agent (only-allow relies on it)
+    if (event !== 'npx' || !env.npm_config_user_agent) env.npm_config_user_agent = this.userAgent();
     env.npm_execpath = `/usr/lib/node_modules/${this.pm}/bin/${this.pm}-cli.js`;
     env.npm_node_execpath = '/usr/bin/node';
     env.npm_command = event === 'test' || event === 'start' ? event : 'run-script';

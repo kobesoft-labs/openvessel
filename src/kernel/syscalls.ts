@@ -557,7 +557,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
             envData: msg.envData,
             port: msg.port,
           },
-          [msg.port],
+          [msg.port, ...(msg.transfer ?? [])],
           thread.tid,
           tid,
         );

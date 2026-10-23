@@ -1,5 +1,6 @@
 // Minimal WebSocket frame codec used to bridge a virtual socket (where a server
 // library such as `ws` speaks the wire protocol) to message-based transport.
+import { getRandomValues } from './native.ts';
 
 export function encodeClientFrame(data: Uint8Array, opcode: number): Uint8Array {
   // client → server frames must be masked
@@ -20,7 +21,7 @@ export function encodeClientFrame(data: Uint8Array, opcode: number): Uint8Array 
     dv.setUint32(2, Math.floor(len / 2 ** 32));
     dv.setUint32(6, len >>> 0);
   }
-  const mask = crypto.getRandomValues(new Uint8Array(4));
+  const mask = getRandomValues(new Uint8Array(4));
   out.set(mask, headerLen);
   for (let i = 0; i < len; i++) out[headerLen + 4 + i] = data[i] ^ mask[i & 3];
   return out;

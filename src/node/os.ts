@@ -1,4 +1,5 @@
 // node:os
+import { perfNow } from './native.ts';
 
 let hostnameValue = 'openvessel';
 let homeValue = '/home/user';
@@ -49,7 +50,7 @@ export function endianness() {
   return 'LE';
 }
 export function uptime() {
-  return Math.floor(performance.now() / 1000);
+  return Math.floor(perfNow() / 1000);
 }
 export function loadavg() {
   return [0, 0, 0];

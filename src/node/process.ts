@@ -6,6 +6,7 @@ import { startReading } from './fs.ts';
 import { Handle, nextTick, ref, unref } from './loop.ts';
 import { Readable, Writable } from './stream.ts';
 import { SysError, sys } from './sys.ts';
+import { perfNow, timeOrigin } from './native.ts';
 
 export const NODE_VERSION = '22.20.0';
 
@@ -284,10 +285,9 @@ export function createProcess(init: ProcessInit) {
   proc.getgroups = () => [1000];
   proc.setuid = proc.setgid = proc.seteuid = proc.setegid = proc.setgroups = () => {};
   proc.nextTick = nextTick;
-  const t0 = performance.now();
-  const timeOrigin = performance.timeOrigin;
+  const t0 = perfNow();
   proc.hrtime = (prev?: [number, number]) => {
-    const now = performance.now();
+    const now = perfNow();
     const sec = Math.floor((timeOrigin + now) / 1000);
     const ns = Math.floor(((timeOrigin + now) % 1000) * 1e6);
     if (prev) {
@@ -301,8 +301,8 @@ export function createProcess(init: ProcessInit) {
     }
     return [sec, ns];
   };
-  proc.hrtime.bigint = () => BigInt(Math.floor((timeOrigin + performance.now()) * 1e6));
-  proc.uptime = () => (performance.now() - t0) / 1000;
+  proc.hrtime.bigint = () => BigInt(Math.floor((timeOrigin + perfNow()) * 1e6));
+  proc.uptime = () => (perfNow() - t0) / 1000;
   proc.memoryUsage = () => {
     const m = (performance as any).memory;
     const used = m?.usedJSHeapSize ?? 50e6;
@@ -310,10 +310,10 @@ export function createProcess(init: ProcessInit) {
   };
   proc.memoryUsage.rss = () => proc.memoryUsage().rss;
   proc.cpuUsage = (prev?: { user: number; system: number }) => {
-    const user = Math.floor((performance.now() - t0) * 1000);
+    const user = Math.floor((perfNow() - t0) * 1000);
     return prev ? { user: user - prev.user, system: 0 } : { user, system: 0 };
   };
-  proc.resourceUsage = () => ({ userCPUTime: Math.floor((performance.now() - t0) * 1000), systemCPUTime: 0, maxRSS: 100000, fsRead: 0, fsWrite: 0 });
+  proc.resourceUsage = () => ({ userCPUTime: Math.floor((perfNow() - t0) * 1000), systemCPUTime: 0, maxRSS: 100000, fsRead: 0, fsWrite: 0 });
   proc.constrainedMemory = () => 0;
   proc.availableMemory = () => 4 * 1024 ** 3;
   proc.kill = (pid: number, sig: string | number = 'SIGTERM') => {
