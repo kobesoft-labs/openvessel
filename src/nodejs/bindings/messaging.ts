@@ -10,6 +10,85 @@ import { NativeBlob, NativeBroadcastChannel, NativeMessageChannel, NativeMessage
 const kNative = Symbol('native');
 const kToken = Symbol('construct');
 const CLOSE = '__ovMessagePortClosed';
+/** Envelope key: messages between our ports carry a sequence number and the rings of moved ports. */
+const ENV = '__ovMsg';
+
+// -----------------------------------------------------------------------------
+// receiveMessageOnPort: every message on a MessageChannel's ports is also written, serialized with
+// v8.serialize, to a shared-memory ring for its direction, so the receiving side can take it
+// synchronously. A message that can't be serialized (ports, functions…) leaves a gap record and
+// is only delivered the normal way.
+
+const RING_SIZE = 1 << 20; // power of two
+const GAP = 0xffffffff;
+
+class Ring {
+  readonly head: Int32Array; // [0] write position, [1] read position (wrapping int32)
+  readonly data: Uint8Array;
+  constructor(readonly sab: SharedArrayBuffer) {
+    this.head = new Int32Array(sab, 0, 2);
+    this.data = new Uint8Array(sab, 8);
+  }
+  static create() {
+    return new Ring(new SharedArrayBuffer(8 + RING_SIZE));
+  }
+  #copyIn(pos: number, bytes: Uint8Array) {
+    const at = pos & (RING_SIZE - 1);
+    const first = Math.min(bytes.length, RING_SIZE - at);
+    this.data.set(bytes.subarray(0, first), at);
+    if (first < bytes.length) this.data.set(bytes.subarray(first), 0);
+  }
+  #copyOut(pos: number, len: number) {
+    const out = new Uint8Array(len);
+    const at = pos & (RING_SIZE - 1);
+    const first = Math.min(len, RING_SIZE - at);
+    out.set(this.data.subarray(at, at + first));
+    if (first < len) out.set(this.data.subarray(0, len - first), first);
+    return out;
+  }
+  /** Appends a record; payload null writes a gap. */
+  push(seq: number, payload: Uint8Array | null) {
+    const len = payload ? payload.length : 0;
+    const head = Atomics.load(this.head, 0);
+    const tail = Atomics.load(this.head, 1);
+    const need = 8 + len;
+    if (RING_SIZE - ((head - tail) | 0) < need + 8) {
+      // full: record only the gap, if even that fits
+      if (RING_SIZE - ((head - tail) | 0) < 8) return;
+      payload = null;
+    }
+    const hdr = new Uint8Array(8);
+    const dv = new DataView(hdr.buffer);
+    dv.setUint32(0, payload ? payload.length : GAP, true);
+    dv.setUint32(4, seq, true);
+    this.#copyIn(head, hdr);
+    if (payload) this.#copyIn((head + 8) | 0, payload);
+    Atomics.store(this.head, 0, (head + 8 + (payload ? payload.length : 0)) | 0);
+  }
+  /** The next record without consuming it. */
+  peek(): { seq: number; payload: Uint8Array | null; size: number } | null {
+    const head = Atomics.load(this.head, 0);
+    const tail = Atomics.load(this.head, 1);
+    if (head === tail) return null;
+    const dv = new DataView(this.#copyOut(tail, 8).buffer);
+    const len = dv.getUint32(0, true);
+    const seq = dv.getUint32(4, true);
+    if (len === GAP) return { seq, payload: null, size: 8 };
+    return { seq, payload: this.#copyOut((tail + 8) | 0, len), size: 8 + len };
+  }
+  skip(size: number) {
+    Atomics.store(this.head, 1, (Atomics.load(this.head, 1) + size) | 0);
+  }
+}
+
+function serializeForRing(value: unknown): Uint8Array | null {
+  try {
+    const b: Uint8Array = S.requireBuiltin('v8').serialize(value);
+    return new Uint8Array(b.buffer, b.byteOffset, b.byteLength);
+  } catch {
+    return null;
+  }
+}
 
 type NativeEnd = MessagePort | BroadcastChannel;
 
@@ -71,6 +150,11 @@ export class NodeMessagePort {
   #stopped = false;
   #closed = false;
   #queue: MessageEvent[] = [];
+  /** rings for receiveMessageOnPort (only on MessageChannel ports) */
+  sendRing: Ring | null = null;
+  recvRing: Ring | null = null;
+  #seq = 1;
+  #consumed = new Set<number>();
 
   constructor(token?: symbol, native?: NativeEnd) {
     if (token !== kToken || !native) {
@@ -96,11 +180,55 @@ export class NodeMessagePort {
       this.#closeLocal();
       return;
     }
+    const env = e.data && typeof e.data === 'object' ? (e.data as any)[ENV] : undefined;
+    if (env !== undefined) {
+      const seq = env as number;
+      if (seq && this.#consumed.delete(seq)) return; // already taken by receiveMessageOnPort
+      if (seq) this.#dropMirror(seq);
+      const msg = e.data as { d: unknown; r?: [number, SharedArrayBuffer, SharedArrayBuffer][] };
+      this.#adoptRings(e.ports, msg.r);
+      e = { data: msg.d, ports: e.ports } as MessageEvent;
+    }
     if (!this.#started || this.#stopped) {
       this.#queue.push(e);
       return;
     }
     this.#deliver(e.data, e.ports, 'message');
+  }
+
+  /** Discards ring records up to seq (they were delivered asynchronously). */
+  #dropMirror(seq: number) {
+    const ring = this.recvRing;
+    if (!ring) return;
+    for (;;) {
+      const r = ring.peek();
+      if (!r || r.seq > seq) return;
+      ring.skip(r.size);
+    }
+  }
+
+  /** Ports moved here keep their rings. */
+  #adoptRings(ports: readonly MessagePort[], rings?: [number, SharedArrayBuffer, SharedArrayBuffer][]) {
+    for (const [i, send, recv] of rings ?? []) {
+      const p = NodeMessagePort.wrap(ports[i]);
+      p.sendRing = new Ring(send);
+      p.recvRing = new Ring(recv);
+    }
+  }
+
+  /** receiveMessageOnPort */
+  receiveSync(): { message: unknown } | undefined {
+    if (this.#queue.length) {
+      const e = this.#queue.shift()!;
+      return { message: rewrap(e.data) };
+    }
+    const ring = this.recvRing;
+    if (!ring) return undefined;
+    const r = ring.peek();
+    if (!r || !r.payload) return undefined; // nothing, or a message only the normal path can carry
+    ring.skip(r.size);
+    this.#consumed.add(r.seq);
+    return { message: S.requireBuiltin('v8').deserialize(r.payload) };
   }
 
   #deliver(data: unknown, ports: readonly MessagePort[], type: string) {
@@ -112,6 +240,15 @@ export class NodeMessagePort {
     if (this.#closed) return;
     const list = transferList(transfer);
     try {
+      const moved = (Array.isArray(transfer) ? transfer : ((transfer as any)?.transfer ?? [])).filter((t: unknown) => t instanceof NodeMessagePort) as NodeMessagePort[];
+      const rings = moved.flatMap((p, i) => (p.sendRing && p.recvRing ? [[i, p.sendRing.sab, p.recvRing.sab]] : []));
+      if (this.sendRing || rings.length) {
+        // seq 0 = not mirrored on this port's own ring
+        const seq = this.sendRing ? this.#seq++ : 0;
+        this.sendRing?.push(seq, moved.length ? null : serializeForRing(value));
+        (this[kNative] as MessagePort).postMessage({ [ENV]: seq, d: unwrap(value), r: rings.length ? rings : undefined }, list);
+        return;
+      }
       (this[kNative] as MessagePort).postMessage(unwrap(value), list);
     } catch (e: any) {
       if (e?.name === 'DataCloneError') throw new S.perContextExports.DOMException(e.message, 'DataCloneError');
@@ -184,6 +321,12 @@ export function createMessaging() {
       const ch = new NativeMessageChannel();
       this.port1 = NodeMessagePort.wrap(ch.port1);
       this.port2 = NodeMessagePort.wrap(ch.port2);
+      const a = Ring.create();
+      const b2 = Ring.create();
+      this.port1.sendRing = a;
+      this.port2.recvRing = a;
+      this.port2.sendRing = b2;
+      this.port1.recvRing = b2;
     }
   }
   return Object.assign(b, {
@@ -193,8 +336,11 @@ export function createMessaging() {
     broadcastChannel: (name: string) => NodeMessagePort.wrap(new NativeBroadcastChannel(name)),
     stopMessagePort: (port: NodeMessagePort) => port.stop(),
     drainMessagePort: (port: NodeMessagePort) => port.drain(),
-    // a synchronous receive needs the shared-memory mirror the worker binding sets up
-    receiveMessageOnPort: (port: NodeMessagePort) => (port as any).receiveSync?.(),
+    // the lib wraps the result in { message }; "nothing" is no_message_symbol
+    receiveMessageOnPort(port: NodeMessagePort) {
+      const r = port.receiveSync();
+      return r ? r.message : S.perIsolateSymbols.no_message_symbol;
+    },
     moveMessagePortToContext: (port: NodeMessagePort) => port,
     setDeserializerCreateObjectFunction(fn: unknown) {
       createObject = fn;
