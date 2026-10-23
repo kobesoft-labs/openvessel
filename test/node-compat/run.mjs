@@ -6,7 +6,8 @@
 //   node test/node-compat/run.mjs --report          # summary of failures grouped by cause
 //
 // Only tests that pass on real Node count. Tests that need V8/internal flags are skipped.
-import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, statSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 
@@ -138,7 +139,16 @@ async function runOv(tests) {
     try {
       await session?.browser.close();
     } catch {}
-    session = await openBrowser();
+    // a throwaway profile, so a browser that is still shutting down can't block the relaunch
+    for (let attempt = 0; ; attempt++) {
+      try {
+        session = await openBrowser({ profile: mkdtempSync(join(tmpdir(), 'ov-compat-')) });
+        break;
+      } catch (e) {
+        if (attempt >= 4) throw e;
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
     await session.page.evaluate(() => window.ov.network.setPolicy({ mode: 'allow-all' }));
     await mount(session.page, files);
   };

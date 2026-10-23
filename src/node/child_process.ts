@@ -207,6 +207,10 @@ export class ChildProcess extends EventEmitter {
     this.signalCode = signal;
     if (this.stdin && !this.stdin.destroyed) this.stdin.destroy();
     this.emit('exit', code, signal);
+    // like Node's flushStdio: drain stdio nobody is reading so the pipes can close
+    for (const s of this.stdio.slice(1)) {
+      if (s && s.readable && !s.readableFlowing && !s._readableState?.readListening) s.resume();
+    }
     // let pending stdio data drain before 'close'
     macrotask(() => this._maybeClose());
   }

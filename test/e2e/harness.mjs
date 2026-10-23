@@ -11,8 +11,7 @@ export async function startServer() {
   return srv;
 }
 
-export async function openBrowser({ headless = true } = {}) {
-  const profile = root + 'node_modules/.cache/ov-chrome';
+export async function openBrowser({ headless = true, profile = root + 'node_modules/.cache/ov-chrome' } = {}) {
   const ctx = await chromium.launchPersistentContext(profile, { channel: 'chrome', headless, args: ['--js-flags=--stack-size=4000'] });
   const browser = { close: () => ctx.close() };
   const page = ctx.pages()[0] ?? (await ctx.newPage());
