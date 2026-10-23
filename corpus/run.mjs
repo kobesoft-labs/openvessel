@@ -15,6 +15,18 @@ const resultsPath = join(outDir, 'results.json');
 const results = existsSync(resultsPath) ? JSON.parse(readFileSync(resultsPath, 'utf8')) : {};
 const env = 'export CI=1 ASTRO_TELEMETRY_DISABLED=1;';
 
+/** The package manager the project asks for (packageManager field, then lockfile). */
+function packageManagerOf(dir) {
+  try {
+    const m = /^(npm|pnpm|yarn|bun)@/.exec(JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).packageManager ?? '');
+    if (m) return m[1];
+  } catch {}
+  if (existsSync(join(dir, 'pnpm-lock.yaml'))) return 'pnpm';
+  if (existsSync(join(dir, 'yarn.lock'))) return 'yarn';
+  if (existsSync(join(dir, 'bun.lock')) || existsSync(join(dir, 'bun.lockb'))) return 'bun';
+  return 'npm';
+}
+
 const srv = await startServer();
 let session = await openBrowser();
 try {
@@ -26,13 +38,14 @@ try {
       await session.page.reload();
       await session.page.evaluate(() => window.ovReady);
       await mountProject(session.page, join(root, 'sites', s.id));
-      const inst = await exec(session.page, `${env} npm install 2>&1`, { timeout: 15 * 60e3 });
+      const pm = packageManagerOf(join(root, 'sites', s.id));
+      const inst = await exec(session.page, `${env} ${pm} install 2>&1`, { timeout: 15 * 60e3 });
       r.install = inst.code === 0;
-      log += `$ npm install\n${inst.output}\n[exit ${inst.code} ${inst.ms}ms]\n`;
+      log += `$ ${pm} install\n${inst.output}\n[exit ${inst.code} ${inst.ms}ms]\n`;
       if (r.install) {
-        const b = await exec(session.page, `${env} npm run build 2>&1`, { timeout: 15 * 60e3 });
+        const b = await exec(session.page, `${env} ${pm} run build 2>&1`, { timeout: 15 * 60e3 });
         r.build = b.code === 0;
-        log += `$ npm run build\n${b.output}\n[exit ${b.code} ${b.ms}ms]\n`;
+        log += `$ ${pm} run build\n${b.output}\n[exit ${b.code} ${b.ms}ms]\n`;
         if (!r.build) r.error = b.output.split('\n').filter((l) => l.trim()).slice(-12).join('\n');
       } else r.error = inst.output.split('\n').filter((l) => l.trim()).slice(-8).join('\n');
     } catch (e) {

@@ -93,7 +93,7 @@ interface Edge {
 function withWasiBinding(opt: Record<string, string> | undefined): Record<string, string> | undefined {
   if (!opt) return opt;
   const names = Object.keys(opt);
-  if (names.some((n) => n.endsWith('-wasm32-wasi'))) return opt;
+  if (names.some((n) => n.includes('wasm32'))) return opt;
   const native = names.find((n) => /-(linux|darwin|win32|freebsd|android)-(x64|arm64|arm|ia32)(-gnu|-musl|-msvc|-gnueabihf|-eabi)?$/.test(n));
   if (!native) return opt;
   const base = native.replace(/-(linux|darwin|win32|freebsd|android)-(x64|arm64|arm|ia32)(-gnu|-musl|-msvc|-gnueabihf|-eabi)?$/, '');
