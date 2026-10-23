@@ -4,9 +4,11 @@ import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
 const root = new URL('../dist', import.meta.url).pathname;
-const HOST = Number(process.env.OV_HOST_PORT ?? 5170);
-const RUNTIME = Number(process.env.OV_RUNTIME_PORT ?? 5171);
-const PREVIEW = Number(process.env.OV_PREVIEW_PORT ?? 5172);
+// OV_PORT_BASE moves all three (base, base+1, base+2), so several test runs can share a machine
+const BASE = Number(process.env.OV_PORT_BASE ?? 5170);
+const HOST = Number(process.env.OV_HOST_PORT ?? BASE);
+const RUNTIME = Number(process.env.OV_RUNTIME_PORT ?? BASE + 1);
+const PREVIEW = Number(process.env.OV_PREVIEW_PORT ?? BASE + 2);
 const hostOrigin = `http://localhost:${HOST}`;
 
 const TYPES = {

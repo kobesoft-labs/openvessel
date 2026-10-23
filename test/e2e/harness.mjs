@@ -11,7 +11,10 @@ export async function startServer() {
   return srv;
 }
 
-export async function openBrowser({ headless = true, profile = root + 'node_modules/.cache/ov-chrome' } = {}) {
+// OV_PORT_BASE selects the dev server ports (see scripts/serve.mjs) and a matching browser profile
+const PORT_BASE = Number(process.env.OV_PORT_BASE ?? 5170);
+
+export async function openBrowser({ headless = true, profile = root + 'node_modules/.cache/ov-chrome' + (PORT_BASE === 5170 ? '' : `-${PORT_BASE}`) } = {}) {
   const ctx = await chromium.launchPersistentContext(profile, { channel: 'chrome', headless, args: ['--js-flags=--stack-size=4000'] });
   const browser = { close: () => ctx.close() };
   const page = ctx.pages()[0] ?? (await ctx.newPage());
@@ -19,7 +22,7 @@ export async function openBrowser({ headless = true, profile = root + 'node_modu
     if (process.env.OV_CONSOLE) console.log(`[console.${m.type()}] ${m.text()}`);
   });
   page.on('pageerror', (e) => console.log('[pageerror]', e.message));
-  await page.goto('http://localhost:5170/');
+  await page.goto(`http://localhost:${PORT_BASE}/`);
   await page.evaluate(() => window.ovReady);
   if (process.env.OV_TRACE) await page.evaluate(() => (window.__trace = true));
   return { browser, page };
