@@ -219,10 +219,18 @@ export class LibuvStreamWrap extends HandleWrap {
   }
 
   shutdown(req: { oncomplete?: (status: number) => void }) {
+    let status = 0;
+    if (this._fd >= 0 && sys<string | null>('fdKind', { fd: this._fd }) === 'socket') {
+      try {
+        sys('shutdown', { fd: this._fd });
+      } catch (e) {
+        status = e instanceof SysError ? errno(e.code) : errno('EINVAL');
+      }
+    }
     const done = loop.startReq('ShutdownWrap');
     loop.macrotask(() => {
       done();
-      if (typeof req.oncomplete === 'function') loop.scope(req.oncomplete, req, 0);
+      if (typeof req.oncomplete === 'function') loop.scope(req.oncomplete, req, status);
     });
     return 0;
   }
@@ -265,7 +273,33 @@ function encodingId(e: string): Enc {
   }
 }
 
+// Unix domain sockets: bind() makes the socket inode, connections arrive as 'pipe-accept' with a
+// new fd (a kernel socketpair, like TCP), keyed by that inode.
+const pipeServers = new Map<number, Pipe>();
+let pipeAcceptInstalled = false;
+function installPipeAccept() {
+  if (pipeAcceptInstalled) return;
+  pipeAcceptInstalled = true;
+  S.kernelHandlers.set('pipe-accept', (msg: { port: number; fd: number }) => {
+    const server = pipeServers.get(msg.port);
+    if (!server || !server._listening || typeof server.onconnection !== 'function') {
+      try {
+        sys('close', { fd: msg.fd });
+      } catch {}
+      return;
+    }
+    const client = new Pipe(0);
+    client._setFd(msg.fd);
+    loop.scope(server.onconnection, server, 0, client);
+  });
+}
+
 export class Pipe extends LibuvStreamWrap {
+  onconnection: ((err: number, client?: Pipe) => void) | null = null;
+  #ino = -1;
+  /** @internal */
+  _listening = false;
+
   constructor(public type = 0) {
     super(type === 1 ? 'PipeServerWrap' : 'PipeWrap');
   }
@@ -277,19 +311,52 @@ export class Pipe extends LibuvStreamWrap {
   _setFd(fd: number) {
     this._fd = fd;
   }
-  bind() {
-    return errno('ENOTSUP');
+  bind(name: string) {
+    try {
+      this.#ino = sys<number>('unixListen', { p: name });
+    } catch (e) {
+      return e instanceof SysError ? errno(e.code) : errno('EADDRINUSE');
+    }
+    installPipeAccept();
+    pipeServers.set(this.#ino, this);
+    return 0;
   }
-  listen() {
-    return errno('ENOTSUP');
+  listen(_backlog: number) {
+    if (this.#ino < 0) return errno('EINVAL');
+    this._listening = true;
+    this.setActive(true);
+    return 0;
   }
-  connect() {
-    return errno('ENOTSUP');
+  connect(req: { oncomplete?: (status: number, handle: Pipe, req: unknown, readable: boolean, writable: boolean) => void }, name: string) {
+    let status = 0;
+    try {
+      this._fd = sys<number>('unixConnect', { p: name });
+    } catch (e) {
+      status = e instanceof SysError ? errno(e.code) : errno('ECONNREFUSED');
+    }
+    // libuv reports the result on a later turn, even failures
+    const done = loop.startReq('PipeConnectWrap');
+    loop.macrotask(() => {
+      done();
+      if (typeof req.oncomplete === 'function') loop.scope(req.oncomplete, req, status, this, req, true, true);
+    });
   }
   fchmod() {
     return 0;
   }
   setPendingInstances() {}
+
+  protected override _onClose() {
+    if (this.#ino >= 0) {
+      pipeServers.delete(this.#ino);
+      try {
+        sys('unixUnlisten', { ino: this.#ino });
+      } catch {}
+      this.#ino = -1;
+      this._listening = false;
+    }
+    super._onClose();
+  }
 }
 
 export class TTY extends LibuvStreamWrap {

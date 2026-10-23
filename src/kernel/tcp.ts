@@ -17,14 +17,14 @@ export class TcpBridge {
   constructor(private kernel: Kernel) {}
 
   /** Opens a connection to a raw listener; returns the connecting side's end. */
-  connect(rec: ListenRecord, from?: { address: string; port: number }): OpenFile | null {
+  connect(rec: ListenRecord, from?: { address: string; port: number }, accept = 'tcp-accept'): OpenFile | null {
     const proc = this.kernel.procs.get(rec.pid);
     if (!proc || proc.state !== 'running') return null;
     const [serverEnd, clientEnd] = createSocketPair();
     const fd = proc.allocFd(serverEnd, 3);
     const thread = proc.threads.get(rec.tid) ?? proc.threads.values().next().value;
     const peerPort = from?.port ?? (nextPeerPort = nextPeerPort >= 60000 ? 40000 : nextPeerPort + 1);
-    thread?.worker.postMessage({ t: 'tcp-accept', port: rec.port, fd, remoteAddress: from?.address ?? '127.0.0.1', remotePort: peerPort });
+    thread?.worker.postMessage({ t: accept, port: rec.port, fd, remoteAddress: from?.address ?? '127.0.0.1', remotePort: peerPort });
     return clientEnd;
   }
 

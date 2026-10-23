@@ -545,6 +545,17 @@ export class VFS {
     dir.entries!.set(name, node);
   }
 
+  /** bind(2) of a Unix domain socket: a socket inode at `path` (EADDRINUSE if the name exists). */
+  mknodSock(path: string, mode = 0o755): Inode {
+    const { dir, name } = this.lookupParent(path);
+    if (dir.entries!.has(name)) throw kerr('EADDRINUSE');
+    const node = this.newInode(S_IFSOCK | mode);
+    dir.entries!.set(name, node);
+    this.touchDir(dir);
+    this.emit('rename', path);
+    return node;
+  }
+
   /** Recursively copies `from` to `to` (files, dirs, symlinks). */
   copy(from: string, to: string, opts: { force?: boolean; errorOnExist?: boolean; dereference?: boolean } = {}) {
     const node = this.lookup(from, !!opts.dereference);

@@ -37,6 +37,8 @@ export class OpenFile {
   closed = false;
   dirCursor?: string[];
   onClose?: () => void;
+  /** sockets: half-close the write side */
+  shutdownWrite?: () => void;
   constructor(
     public kind: FileKind,
     public flags: number,
@@ -316,9 +318,16 @@ export function createSocketPair(): [OpenFile, OpenFile] {
   const b = createPipe();
   const end = (r: OpenFile, w: OpenFile) => {
     const f = new OpenFile('socket', O_RDWR, { reader: r.opts.reader, writer: w.opts.writer });
+    let writeOpen = true;
+    // shutdown(SHUT_WR): the peer reads EOF, this end can still read
+    f.shutdownWrite = () => {
+      if (!writeOpen) return;
+      writeOpen = false;
+      w.unref();
+    };
     f.onClose = () => {
       r.unref();
-      w.unref();
+      f.shutdownWrite!();
     };
     return f;
   };

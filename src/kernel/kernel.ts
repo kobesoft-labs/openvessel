@@ -48,6 +48,8 @@ export class Kernel {
   procs = new Map<number, Proc>();
   programs = new Map<string, Program>();
   ports = new Map<number, ListenRecord>();
+  /** Unix domain socket listeners, by the socket inode (the name can be renamed or unlinked) */
+  unixSockets = new Map<number, ListenRecord & { path: string }>();
   private nextPid = 1;
   private nextTid = 1;
   private nextTtyId = 1;
@@ -198,6 +200,7 @@ export class Kernel {
           this.hooks.onUnlisten?.(port, pid);
         }
       }
+      for (const [ino, rec] of this.unixSockets) if (rec.pid === pid) this.unixSockets.delete(ino);
       // reparent children to init (pid 0)
       for (const c of proc.children) {
         const cp = this.procs.get(c);

@@ -505,6 +505,38 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         if (!end) throw kerr('ECONNREFUSED');
         return proc.allocFd(end, 3);
       }
+      case 'shutdown': {
+        const f = proc.fds.get(a.fd);
+        if (!f) throw kerr('EBADF');
+        if (!f.shutdownWrite) throw kerr('ENOTSOCK');
+        f.shutdownWrite();
+        return null;
+      }
+      case 'unixListen': {
+        // the socket inode is made by bind(); listen() registers it
+        const node = kernel.vfs.mknodSock(abs(proc, a.p));
+        kernel.unixSockets.set(node.ino, { port: node.ino, pid: proc.pid, tid: thread.tid, host: 'unix', path: abs(proc, a.p) });
+        return node.ino;
+      }
+      case 'unixUnlisten': {
+        const rec = kernel.unixSockets.get(a.ino);
+        if (rec && rec.pid === proc.pid) {
+          kernel.unixSockets.delete(a.ino);
+          // libuv unlinks the name when the server closes
+          try {
+            if (kernel.vfs.lookup(rec.path, false).ino === a.ino) kernel.vfs.unlink(rec.path);
+          } catch {}
+        }
+        return null;
+      }
+      case 'unixConnect': {
+        const node = kernel.vfs.lookup(abs(proc, a.p), true);
+        const rec = kernel.unixSockets.get(node.ino);
+        if (!rec || (node.mode & 0o170000) !== S_IFSOCK) throw kerr('ECONNREFUSED');
+        const end = net.tcp.connect(rec, { address: '', port: 0 }, 'pipe-accept');
+        if (!end) throw kerr('ECONNREFUSED');
+        return proc.allocFd(end, 3);
+      }
       case 'portInfo':
         return kernel.ports.has(a.port);
     }
