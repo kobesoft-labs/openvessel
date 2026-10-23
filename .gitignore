@@ -4,3 +4,4 @@ corpus/sites/
 .DS_Store
 test/node-compat/.node/
 test/node-compat/results/logs/
+vendor/

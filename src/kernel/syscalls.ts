@@ -91,6 +91,8 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       }
       case 'fstat':
         return fstatOf(proc.getFd(a.fd));
+      case 'fdKind':
+        return proc.fds.get(a.fd)?.kind ?? null;
       case 'access': {
         const n = vfs.lookup(abs(proc, a.p));
         if (a.mode & 1 && !(n.mode & 0o111) && !isDir(n)) throw kerr('EACCES');
@@ -307,6 +309,13 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         return esm.resolver.formatOf(abs(proc, a.p));
 
       // ---------------- process ----------------
+      case 'getcwd':
+        return proc.cwd;
+      case 'umask': {
+        const old = proc.umask;
+        if (typeof a.mask === 'number') proc.umask = a.mask & 0o777;
+        return old;
+      }
       case 'chdir': {
         const p = abs(proc, a.p);
         const n = vfs.lookup(p);

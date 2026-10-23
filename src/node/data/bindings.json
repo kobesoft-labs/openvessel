@@ -1,0 +1,5590 @@
+{
+ "async_wrap": {
+  "setupHooks": {
+   "__fn": "setupHooks"
+  },
+  "setCallbackTrampoline": {
+   "__fn": "setCallbackTrampoline"
+  },
+  "pushAsyncContext": {
+   "__fn": "pushAsyncContext"
+  },
+  "popAsyncContext": {
+   "__fn": "popAsyncContext"
+  },
+  "executionAsyncResource": {
+   "__fn": "executionAsyncResource"
+  },
+  "clearAsyncIdStack": {
+   "__fn": "clearAsyncIdStack"
+  },
+  "queueDestroyAsyncId": {
+   "__fn": "queueDestroyAsyncId"
+  },
+  "setPromiseHooks": {
+   "__fn": "setPromiseHooks"
+  },
+  "getPromiseHooks": {
+   "__fn": "getPromiseHooks"
+  },
+  "registerDestroyHook": {
+   "__fn": "registerDestroyHook"
+  },
+  "async_hook_fields": {
+   "__typed": "Uint32Array",
+   "length": 9,
+   "values": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    0
+   ]
+  },
+  "async_id_fields": {
+   "__typed": "Float64Array",
+   "length": 4,
+   "values": [
+    1,
+    0,
+    2,
+    -1
+   ]
+  },
+  "execution_async_resources": [],
+  "async_ids_stack": {
+   "__typed": "Float64Array",
+   "length": 32,
+   "values": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  "constants": {
+   "kInit": 0,
+   "kBefore": 1,
+   "kAfter": 2,
+   "kDestroy": 3,
+   "kPromiseResolve": 4,
+   "kTotals": 5,
+   "kCheck": 6,
+   "kExecutionAsyncId": 0,
+   "kTriggerAsyncId": 1,
+   "kAsyncIdCounter": 2,
+   "kDefaultTriggerAsyncId": 3,
+   "kUsesExecutionAsyncResource": 8,
+   "kStackLength": 7
+  },
+  "Providers": {
+   "NONE": 0,
+   "DIRHANDLE": 1,
+   "DNSCHANNEL": 2,
+   "ELDHISTOGRAM": 3,
+   "FILEHANDLE": 4,
+   "FILEHANDLECLOSEREQ": 5,
+   "BLOBREADER": 6,
+   "FSEVENTWRAP": 7,
+   "FSREQCALLBACK": 8,
+   "FSREQPROMISE": 9,
+   "GETADDRINFOREQWRAP": 10,
+   "GETNAMEINFOREQWRAP": 11,
+   "HEAPSNAPSHOT": 12,
+   "HTTP2SESSION": 13,
+   "HTTP2STREAM": 14,
+   "HTTP2PING": 15,
+   "HTTP2SETTINGS": 16,
+   "HTTPINCOMINGMESSAGE": 17,
+   "HTTPCLIENTREQUEST": 18,
+   "JSSTREAM": 19,
+   "JSUDPWRAP": 20,
+   "MESSAGEPORT": 21,
+   "PIPECONNECTWRAP": 22,
+   "PIPESERVERWRAP": 23,
+   "PIPEWRAP": 24,
+   "PROCESSWRAP": 25,
+   "PROMISE": 26,
+   "QUERYWRAP": 27,
+   "QUIC_ENDPOINT": 28,
+   "QUIC_LOGSTREAM": 29,
+   "QUIC_PACKET": 30,
+   "QUIC_SESSION": 31,
+   "QUIC_STREAM": 32,
+   "QUIC_UDP": 33,
+   "SHUTDOWNWRAP": 34,
+   "SIGNALWRAP": 35,
+   "STATWATCHER": 36,
+   "STREAMPIPE": 37,
+   "TCPCONNECTWRAP": 38,
+   "TCPSERVERWRAP": 39,
+   "TCPWRAP": 40,
+   "TTYWRAP": 41,
+   "UDPSENDWRAP": 42,
+   "UDPWRAP": 43,
+   "SIGINTWATCHDOG": 44,
+   "WORKER": 45,
+   "WORKERCPUPROFILE": 46,
+   "WORKERCPUUSAGE": 47,
+   "WORKERHEAPSNAPSHOT": 48,
+   "WORKERHEAPSTATISTICS": 49,
+   "WRITEWRAP": 50,
+   "ZLIB": 51,
+   "CHECKPRIMEREQUEST": 52,
+   "PBKDF2REQUEST": 53,
+   "KEYPAIRGENREQUEST": 54,
+   "KEYGENREQUEST": 55,
+   "KEYEXPORTREQUEST": 56,
+   "CIPHERREQUEST": 57,
+   "DERIVEBITSREQUEST": 58,
+   "HASHREQUEST": 59,
+   "RANDOMBYTESREQUEST": 60,
+   "RANDOMPRIMEREQUEST": 61,
+   "SCRYPTREQUEST": 62,
+   "SIGNREQUEST": 63,
+   "TLSWRAP": 64,
+   "VERIFYREQUEST": 65
+  }
+ },
+ "blob": {
+  "createBlob": {
+   "__fn": "createBlob"
+  },
+  "storeDataObject": {
+   "__fn": "storeDataObject"
+  },
+  "getDataObject": {
+   "__fn": "getDataObject"
+  },
+  "revokeObjectURL": {
+   "__fn": "revokeObjectURL"
+  },
+  "concat": {
+   "__fn": "concat"
+  },
+  "createBlobFromFilePath": {
+   "__fn": "createBlobFromFilePath"
+  }
+ },
+ "block_list": {
+  "BlockList": {
+   "__fn": "BlockList",
+   "proto": [
+    "addAddress",
+    "addRange",
+    "addSubnet",
+    "check",
+    "getRules"
+   ]
+  },
+  "SocketAddress": {
+   "__fn": "SocketAddress",
+   "proto": [
+    "detail",
+    "legacyDetail",
+    "flowlabel"
+   ]
+  },
+  "AF_INET": 2,
+  "AF_INET6": 10
+ },
+ "buffer": {
+  "atob": {
+   "__fn": "atob"
+  },
+  "btoa": {
+   "__fn": "btoa"
+  },
+  "byteLengthUtf8": {
+   "__fn": true
+  },
+  "copy": {
+   "__fn": true
+  },
+  "compare": {
+   "__fn": true
+  },
+  "compareOffset": {
+   "__fn": "compareOffset"
+  },
+  "fill": {
+   "__fn": "fill"
+  },
+  "indexOfBuffer": {
+   "__fn": "indexOfBuffer"
+  },
+  "indexOfNumber": {
+   "__fn": true
+  },
+  "indexOfString": {
+   "__fn": "indexOfString"
+  },
+  "copyArrayBuffer": {
+   "__fn": "copyArrayBuffer"
+  },
+  "swap16": {
+   "__fn": "swap16"
+  },
+  "swap32": {
+   "__fn": "swap32"
+  },
+  "swap64": {
+   "__fn": "swap64"
+  },
+  "isUtf8": {
+   "__fn": "isUtf8"
+  },
+  "isAscii": {
+   "__fn": "isAscii"
+  },
+  "kMaxLength": 9007199254740991,
+  "kStringMaxLength": 536870888,
+  "asciiSlice": {
+   "__fn": "asciiSlice"
+  },
+  "base64Slice": {
+   "__fn": "base64Slice"
+  },
+  "base64urlSlice": {
+   "__fn": "base64urlSlice"
+  },
+  "latin1Slice": {
+   "__fn": "latin1Slice"
+  },
+  "hexSlice": {
+   "__fn": "hexSlice"
+  },
+  "ucs2Slice": {
+   "__fn": "ucs2Slice"
+  },
+  "utf8Slice": {
+   "__fn": "utf8Slice"
+  },
+  "base64Write": {
+   "__fn": "base64Write"
+  },
+  "base64urlWrite": {
+   "__fn": "base64urlWrite"
+  },
+  "hexWrite": {
+   "__fn": "hexWrite"
+  },
+  "ucs2Write": {
+   "__fn": "ucs2Write"
+  },
+  "asciiWriteStatic": {
+   "__fn": true
+  },
+  "latin1WriteStatic": {
+   "__fn": true
+  },
+  "utf8WriteStatic": {
+   "__fn": true
+  },
+  "getZeroFillToggle": {
+   "__fn": "getZeroFillToggle"
+  }
+ },
+ "builtins": {
+  "builtinCategories": {
+   "cannotBeRequired": {
+    "__set": [
+     "internal/bootstrap/node",
+     "internal/bootstrap/realm",
+     "internal/bootstrap/shadow_realm",
+     "internal/bootstrap/switches/does_not_own_process_state",
+     "internal/bootstrap/switches/does_own_process_state",
+     "internal/bootstrap/switches/is_main_thread",
+     "internal/bootstrap/switches/is_not_main_thread",
+     "internal/bootstrap/web/exposed-wildcard",
+     "internal/bootstrap/web/exposed-window-or-worker",
+     "internal/deps/acorn/acorn-walk/dist/walk",
+     "internal/deps/acorn/acorn/dist/acorn",
+     "internal/deps/amaro/dist/index",
+     "internal/deps/cjs-module-lexer/dist/lexer",
+     "internal/deps/minimatch/index",
+     "internal/deps/undici/undici",
+     "internal/deps/v8/tools/arguments",
+     "internal/deps/v8/tools/codemap",
+     "internal/deps/v8/tools/consarray",
+     "internal/deps/v8/tools/csvparser",
+     "internal/deps/v8/tools/logreader",
+     "internal/deps/v8/tools/profile",
+     "internal/deps/v8/tools/profile_view",
+     "internal/deps/v8/tools/sourcemap",
+     "internal/deps/v8/tools/splaytree",
+     "internal/deps/v8/tools/tickprocessor",
+     "internal/deps/v8/tools/tickprocessor-driver",
+     "internal/main/check_syntax",
+     "internal/main/embedding",
+     "internal/main/eval_stdin",
+     "internal/main/eval_string",
+     "internal/main/inspect",
+     "internal/main/mksnapshot",
+     "internal/main/print_help",
+     "internal/main/prof_process",
+     "internal/main/repl",
+     "internal/main/run_main_module",
+     "internal/main/test_runner",
+     "internal/main/watch_mode",
+     "internal/main/worker_thread",
+     "internal/per_context/domexception",
+     "internal/per_context/messageport",
+     "internal/per_context/primordials",
+     "internal/quic/quic",
+     "internal/quic/state",
+     "internal/quic/stats",
+     "internal/quic/symbols",
+     "internal/test/binding",
+     "internal/v8_prof_polyfill",
+     "internal/v8_prof_processor",
+     "sqlite",
+     "sys",
+     "wasi"
+    ]
+   },
+   "canBeRequired": {
+    "__set": [
+     "_http_agent",
+     "_http_client",
+     "_http_common",
+     "_http_incoming",
+     "_http_outgoing",
+     "_http_server",
+     "_stream_duplex",
+     "_stream_passthrough",
+     "_stream_readable",
+     "_stream_transform",
+     "_stream_wrap",
+     "_stream_writable",
+     "_tls_common",
+     "_tls_wrap",
+     "assert",
+     "assert/strict",
+     "async_hooks",
+     "buffer",
+     "child_process",
+     "cluster",
+     "console",
+     "constants",
+     "crypto",
+     "dgram",
+     "diagnostics_channel",
+     "dns",
+     "dns/promises",
+     "domain",
+     "events",
+     "fs",
+     "fs/promises",
+     "http",
+     "http2",
+     "https",
+     "inspector",
+     "inspector/promises",
+     "internal/abort_controller",
+     "internal/assert",
+     "internal/assert/assertion_error",
+     "internal/assert/calltracker",
+     "internal/assert/myers_diff",
+     "internal/assert/utils",
+     "internal/async_context_frame",
+     "internal/async_hooks",
+     "internal/async_local_storage/async_context_frame",
+     "internal/async_local_storage/async_hooks",
+     "internal/blob",
+     "internal/blocklist",
+     "internal/buffer",
+     "internal/child_process",
+     "internal/child_process/serialization",
+     "internal/cli_table",
+     "internal/cluster/child",
+     "internal/cluster/primary",
+     "internal/cluster/round_robin_handle",
+     "internal/cluster/shared_handle",
+     "internal/cluster/utils",
+     "internal/cluster/worker",
+     "internal/console/constructor",
+     "internal/console/global",
+     "internal/constants",
+     "internal/crypto/aes",
+     "internal/crypto/certificate",
+     "internal/crypto/cfrg",
+     "internal/crypto/cipher",
+     "internal/crypto/diffiehellman",
+     "internal/crypto/ec",
+     "internal/crypto/hash",
+     "internal/crypto/hashnames",
+     "internal/crypto/hkdf",
+     "internal/crypto/keygen",
+     "internal/crypto/keys",
+     "internal/crypto/mac",
+     "internal/crypto/pbkdf2",
+     "internal/crypto/random",
+     "internal/crypto/rsa",
+     "internal/crypto/scrypt",
+     "internal/crypto/sig",
+     "internal/crypto/util",
+     "internal/crypto/webcrypto",
+     "internal/crypto/webidl",
+     "internal/crypto/x509",
+     "internal/data_url",
+     "internal/debugger/inspect",
+     "internal/debugger/inspect_client",
+     "internal/debugger/inspect_repl",
+     "internal/deps/cjs-module-lexer/lexer",
+     "internal/dgram",
+     "internal/dns/callback_resolver",
+     "internal/dns/promises",
+     "internal/dns/utils",
+     "internal/encoding",
+     "internal/error_serdes",
+     "internal/errors",
+     "internal/event_target",
+     "internal/events/abort_listener",
+     "internal/events/symbols",
+     "internal/file",
+     "internal/fixed_queue",
+     "internal/freelist",
+     "internal/freeze_intrinsics",
+     "internal/fs/cp/cp",
+     "internal/fs/cp/cp-sync",
+     "internal/fs/dir",
+     "internal/fs/glob",
+     "internal/fs/promises",
+     "internal/fs/read/context",
+     "internal/fs/recursive_watch",
+     "internal/fs/rimraf",
+     "internal/fs/streams",
+     "internal/fs/sync_write_stream",
+     "internal/fs/utils",
+     "internal/fs/watchers",
+     "internal/heap_utils",
+     "internal/histogram",
+     "internal/http",
+     "internal/http2/compat",
+     "internal/http2/core",
+     "internal/http2/util",
+     "internal/inspector/network",
+     "internal/inspector/network_http",
+     "internal/inspector/network_http2",
+     "internal/inspector/network_resources",
+     "internal/inspector/network_undici",
+     "internal/inspector_async_hook",
+     "internal/inspector_network_tracking",
+     "internal/js_stream_socket",
+     "internal/legacy/processbinding",
+     "internal/linkedlist",
+     "internal/mime",
+     "internal/modules/cjs/loader",
+     "internal/modules/customization_hooks",
+     "internal/modules/esm/assert",
+     "internal/modules/esm/create_dynamic_module",
+     "internal/modules/esm/formats",
+     "internal/modules/esm/get_format",
+     "internal/modules/esm/hooks",
+     "internal/modules/esm/initialize_import_meta",
+     "internal/modules/esm/load",
+     "internal/modules/esm/loader",
+     "internal/modules/esm/module_job",
+     "internal/modules/esm/module_map",
+     "internal/modules/esm/resolve",
+     "internal/modules/esm/shared_constants",
+     "internal/modules/esm/translators",
+     "internal/modules/esm/utils",
+     "internal/modules/esm/worker",
+     "internal/modules/helpers",
+     "internal/modules/package_json_reader",
+     "internal/modules/run_main",
+     "internal/modules/typescript",
+     "internal/navigator",
+     "internal/net",
+     "internal/options",
+     "internal/perf/event_loop_delay",
+     "internal/perf/event_loop_utilization",
+     "internal/perf/nodetiming",
+     "internal/perf/observe",
+     "internal/perf/performance",
+     "internal/perf/performance_entry",
+     "internal/perf/resource_timing",
+     "internal/perf/timerify",
+     "internal/perf/usertiming",
+     "internal/perf/utils",
+     "internal/priority_queue",
+     "internal/process/execution",
+     "internal/process/finalization",
+     "internal/process/per_thread",
+     "internal/process/permission",
+     "internal/process/pre_execution",
+     "internal/process/promises",
+     "internal/process/report",
+     "internal/process/signal",
+     "internal/process/task_queues",
+     "internal/process/warning",
+     "internal/process/worker_thread_only",
+     "internal/promise_hooks",
+     "internal/querystring",
+     "internal/readline/callbacks",
+     "internal/readline/emitKeypressEvents",
+     "internal/readline/interface",
+     "internal/readline/promises",
+     "internal/readline/utils",
+     "internal/repl",
+     "internal/repl/await",
+     "internal/repl/history",
+     "internal/repl/utils",
+     "internal/socket_list",
+     "internal/socketaddress",
+     "internal/source_map/prepare_stack_trace",
+     "internal/source_map/source_map",
+     "internal/source_map/source_map_cache",
+     "internal/source_map/source_map_cache_map",
+     "internal/stream_base_commons",
+     "internal/streams/add-abort-signal",
+     "internal/streams/compose",
+     "internal/streams/destroy",
+     "internal/streams/duplex",
+     "internal/streams/duplexify",
+     "internal/streams/duplexpair",
+     "internal/streams/end-of-stream",
+     "internal/streams/from",
+     "internal/streams/lazy_transform",
+     "internal/streams/legacy",
+     "internal/streams/operators",
+     "internal/streams/passthrough",
+     "internal/streams/pipeline",
+     "internal/streams/readable",
+     "internal/streams/state",
+     "internal/streams/transform",
+     "internal/streams/utils",
+     "internal/streams/writable",
+     "internal/test/transfer",
+     "internal/test_runner/assert",
+     "internal/test_runner/coverage",
+     "internal/test_runner/harness",
+     "internal/test_runner/mock/loader",
+     "internal/test_runner/mock/mock",
+     "internal/test_runner/mock/mock_timers",
+     "internal/test_runner/reporter/dot",
+     "internal/test_runner/reporter/junit",
+     "internal/test_runner/reporter/lcov",
+     "internal/test_runner/reporter/spec",
+     "internal/test_runner/reporter/tap",
+     "internal/test_runner/reporter/utils",
+     "internal/test_runner/reporter/v8-serializer",
+     "internal/test_runner/runner",
+     "internal/test_runner/snapshot",
+     "internal/test_runner/test",
+     "internal/test_runner/tests_stream",
+     "internal/test_runner/utils",
+     "internal/timers",
+     "internal/tls/secure-context",
+     "internal/tls/secure-pair",
+     "internal/trace_events_async_hooks",
+     "internal/tty",
+     "internal/url",
+     "internal/util",
+     "internal/util/colors",
+     "internal/util/comparisons",
+     "internal/util/debuglog",
+     "internal/util/diff",
+     "internal/util/inspect",
+     "internal/util/inspector",
+     "internal/util/parse_args/parse_args",
+     "internal/util/parse_args/utils",
+     "internal/util/trace_sigint",
+     "internal/util/types",
+     "internal/v8/startup_snapshot",
+     "internal/validators",
+     "internal/vm",
+     "internal/vm/module",
+     "internal/wasm_web_api",
+     "internal/watch_mode/files_watcher",
+     "internal/watchdog",
+     "internal/webidl",
+     "internal/webstorage",
+     "internal/webstreams/adapters",
+     "internal/webstreams/compression",
+     "internal/webstreams/encoding",
+     "internal/webstreams/queuingstrategies",
+     "internal/webstreams/readablestream",
+     "internal/webstreams/transfer",
+     "internal/webstreams/transformstream",
+     "internal/webstreams/util",
+     "internal/webstreams/writablestream",
+     "internal/worker",
+     "internal/worker/clone_dom_exception",
+     "internal/worker/io",
+     "internal/worker/js_transferable",
+     "internal/worker/messaging",
+     "module",
+     "net",
+     "os",
+     "path",
+     "path/posix",
+     "path/win32",
+     "perf_hooks",
+     "process",
+     "punycode",
+     "querystring",
+     "readline",
+     "readline/promises",
+     "repl",
+     "sea",
+     "stream",
+     "stream/consumers",
+     "stream/promises",
+     "stream/web",
+     "string_decoder",
+     "test",
+     "test/reporters",
+     "timers",
+     "timers/promises",
+     "tls",
+     "trace_events",
+     "tty",
+     "url",
+     "util",
+     "util/types",
+     "v8",
+     "vm",
+     "worker_threads",
+     "zlib"
+    ]
+   }
+  },
+  "builtinIds": [
+   "_http_agent",
+   "_http_client",
+   "_http_common",
+   "_http_incoming",
+   "_http_outgoing",
+   "_http_server",
+   "_stream_duplex",
+   "_stream_passthrough",
+   "_stream_readable",
+   "_stream_transform",
+   "_stream_wrap",
+   "_stream_writable",
+   "_tls_common",
+   "_tls_wrap",
+   "assert",
+   "assert/strict",
+   "async_hooks",
+   "buffer",
+   "child_process",
+   "cluster",
+   "console",
+   "constants",
+   "crypto",
+   "dgram",
+   "diagnostics_channel",
+   "dns",
+   "dns/promises",
+   "domain",
+   "events",
+   "fs",
+   "fs/promises",
+   "http",
+   "http2",
+   "https",
+   "inspector",
+   "inspector/promises",
+   "internal/abort_controller",
+   "internal/assert",
+   "internal/assert/assertion_error",
+   "internal/assert/calltracker",
+   "internal/assert/myers_diff",
+   "internal/assert/utils",
+   "internal/async_context_frame",
+   "internal/async_hooks",
+   "internal/async_local_storage/async_context_frame",
+   "internal/async_local_storage/async_hooks",
+   "internal/blob",
+   "internal/blocklist",
+   "internal/bootstrap/node",
+   "internal/bootstrap/realm",
+   "internal/bootstrap/shadow_realm",
+   "internal/bootstrap/switches/does_not_own_process_state",
+   "internal/bootstrap/switches/does_own_process_state",
+   "internal/bootstrap/switches/is_main_thread",
+   "internal/bootstrap/switches/is_not_main_thread",
+   "internal/bootstrap/web/exposed-wildcard",
+   "internal/bootstrap/web/exposed-window-or-worker",
+   "internal/buffer",
+   "internal/child_process",
+   "internal/child_process/serialization",
+   "internal/cli_table",
+   "internal/cluster/child",
+   "internal/cluster/primary",
+   "internal/cluster/round_robin_handle",
+   "internal/cluster/shared_handle",
+   "internal/cluster/utils",
+   "internal/cluster/worker",
+   "internal/console/constructor",
+   "internal/console/global",
+   "internal/constants",
+   "internal/crypto/aes",
+   "internal/crypto/certificate",
+   "internal/crypto/cfrg",
+   "internal/crypto/cipher",
+   "internal/crypto/diffiehellman",
+   "internal/crypto/ec",
+   "internal/crypto/hash",
+   "internal/crypto/hashnames",
+   "internal/crypto/hkdf",
+   "internal/crypto/keygen",
+   "internal/crypto/keys",
+   "internal/crypto/mac",
+   "internal/crypto/pbkdf2",
+   "internal/crypto/random",
+   "internal/crypto/rsa",
+   "internal/crypto/scrypt",
+   "internal/crypto/sig",
+   "internal/crypto/util",
+   "internal/crypto/webcrypto",
+   "internal/crypto/webidl",
+   "internal/crypto/x509",
+   "internal/data_url",
+   "internal/debugger/inspect",
+   "internal/debugger/inspect_client",
+   "internal/debugger/inspect_repl",
+   "internal/deps/acorn/acorn-walk/dist/walk",
+   "internal/deps/acorn/acorn/dist/acorn",
+   "internal/deps/amaro/dist/index",
+   "internal/deps/cjs-module-lexer/dist/lexer",
+   "internal/deps/cjs-module-lexer/lexer",
+   "internal/deps/minimatch/index",
+   "internal/deps/undici/undici",
+   "internal/deps/v8/tools/arguments",
+   "internal/deps/v8/tools/codemap",
+   "internal/deps/v8/tools/consarray",
+   "internal/deps/v8/tools/csvparser",
+   "internal/deps/v8/tools/logreader",
+   "internal/deps/v8/tools/profile",
+   "internal/deps/v8/tools/profile_view",
+   "internal/deps/v8/tools/sourcemap",
+   "internal/deps/v8/tools/splaytree",
+   "internal/deps/v8/tools/tickprocessor",
+   "internal/deps/v8/tools/tickprocessor-driver",
+   "internal/dgram",
+   "internal/dns/callback_resolver",
+   "internal/dns/promises",
+   "internal/dns/utils",
+   "internal/encoding",
+   "internal/error_serdes",
+   "internal/errors",
+   "internal/event_target",
+   "internal/events/abort_listener",
+   "internal/events/symbols",
+   "internal/file",
+   "internal/fixed_queue",
+   "internal/freelist",
+   "internal/freeze_intrinsics",
+   "internal/fs/cp/cp",
+   "internal/fs/cp/cp-sync",
+   "internal/fs/dir",
+   "internal/fs/glob",
+   "internal/fs/promises",
+   "internal/fs/read/context",
+   "internal/fs/recursive_watch",
+   "internal/fs/rimraf",
+   "internal/fs/streams",
+   "internal/fs/sync_write_stream",
+   "internal/fs/utils",
+   "internal/fs/watchers",
+   "internal/heap_utils",
+   "internal/histogram",
+   "internal/http",
+   "internal/http2/compat",
+   "internal/http2/core",
+   "internal/http2/util",
+   "internal/inspector/network",
+   "internal/inspector/network_http",
+   "internal/inspector/network_http2",
+   "internal/inspector/network_resources",
+   "internal/inspector/network_undici",
+   "internal/inspector_async_hook",
+   "internal/inspector_network_tracking",
+   "internal/js_stream_socket",
+   "internal/legacy/processbinding",
+   "internal/linkedlist",
+   "internal/main/check_syntax",
+   "internal/main/embedding",
+   "internal/main/eval_stdin",
+   "internal/main/eval_string",
+   "internal/main/inspect",
+   "internal/main/mksnapshot",
+   "internal/main/print_help",
+   "internal/main/prof_process",
+   "internal/main/repl",
+   "internal/main/run_main_module",
+   "internal/main/test_runner",
+   "internal/main/watch_mode",
+   "internal/main/worker_thread",
+   "internal/mime",
+   "internal/modules/cjs/loader",
+   "internal/modules/customization_hooks",
+   "internal/modules/esm/assert",
+   "internal/modules/esm/create_dynamic_module",
+   "internal/modules/esm/formats",
+   "internal/modules/esm/get_format",
+   "internal/modules/esm/hooks",
+   "internal/modules/esm/initialize_import_meta",
+   "internal/modules/esm/load",
+   "internal/modules/esm/loader",
+   "internal/modules/esm/module_job",
+   "internal/modules/esm/module_map",
+   "internal/modules/esm/resolve",
+   "internal/modules/esm/shared_constants",
+   "internal/modules/esm/translators",
+   "internal/modules/esm/utils",
+   "internal/modules/esm/worker",
+   "internal/modules/helpers",
+   "internal/modules/package_json_reader",
+   "internal/modules/run_main",
+   "internal/modules/typescript",
+   "internal/navigator",
+   "internal/net",
+   "internal/options",
+   "internal/per_context/domexception",
+   "internal/per_context/messageport",
+   "internal/per_context/primordials",
+   "internal/perf/event_loop_delay",
+   "internal/perf/event_loop_utilization",
+   "internal/perf/nodetiming",
+   "internal/perf/observe",
+   "internal/perf/performance",
+   "internal/perf/performance_entry",
+   "internal/perf/resource_timing",
+   "internal/perf/timerify",
+   "internal/perf/usertiming",
+   "internal/perf/utils",
+   "internal/priority_queue",
+   "internal/process/execution",
+   "internal/process/finalization",
+   "internal/process/per_thread",
+   "internal/process/permission",
+   "internal/process/pre_execution",
+   "internal/process/promises",
+   "internal/process/report",
+   "internal/process/signal",
+   "internal/process/task_queues",
+   "internal/process/warning",
+   "internal/process/worker_thread_only",
+   "internal/promise_hooks",
+   "internal/querystring",
+   "internal/quic/quic",
+   "internal/quic/state",
+   "internal/quic/stats",
+   "internal/quic/symbols",
+   "internal/readline/callbacks",
+   "internal/readline/emitKeypressEvents",
+   "internal/readline/interface",
+   "internal/readline/promises",
+   "internal/readline/utils",
+   "internal/repl",
+   "internal/repl/await",
+   "internal/repl/history",
+   "internal/repl/utils",
+   "internal/socket_list",
+   "internal/socketaddress",
+   "internal/source_map/prepare_stack_trace",
+   "internal/source_map/source_map",
+   "internal/source_map/source_map_cache",
+   "internal/source_map/source_map_cache_map",
+   "internal/stream_base_commons",
+   "internal/streams/add-abort-signal",
+   "internal/streams/compose",
+   "internal/streams/destroy",
+   "internal/streams/duplex",
+   "internal/streams/duplexify",
+   "internal/streams/duplexpair",
+   "internal/streams/end-of-stream",
+   "internal/streams/from",
+   "internal/streams/lazy_transform",
+   "internal/streams/legacy",
+   "internal/streams/operators",
+   "internal/streams/passthrough",
+   "internal/streams/pipeline",
+   "internal/streams/readable",
+   "internal/streams/state",
+   "internal/streams/transform",
+   "internal/streams/utils",
+   "internal/streams/writable",
+   "internal/test/binding",
+   "internal/test/transfer",
+   "internal/test_runner/assert",
+   "internal/test_runner/coverage",
+   "internal/test_runner/harness",
+   "internal/test_runner/mock/loader",
+   "internal/test_runner/mock/mock",
+   "internal/test_runner/mock/mock_timers",
+   "internal/test_runner/reporter/dot",
+   "internal/test_runner/reporter/junit",
+   "internal/test_runner/reporter/lcov",
+   "internal/test_runner/reporter/spec",
+   "internal/test_runner/reporter/tap",
+   "internal/test_runner/reporter/utils",
+   "internal/test_runner/reporter/v8-serializer",
+   "internal/test_runner/runner",
+   "internal/test_runner/snapshot",
+   "internal/test_runner/test",
+   "internal/test_runner/tests_stream",
+   "internal/test_runner/utils",
+   "internal/timers",
+   "internal/tls/secure-context",
+   "internal/tls/secure-pair",
+   "internal/trace_events_async_hooks",
+   "internal/tty",
+   "internal/url",
+   "internal/util",
+   "internal/util/colors",
+   "internal/util/comparisons",
+   "internal/util/debuglog",
+   "internal/util/diff",
+   "internal/util/inspect",
+   "internal/util/inspector",
+   "internal/util/parse_args/parse_args",
+   "internal/util/parse_args/utils",
+   "internal/util/trace_sigint",
+   "internal/util/types",
+   "internal/v8/startup_snapshot",
+   "internal/v8_prof_polyfill",
+   "internal/v8_prof_processor",
+   "internal/validators",
+   "internal/vm",
+   "internal/vm/module",
+   "internal/wasm_web_api",
+   "internal/watch_mode/files_watcher",
+   "internal/watchdog",
+   "internal/webidl",
+   "internal/webstorage",
+   "internal/webstreams/adapters",
+   "internal/webstreams/compression",
+   "internal/webstreams/encoding",
+   "internal/webstreams/queuingstrategies",
+   "internal/webstreams/readablestream",
+   "internal/webstreams/transfer",
+   "internal/webstreams/transformstream",
+   "internal/webstreams/util",
+   "internal/webstreams/writablestream",
+   "internal/worker",
+   "internal/worker/clone_dom_exception",
+   "internal/worker/io",
+   "internal/worker/js_transferable",
+   "internal/worker/messaging",
+   "module",
+   "net",
+   "os",
+   "path",
+   "path/posix",
+   "path/win32",
+   "perf_hooks",
+   "process",
+   "punycode",
+   "querystring",
+   "readline",
+   "readline/promises",
+   "repl",
+   "sea",
+   "sqlite",
+   "stream",
+   "stream/consumers",
+   "stream/promises",
+   "stream/web",
+   "string_decoder",
+   "sys",
+   "test",
+   "test/reporters",
+   "timers",
+   "timers/promises",
+   "tls",
+   "trace_events",
+   "tty",
+   "url",
+   "util",
+   "util/types",
+   "v8",
+   "vm",
+   "wasi",
+   "worker_threads",
+   "zlib"
+  ],
+  "config": "{ \"target_defaults\": { \"cflags\": [],\n                       \"configurations\": { \"Debug\": {\"v8_enable_v8_checks\": 0, \"variables\": {}},\n                                           \"Release\": {\"v8_enable_v8_checks\": 1, \"variables\": {}}},\n                       \"default_configuration\": \"Release\",\n                       \"defines\": [\"NODE_OPENSSL_CONF_NAME=nodejs_conf\", \"ICU_NO_USER_DATA_OVERRIDE\"],\n                       \"include_dirs\": [],\n                       \"libraries\": []},\n  \"variables\": { \"asan\": 0,\n                 \"clang\": 0,\n                 \"control_flow_guard\": false,\n                 \"coverage\": false,\n                 \"dcheck_always_on\": 0,\n                 \"debug_nghttp2\": false,\n                 \"debug_node\": false,\n                 \"enable_lto\": false,\n                 \"enable_pgo_generate\": false,\n                 \"enable_pgo_use\": false,\n                 \"error_on_warn\": false,\n                 \"force_dynamic_crt\": 0,\n                 \"gas_version\": \"2.35\",\n                 \"host_arch\": \"x64\",\n                 \"icu_data_in\": \"../../deps/icu-tmp/icudt77l.dat\",\n                 \"icu_endianness\": \"l\",\n                 \"icu_gyp_path\": \"tools/icu/icu-generic.gyp\",\n                 \"icu_path\": \"deps/icu-small\",\n                 \"icu_small\": false,\n                 \"icu_ver_major\": \"77\",\n                 \"libdir\": \"lib\",\n                 \"llvm_version\": \"0.0\",\n                 \"napi_build_version\": \"10\",\n                 \"node_builtin_shareable_builtins\": [ \"deps/cjs-module-lexer/lexer.js\",\n                                                      \"deps/cjs-module-lexer/dist/lexer.js\",\n                                                      \"deps/undici/undici.js\",\n                                                      \"deps/amaro/dist/index.js\"],\n                 \"node_byteorder\": \"little\",\n                 \"node_cctest_sources\": [ \"src/node_snapshot_stub.cc\",\n                                          \"test/cctest/inspector/test_node_protocol.cc\",\n                                          \"test/cctest/node_test_fixture.cc\",\n                                          \"test/cctest/test_aliased_buffer.cc\",\n                                          \"test/cctest/test_base64.cc\",\n                                          \"test/cctest/test_base_object_ptr.cc\",\n                                          \"test/cctest/test_cppgc.cc\",\n                                          \"test/cctest/test_crypto_clienthello.cc\",\n                                          \"test/cctest/test_dataqueue.cc\",\n                                          \"test/cctest/test_environment.cc\",\n                                          \"test/cctest/test_inspector_socket.cc\",\n                                          \"test/cctest/test_inspector_socket_server.cc\",\n                                          \"test/cctest/test_json_utils.cc\",\n                                          \"test/cctest/test_linked_binding.cc\",\n                                          \"test/cctest/test_node_api.cc\",\n                                          \"test/cctest/test_node_crypto.cc\",\n                                          \"test/cctest/test_node_crypto_env.cc\",\n                                          \"test/cctest/test_node_postmortem_metadata.cc\",\n                                          \"test/cctest/test_node_task_runner.cc\",\n                                          \"test/cctest/test_path.cc\",\n                                          \"test/cctest/test_per_process.cc\",\n                                          \"test/cctest/test_platform.cc\",\n                                          \"test/cctest/test_quic_cid.cc\",\n                                          \"test/cctest/test_quic_error.cc\",\n                                          \"test/cctest/test_quic_tokens.cc\",\n                                          \"test/cctest/test_report.cc\",\n                                          \"test/cctest/test_sockaddr.cc\",\n                                          \"test/cctest/test_traced_value.cc\",\n                                          \"test/cctest/test_util.cc\",\n                                          \"test/cctest/node_test_fixture.h\"],\n                 \"node_debug_lib\": false,\n                 \"node_enable_d8\": false,\n                 \"node_enable_v8_vtunejit\": false,\n                 \"node_enable_v8windbg\": false,\n                 \"node_fipsinstall\": false,\n                 \"node_install_corepack\": true,\n                 \"node_install_npm\": true,\n                 \"node_library_files\": [ \"lib/_http_agent.js\",\n                                         \"lib/_http_client.js\",\n                                         \"lib/_http_common.js\",\n                                         \"lib/_http_incoming.js\",\n                                         \"lib/_http_outgoing.js\",\n                                         \"lib/_http_server.js\",\n                                         \"lib/_stream_duplex.js\",\n                                         \"lib/_stream_passthrough.js\",\n                                         \"lib/_stream_readable.js\",\n                                         \"lib/_stream_transform.js\",\n                                         \"lib/_stream_wrap.js\",\n                                         \"lib/_stream_writable.js\",\n                                         \"lib/_tls_common.js\",\n                                         \"lib/_tls_wrap.js\",\n                                         \"lib/assert.js\",\n                                         \"lib/assert/strict.js\",\n                                         \"lib/async_hooks.js\",\n                                         \"lib/buffer.js\",\n                                         \"lib/child_process.js\",\n                                         \"lib/cluster.js\",\n                                         \"lib/console.js\",\n                                         \"lib/constants.js\",\n                                         \"lib/crypto.js\",\n                                         \"lib/dgram.js\",\n                                         \"lib/diagnostics_channel.js\",\n                                         \"lib/dns.js\",\n                                         \"lib/dns/promises.js\",\n                                         \"lib/domain.js\",\n                                         \"lib/events.js\",\n                                         \"lib/fs.js\",\n                                         \"lib/fs/promises.js\",\n                                         \"lib/http.js\",\n                                         \"lib/http2.js\",\n                                         \"lib/https.js\",\n                                         \"lib/inspector.js\",\n                                         \"lib/inspector/promises.js\",\n                                         \"lib/internal/abort_controller.js\",\n                                         \"lib/internal/assert.js\",\n                                         \"lib/internal/assert/assertion_error.js\",\n                                         \"lib/internal/assert/calltracker.js\",\n                                         \"lib/internal/assert/myers_diff.js\",\n                                         \"lib/internal/assert/utils.js\",\n                                         \"lib/internal/async_context_frame.js\",\n                                         \"lib/internal/async_hooks.js\",\n                                         \"lib/internal/async_local_storage/async_context_frame.js\",\n                                         \"lib/internal/async_local_storage/async_hooks.js\",\n                                         \"lib/internal/blob.js\",\n                                         \"lib/internal/blocklist.js\",\n                                         \"lib/internal/bootstrap/node.js\",\n                                         \"lib/internal/bootstrap/realm.js\",\n                                         \"lib/internal/bootstrap/shadow_realm.js\",\n                                         \"lib/internal/bootstrap/switches/does_not_own_process_state.js\",\n                                         \"lib/internal/bootstrap/switches/does_own_process_state.js\",\n                                         \"lib/internal/bootstrap/switches/is_main_thread.js\",\n                                         \"lib/internal/bootstrap/switches/is_not_main_thread.js\",\n                                         \"lib/internal/bootstrap/web/exposed-wildcard.js\",\n                                         \"lib/internal/bootstrap/web/exposed-window-or-worker.js\",\n                                         \"lib/internal/buffer.js\",\n                                         \"lib/internal/child_process.js\",\n                                         \"lib/internal/child_process/serialization.js\",\n                                         \"lib/internal/cli_table.js\",\n                                         \"lib/internal/cluster/child.js\",\n                                         \"lib/internal/cluster/primary.js\",\n                                         \"lib/internal/cluster/round_robin_handle.js\",\n                                         \"lib/internal/cluster/shared_handle.js\",\n                                         \"lib/internal/cluster/utils.js\",\n                                         \"lib/internal/cluster/worker.js\",\n                                         \"lib/internal/console/constructor.js\",\n                                         \"lib/internal/console/global.js\",\n                                         \"lib/internal/constants.js\",\n                                         \"lib/internal/crypto/aes.js\",\n                                         \"lib/internal/crypto/certificate.js\",\n                                         \"lib/internal/crypto/cfrg.js\",\n                                         \"lib/internal/crypto/cipher.js\",\n                                         \"lib/internal/crypto/diffiehellman.js\",\n                                         \"lib/internal/crypto/ec.js\",\n                                         \"lib/internal/crypto/hash.js\",\n                                         \"lib/internal/crypto/hashnames.js\",\n                                         \"lib/internal/crypto/hkdf.js\",\n                                         \"lib/internal/crypto/keygen.js\",\n                                         \"lib/internal/crypto/keys.js\",\n                                         \"lib/internal/crypto/mac.js\",\n                                         \"lib/internal/crypto/pbkdf2.js\",\n                                         \"lib/internal/crypto/random.js\",\n                                         \"lib/internal/crypto/rsa.js\",\n                                         \"lib/internal/crypto/scrypt.js\",\n                                         \"lib/internal/crypto/sig.js\",\n                                         \"lib/internal/crypto/util.js\",\n                                         \"lib/internal/crypto/webcrypto.js\",\n                                         \"lib/internal/crypto/webidl.js\",\n                                         \"lib/internal/crypto/x509.js\",\n                                         \"lib/internal/data_url.js\",\n                                         \"lib/internal/debugger/inspect.js\",\n                                         \"lib/internal/debugger/inspect_client.js\",\n                                         \"lib/internal/debugger/inspect_repl.js\",\n                                         \"lib/internal/dgram.js\",\n                                         \"lib/internal/dns/callback_resolver.js\",\n                                         \"lib/internal/dns/promises.js\",\n                                         \"lib/internal/dns/utils.js\",\n                                         \"lib/internal/encoding.js\",\n                                         \"lib/internal/error_serdes.js\",\n                                         \"lib/internal/errors.js\",\n                                         \"lib/internal/event_target.js\",\n                                         \"lib/internal/events/abort_listener.js\",\n                                         \"lib/internal/events/symbols.js\",\n                                         \"lib/internal/file.js\",\n                                         \"lib/internal/fixed_queue.js\",\n                                         \"lib/internal/freelist.js\",\n                                         \"lib/internal/freeze_intrinsics.js\",\n                                         \"lib/internal/fs/cp/cp-sync.js\",\n                                         \"lib/internal/fs/cp/cp.js\",\n                                         \"lib/internal/fs/dir.js\",\n                                         \"lib/internal/fs/glob.js\",\n                                         \"lib/internal/fs/promises.js\",\n                                         \"lib/internal/fs/read/context.js\",\n                                         \"lib/internal/fs/recursive_watch.js\",\n                                         \"lib/internal/fs/rimraf.js\",\n                                         \"lib/internal/fs/streams.js\",\n                                         \"lib/internal/fs/sync_write_stream.js\",\n                                         \"lib/internal/fs/utils.js\",\n                                         \"lib/internal/fs/watchers.js\",\n                                         \"lib/internal/heap_utils.js\",\n                                         \"lib/internal/histogram.js\",\n                                         \"lib/internal/http.js\",\n                                         \"lib/internal/http2/compat.js\",\n                                         \"lib/internal/http2/core.js\",\n                                         \"lib/internal/http2/util.js\",\n                                         \"lib/internal/inspector/network.js\",\n                                         \"lib/internal/inspector/network_http.js\",\n                                         \"lib/internal/inspector/network_http2.js\",\n                                         \"lib/internal/inspector/network_resources.js\",\n                                         \"lib/internal/inspector/network_undici.js\",\n                                         \"lib/internal/inspector_async_hook.js\",\n                                         \"lib/internal/inspector_network_tracking.js\",\n                                         \"lib/internal/js_stream_socket.js\",\n                                         \"lib/internal/legacy/processbinding.js\",\n                                         \"lib/internal/linkedlist.js\",\n                                         \"lib/internal/main/check_syntax.js\",\n                                         \"lib/internal/main/embedding.js\",\n                                         \"lib/internal/main/eval_stdin.js\",\n                                         \"lib/internal/main/eval_string.js\",\n                                         \"lib/internal/main/inspect.js\",\n                                         \"lib/internal/main/mksnapshot.js\",\n                                         \"lib/internal/main/print_help.js\",\n                                         \"lib/internal/main/prof_process.js\",\n                                         \"lib/internal/main/repl.js\",\n                                         \"lib/internal/main/run_main_module.js\",\n                                         \"lib/internal/main/test_runner.js\",\n                                         \"lib/internal/main/watch_mode.js\",\n                                         \"lib/internal/main/worker_thread.js\",\n                                         \"lib/internal/mime.js\",\n                                         \"lib/internal/modules/cjs/loader.js\",\n                                         \"lib/internal/modules/customization_hooks.js\",\n                                         \"lib/internal/modules/esm/assert.js\",\n                                         \"lib/internal/modules/esm/create_dynamic_module.js\",\n                                         \"lib/internal/modules/esm/formats.js\",\n                                         \"lib/internal/modules/esm/get_format.js\",\n                                         \"lib/internal/modules/esm/hooks.js\",\n                                         \"lib/internal/modules/esm/initialize_import_meta.js\",\n                                         \"lib/internal/modules/esm/load.js\",\n                                         \"lib/internal/modules/esm/loader.js\",\n                                         \"lib/internal/modules/esm/module_job.js\",\n                                         \"lib/internal/modules/esm/module_map.js\",\n                                         \"lib/internal/modules/esm/resolve.js\",\n                                         \"lib/internal/modules/esm/shared_constants.js\",\n                                         \"lib/internal/modules/esm/translators.js\",\n                                         \"lib/internal/modules/esm/utils.js\",\n                                         \"lib/internal/modules/esm/worker.js\",\n                                         \"lib/internal/modules/helpers.js\",\n                                         \"lib/internal/modules/package_json_reader.js\",\n                                         \"lib/internal/modules/run_main.js\",\n                                         \"lib/internal/modules/typescript.js\",\n                                         \"lib/internal/navigator.js\",\n                                         \"lib/internal/net.js\",\n                                         \"lib/internal/options.js\",\n                                         \"lib/internal/per_context/domexception.js\",\n                                         \"lib/internal/per_context/messageport.js\",\n                                         \"lib/internal/per_context/primordials.js\",\n                                         \"lib/internal/perf/event_loop_delay.js\",\n                                         \"lib/internal/perf/event_loop_utilization.js\",\n                                         \"lib/internal/perf/nodetiming.js\",\n                                         \"lib/internal/perf/observe.js\",\n                                         \"lib/internal/perf/performance.js\",\n                                         \"lib/internal/perf/performance_entry.js\",\n                                         \"lib/internal/perf/resource_timing.js\",\n                                         \"lib/internal/perf/timerify.js\",\n                                         \"lib/internal/perf/usertiming.js\",\n                                         \"lib/internal/perf/utils.js\",\n                                         \"lib/internal/priority_queue.js\",\n                                         \"lib/internal/process/execution.js\",\n                                         \"lib/internal/process/finalization.js\",\n                                         \"lib/internal/process/per_thread.js\",\n                                         \"lib/internal/process/permission.js\",\n                                         \"lib/internal/process/pre_execution.js\",\n                                         \"lib/internal/process/promises.js\",\n                                         \"lib/internal/process/report.js\",\n                                         \"lib/internal/process/signal.js\",\n                                         \"lib/internal/process/task_queues.js\",\n                                         \"lib/internal/process/warning.js\",\n                                         \"lib/internal/process/worker_thread_only.js\",\n                                         \"lib/internal/promise_hooks.js\",\n                                         \"lib/internal/querystring.js\",\n                                         \"lib/internal/quic/quic.js\",\n                                         \"lib/internal/quic/state.js\",\n                                         \"lib/internal/quic/stats.js\",\n                                         \"lib/internal/quic/symbols.js\",\n                                         \"lib/internal/readline/callbacks.js\",\n                                         \"lib/internal/readline/emitKeypressEvents.js\",\n                                         \"lib/internal/readline/interface.js\",\n                                         \"lib/internal/readline/promises.js\",\n                                         \"lib/internal/readline/utils.js\",\n                                         \"lib/internal/repl.js\",\n                                         \"lib/internal/repl/await.js\",\n                                         \"lib/internal/repl/history.js\",\n                                         \"lib/internal/repl/utils.js\",\n                                         \"lib/internal/socket_list.js\",\n                                         \"lib/internal/socketaddress.js\",\n                                         \"lib/internal/source_map/prepare_stack_trace.js\",\n                                         \"lib/internal/source_map/source_map.js\",\n                                         \"lib/internal/source_map/source_map_cache.js\",\n                                         \"lib/internal/source_map/source_map_cache_map.js\",\n                                         \"lib/internal/stream_base_commons.js\",\n                                         \"lib/internal/streams/add-abort-signal.js\",\n                                         \"lib/internal/streams/compose.js\",\n                                         \"lib/internal/streams/destroy.js\",\n                                         \"lib/internal/streams/duplex.js\",\n                                         \"lib/internal/streams/duplexify.js\",\n                                         \"lib/internal/streams/duplexpair.js\",\n                                         \"lib/internal/streams/end-of-stream.js\",\n                                         \"lib/internal/streams/from.js\",\n                                         \"lib/internal/streams/lazy_transform.js\",\n                                         \"lib/internal/streams/legacy.js\",\n                                         \"lib/internal/streams/operators.js\",\n                                         \"lib/internal/streams/passthrough.js\",\n                                         \"lib/internal/streams/pipeline.js\",\n                                         \"lib/internal/streams/readable.js\",\n                                         \"lib/internal/streams/state.js\",\n                                         \"lib/internal/streams/transform.js\",\n                                         \"lib/internal/streams/utils.js\",\n                                         \"lib/internal/streams/writable.js\",\n                                         \"lib/internal/test/binding.js\",\n                                         \"lib/internal/test/transfer.js\",\n                                         \"lib/internal/test_runner/assert.js\",\n                                         \"lib/internal/test_runner/coverage.js\",\n                                         \"lib/internal/test_runner/harness.js\",\n                                         \"lib/internal/test_runner/mock/loader.js\",\n                                         \"lib/internal/test_runner/mock/mock.js\",\n                                         \"lib/internal/test_runner/mock/mock_timers.js\",\n                                         \"lib/internal/test_runner/reporter/dot.js\",\n                                         \"lib/internal/test_runner/reporter/junit.js\",\n                                         \"lib/internal/test_runner/reporter/lcov.js\",\n                                         \"lib/internal/test_runner/reporter/spec.js\",\n                                         \"lib/internal/test_runner/reporter/tap.js\",\n                                         \"lib/internal/test_runner/reporter/utils.js\",\n                                         \"lib/internal/test_runner/reporter/v8-serializer.js\",\n                                         \"lib/internal/test_runner/runner.js\",\n                                         \"lib/internal/test_runner/snapshot.js\",\n                                         \"lib/internal/test_runner/test.js\",\n                                         \"lib/internal/test_runner/tests_stream.js\",\n                                         \"lib/internal/test_runner/utils.js\",\n                                         \"lib/internal/timers.js\",\n                                         \"lib/internal/tls/secure-context.js\",\n                                         \"lib/internal/tls/secure-pair.js\",\n                                         \"lib/internal/trace_events_async_hooks.js\",\n                                         \"lib/internal/tty.js\",\n                                         \"lib/internal/url.js\",\n                                         \"lib/internal/util.js\",\n                                         \"lib/internal/util/colors.js\",\n                                         \"lib/internal/util/comparisons.js\",\n                                         \"lib/internal/util/debuglog.js\",\n                                         \"lib/internal/util/diff.js\",\n                                         \"lib/internal/util/inspect.js\",\n                                         \"lib/internal/util/inspector.js\",\n                                         \"lib/internal/util/parse_args/parse_args.js\",\n                                         \"lib/internal/util/parse_args/utils.js\",\n                                         \"lib/internal/util/trace_sigint.js\",\n                                         \"lib/internal/util/types.js\",\n                                         \"lib/internal/v8/startup_snapshot.js\",\n                                         \"lib/internal/v8_prof_polyfill.js\",\n                                         \"lib/internal/v8_prof_processor.js\",\n                                         \"lib/internal/validators.js\",\n                                         \"lib/internal/vm.js\",\n                                         \"lib/internal/vm/module.js\",\n                                         \"lib/internal/wasm_web_api.js\",\n                                         \"lib/internal/watch_mode/files_watcher.js\",\n                                         \"lib/internal/watchdog.js\",\n                                         \"lib/internal/webidl.js\",\n                                         \"lib/internal/webstorage.js\",\n                                         \"lib/internal/webstreams/adapters.js\",\n                                         \"lib/internal/webstreams/compression.js\",\n                                         \"lib/internal/webstreams/encoding.js\",\n                                         \"lib/internal/webstreams/queuingstrategies.js\",\n                                         \"lib/internal/webstreams/readablestream.js\",\n                                         \"lib/internal/webstreams/transfer.js\",\n                                         \"lib/internal/webstreams/transformstream.js\",\n                                         \"lib/internal/webstreams/util.js\",\n                                         \"lib/internal/webstreams/writablestream.js\",\n                                         \"lib/internal/worker.js\",\n                                         \"lib/internal/worker/clone_dom_exception.js\",\n                                         \"lib/internal/worker/io.js\",\n                                         \"lib/internal/worker/js_transferable.js\",\n                                         \"lib/internal/worker/messaging.js\",\n                                         \"lib/module.js\",\n                                         \"lib/net.js\",\n                                         \"lib/os.js\",\n                                         \"lib/path.js\",\n                                         \"lib/path/posix.js\",\n                                         \"lib/path/win32.js\",\n                                         \"lib/perf_hooks.js\",\n                                         \"lib/process.js\",\n                                         \"lib/punycode.js\",\n                                         \"lib/querystring.js\",\n                                         \"lib/readline.js\",\n                                         \"lib/readline/promises.js\",\n                                         \"lib/repl.js\",\n                                         \"lib/sea.js\",\n                                         \"lib/sqlite.js\",\n                                         \"lib/stream.js\",\n                                         \"lib/stream/consumers.js\",\n                                         \"lib/stream/promises.js\",\n                                         \"lib/stream/web.js\",\n                                         \"lib/string_decoder.js\",\n                                         \"lib/sys.js\",\n                                         \"lib/test.js\",\n                                         \"lib/test/reporters.js\",\n                                         \"lib/timers.js\",\n                                         \"lib/timers/promises.js\",\n                                         \"lib/tls.js\",\n                                         \"lib/trace_events.js\",\n                                         \"lib/tty.js\",\n                                         \"lib/url.js\",\n                                         \"lib/util.js\",\n                                         \"lib/util/types.js\",\n                                         \"lib/v8.js\",\n                                         \"lib/vm.js\",\n                                         \"lib/wasi.js\",\n                                         \"lib/worker_threads.js\",\n                                         \"lib/zlib.js\"],\n                 \"node_module_version\": 127,\n                 \"node_no_browser_globals\": false,\n                 \"node_prefix\": \"/\",\n                 \"node_release_urlbase\": \"https://nodejs.org/download/release/\",\n                 \"node_section_ordering_info\": \"\",\n                 \"node_shared\": false,\n                 \"node_shared_ada\": false,\n                 \"node_shared_brotli\": false,\n                 \"node_shared_cares\": false,\n                 \"node_shared_http_parser\": false,\n                 \"node_shared_libuv\": false,\n                 \"node_shared_nghttp2\": false,\n                 \"node_shared_nghttp3\": false,\n                 \"node_shared_ngtcp2\": false,\n                 \"node_shared_openssl\": false,\n                 \"node_shared_simdjson\": false,\n                 \"node_shared_simdutf\": false,\n                 \"node_shared_sqlite\": false,\n                 \"node_shared_uvwasi\": false,\n                 \"node_shared_zlib\": false,\n                 \"node_shared_zstd\": false,\n                 \"node_tag\": \"\",\n                 \"node_target_type\": \"executable\",\n                 \"node_use_amaro\": true,\n                 \"node_use_bundled_v8\": true,\n                 \"node_use_node_code_cache\": true,\n                 \"node_use_node_snapshot\": true,\n                 \"node_use_openssl\": true,\n                 \"node_use_sqlite\": true,\n                 \"node_use_v8_platform\": true,\n                 \"node_with_ltcg\": false,\n                 \"node_without_node_options\": false,\n                 \"node_write_snapshot_as_array_literals\": false,\n                 \"openssl_is_fips\": false,\n                 \"openssl_quic\": false,\n                 \"ossfuzz\": false,\n                 \"shlib_suffix\": \"so.127\",\n                 \"single_executable_application\": true,\n                 \"suppress_all_error_on_warn\": false,\n                 \"target_arch\": \"x64\",\n                 \"ubsan\": 0,\n                 \"use_ccache_win\": 0,\n                 \"use_prefix_to_find_headers\": false,\n                 \"v8_enable_31bit_smis_on_64bit_arch\": 0,\n                 \"v8_enable_extensible_ro_snapshot\": 0,\n                 \"v8_enable_external_code_space\": 0,\n                 \"v8_enable_gdbjit\": 0,\n                 \"v8_enable_hugepage\": 0,\n                 \"v8_enable_i18n_support\": 1,\n                 \"v8_enable_inspector\": 1,\n                 \"v8_enable_javascript_promise_hooks\": 1,\n                 \"v8_enable_lite_mode\": 0,\n                 \"v8_enable_maglev\": 0,\n                 \"v8_enable_object_print\": 1,\n                 \"v8_enable_pointer_compression\": 0,\n                 \"v8_enable_pointer_compression_shared_cage\": 0,\n                 \"v8_enable_sandbox\": 0,\n                 \"v8_enable_shared_ro_heap\": 1,\n                 \"v8_enable_short_builtin_calls\": 1,\n                 \"v8_enable_wasm_simd256_revec\": 1,\n                 \"v8_enable_webassembly\": 1,\n                 \"v8_optimized_debug\": 1,\n                 \"v8_promise_internal_field_count\": 1,\n                 \"v8_random_seed\": 0,\n                 \"v8_trace_maps\": 0,\n                 \"v8_use_siphash\": 1,\n                 \"want_separate_host_toolset\": 0}}\n",
+  "getCacheUsage": {
+   "__fn": "getCacheUsage"
+  },
+  "compileFunction": {
+   "__fn": "compileFunction"
+  },
+  "hasCachedBuiltins": {
+   "__fn": "hasCachedBuiltins"
+  },
+  "setInternalLoaders": {
+   "__fn": "setInternalLoaders"
+  }
+ },
+ "cares_wrap": {
+  "getaddrinfo": {
+   "__fn": "getaddrinfo"
+  },
+  "getnameinfo": {
+   "__fn": "getnameinfo"
+  },
+  "canonicalizeIP": {
+   "__fn": "canonicalizeIP"
+  },
+  "convertIpv6StringToBuffer": {
+   "__fn": "convertIpv6StringToBuffer"
+  },
+  "strerror": {
+   "__fn": "strerror"
+  },
+  "AF_INET": 2,
+  "AF_INET6": 10,
+  "AF_UNSPEC": 0,
+  "AI_ADDRCONFIG": 32,
+  "AI_ALL": 16,
+  "AI_V4MAPPED": 8,
+  "DNS_ORDER_VERBATIM": 0,
+  "DNS_ORDER_IPV4_FIRST": 1,
+  "DNS_ORDER_IPV6_FIRST": 2,
+  "GetAddrInfoReqWrap": {
+   "__fn": "GetAddrInfoReqWrap"
+  },
+  "GetNameInfoReqWrap": {
+   "__fn": "GetNameInfoReqWrap"
+  },
+  "QueryReqWrap": {
+   "__fn": "QueryReqWrap"
+  },
+  "ChannelWrap": {
+   "__fn": "ChannelWrap",
+   "proto": [
+    "getHostByAddr",
+    "queryA",
+    "queryAny",
+    "queryAaaa",
+    "queryCaa",
+    "queryCname",
+    "queryMx",
+    "queryNaptr",
+    "queryNs",
+    "queryPtr",
+    "querySrv",
+    "querySoa",
+    "queryTlsa",
+    "queryTxt",
+    "getServers",
+    "setServers",
+    "setLocalAddress",
+    "cancel"
+   ]
+  }
+ },
+ "config": {
+  "isDebugBuild": false,
+  "openSSLIsBoringSSL": false,
+  "hasOpenSSL": true,
+  "fipsMode": true,
+  "hasIntl": true,
+  "hasTracing": true,
+  "hasNodeOptions": true,
+  "hasInspector": true,
+  "noBrowserGlobals": false,
+  "bits": 64,
+  "getDefaultLocale": {
+   "__fn": "getDefaultLocale"
+  }
+ },
+ "constants": {
+  "os": {
+   "UV_UDP_REUSEADDR": 4,
+   "dlopen": {
+    "RTLD_LAZY": 1,
+    "RTLD_NOW": 2,
+    "RTLD_GLOBAL": 256,
+    "RTLD_LOCAL": 0,
+    "RTLD_DEEPBIND": 8
+   },
+   "errno": {
+    "E2BIG": 7,
+    "EACCES": 13,
+    "EADDRINUSE": 98,
+    "EADDRNOTAVAIL": 99,
+    "EAFNOSUPPORT": 97,
+    "EAGAIN": 11,
+    "EALREADY": 114,
+    "EBADF": 9,
+    "EBADMSG": 74,
+    "EBUSY": 16,
+    "ECANCELED": 125,
+    "ECHILD": 10,
+    "ECONNABORTED": 103,
+    "ECONNREFUSED": 111,
+    "ECONNRESET": 104,
+    "EDEADLK": 35,
+    "EDESTADDRREQ": 89,
+    "EDOM": 33,
+    "EDQUOT": 122,
+    "EEXIST": 17,
+    "EFAULT": 14,
+    "EFBIG": 27,
+    "EHOSTUNREACH": 113,
+    "EIDRM": 43,
+    "EILSEQ": 84,
+    "EINPROGRESS": 115,
+    "EINTR": 4,
+    "EINVAL": 22,
+    "EIO": 5,
+    "EISCONN": 106,
+    "EISDIR": 21,
+    "ELOOP": 40,
+    "EMFILE": 24,
+    "EMLINK": 31,
+    "EMSGSIZE": 90,
+    "EMULTIHOP": 72,
+    "ENAMETOOLONG": 36,
+    "ENETDOWN": 100,
+    "ENETRESET": 102,
+    "ENETUNREACH": 101,
+    "ENFILE": 23,
+    "ENOBUFS": 105,
+    "ENODATA": 61,
+    "ENODEV": 19,
+    "ENOENT": 2,
+    "ENOEXEC": 8,
+    "ENOLCK": 37,
+    "ENOLINK": 67,
+    "ENOMEM": 12,
+    "ENOMSG": 42,
+    "ENOPROTOOPT": 92,
+    "ENOSPC": 28,
+    "ENOSR": 63,
+    "ENOSTR": 60,
+    "ENOSYS": 38,
+    "ENOTCONN": 107,
+    "ENOTDIR": 20,
+    "ENOTEMPTY": 39,
+    "ENOTSOCK": 88,
+    "ENOTSUP": 95,
+    "ENOTTY": 25,
+    "ENXIO": 6,
+    "EOPNOTSUPP": 95,
+    "EOVERFLOW": 75,
+    "EPERM": 1,
+    "EPIPE": 32,
+    "EPROTO": 71,
+    "EPROTONOSUPPORT": 93,
+    "EPROTOTYPE": 91,
+    "ERANGE": 34,
+    "EROFS": 30,
+    "ESPIPE": 29,
+    "ESRCH": 3,
+    "ESTALE": 116,
+    "ETIME": 62,
+    "ETIMEDOUT": 110,
+    "ETXTBSY": 26,
+    "EWOULDBLOCK": 11,
+    "EXDEV": 18
+   },
+   "signals": {
+    "SIGHUP": 1,
+    "SIGINT": 2,
+    "SIGQUIT": 3,
+    "SIGILL": 4,
+    "SIGTRAP": 5,
+    "SIGABRT": 6,
+    "SIGIOT": 6,
+    "SIGBUS": 7,
+    "SIGFPE": 8,
+    "SIGKILL": 9,
+    "SIGUSR1": 10,
+    "SIGSEGV": 11,
+    "SIGUSR2": 12,
+    "SIGPIPE": 13,
+    "SIGALRM": 14,
+    "SIGTERM": 15,
+    "SIGCHLD": 17,
+    "SIGSTKFLT": 16,
+    "SIGCONT": 18,
+    "SIGSTOP": 19,
+    "SIGTSTP": 20,
+    "SIGTTIN": 21,
+    "SIGTTOU": 22,
+    "SIGURG": 23,
+    "SIGXCPU": 24,
+    "SIGXFSZ": 25,
+    "SIGVTALRM": 26,
+    "SIGPROF": 27,
+    "SIGWINCH": 28,
+    "SIGIO": 29,
+    "SIGPOLL": 29,
+    "SIGPWR": 30,
+    "SIGSYS": 31
+   },
+   "priority": {
+    "PRIORITY_LOW": 19,
+    "PRIORITY_BELOW_NORMAL": 10,
+    "PRIORITY_NORMAL": 0,
+    "PRIORITY_ABOVE_NORMAL": -7,
+    "PRIORITY_HIGH": -14,
+    "PRIORITY_HIGHEST": -20
+   }
+  },
+  "fs": {
+   "UV_FS_SYMLINK_DIR": 1,
+   "UV_FS_SYMLINK_JUNCTION": 2,
+   "O_RDONLY": 0,
+   "O_WRONLY": 1,
+   "O_RDWR": 2,
+   "UV_DIRENT_UNKNOWN": 0,
+   "UV_DIRENT_FILE": 1,
+   "UV_DIRENT_DIR": 2,
+   "UV_DIRENT_LINK": 3,
+   "UV_DIRENT_FIFO": 4,
+   "UV_DIRENT_SOCKET": 5,
+   "UV_DIRENT_CHAR": 6,
+   "UV_DIRENT_BLOCK": 7,
+   "S_IFMT": 61440,
+   "S_IFREG": 32768,
+   "S_IFDIR": 16384,
+   "S_IFCHR": 8192,
+   "S_IFBLK": 24576,
+   "S_IFIFO": 4096,
+   "S_IFLNK": 40960,
+   "S_IFSOCK": 49152,
+   "O_CREAT": 64,
+   "O_EXCL": 128,
+   "UV_FS_O_FILEMAP": 0,
+   "O_NOCTTY": 256,
+   "O_TRUNC": 512,
+   "O_APPEND": 1024,
+   "O_DIRECTORY": 65536,
+   "O_NOATIME": 262144,
+   "O_NOFOLLOW": 131072,
+   "O_SYNC": 1052672,
+   "O_DSYNC": 4096,
+   "O_DIRECT": 16384,
+   "O_NONBLOCK": 2048,
+   "S_IRWXU": 448,
+   "S_IRUSR": 256,
+   "S_IWUSR": 128,
+   "S_IXUSR": 64,
+   "S_IRWXG": 56,
+   "S_IRGRP": 32,
+   "S_IWGRP": 16,
+   "S_IXGRP": 8,
+   "S_IRWXO": 7,
+   "S_IROTH": 4,
+   "S_IWOTH": 2,
+   "S_IXOTH": 1,
+   "F_OK": 0,
+   "R_OK": 4,
+   "W_OK": 2,
+   "X_OK": 1,
+   "UV_FS_COPYFILE_EXCL": 1,
+   "COPYFILE_EXCL": 1,
+   "UV_FS_COPYFILE_FICLONE": 2,
+   "COPYFILE_FICLONE": 2,
+   "UV_FS_COPYFILE_FICLONE_FORCE": 4,
+   "COPYFILE_FICLONE_FORCE": 4
+  },
+  "crypto": {
+   "OPENSSL_VERSION_NUMBER": 810549280,
+   "SSL_OP_ALL": 2147485776,
+   "SSL_OP_ALLOW_NO_DHE_KEX": 1024,
+   "SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION": 262144,
+   "SSL_OP_CIPHER_SERVER_PREFERENCE": 4194304,
+   "SSL_OP_CISCO_ANYCONNECT": 32768,
+   "SSL_OP_COOKIE_EXCHANGE": 8192,
+   "SSL_OP_CRYPTOPRO_TLSEXT_BUG": 2147483648,
+   "SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS": 2048,
+   "SSL_OP_LEGACY_SERVER_CONNECT": 4,
+   "SSL_OP_NO_COMPRESSION": 131072,
+   "SSL_OP_NO_ENCRYPT_THEN_MAC": 524288,
+   "SSL_OP_NO_QUERY_MTU": 4096,
+   "SSL_OP_NO_RENEGOTIATION": 1073741824,
+   "SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION": 65536,
+   "SSL_OP_NO_SSLv2": 0,
+   "SSL_OP_NO_SSLv3": 33554432,
+   "SSL_OP_NO_TICKET": 16384,
+   "SSL_OP_NO_TLSv1": 67108864,
+   "SSL_OP_NO_TLSv1_1": 268435456,
+   "SSL_OP_NO_TLSv1_2": 134217728,
+   "SSL_OP_NO_TLSv1_3": 536870912,
+   "SSL_OP_PRIORITIZE_CHACHA": 2097152,
+   "SSL_OP_TLS_ROLLBACK_BUG": 8388608,
+   "ENGINE_METHOD_RSA": 1,
+   "ENGINE_METHOD_DSA": 2,
+   "ENGINE_METHOD_DH": 4,
+   "ENGINE_METHOD_RAND": 8,
+   "ENGINE_METHOD_EC": 2048,
+   "ENGINE_METHOD_CIPHERS": 64,
+   "ENGINE_METHOD_DIGESTS": 128,
+   "ENGINE_METHOD_PKEY_METHS": 512,
+   "ENGINE_METHOD_PKEY_ASN1_METHS": 1024,
+   "ENGINE_METHOD_ALL": 65535,
+   "ENGINE_METHOD_NONE": 0,
+   "DH_CHECK_P_NOT_SAFE_PRIME": 2,
+   "DH_CHECK_P_NOT_PRIME": 1,
+   "DH_UNABLE_TO_CHECK_GENERATOR": 4,
+   "DH_NOT_SUITABLE_GENERATOR": 8,
+   "RSA_PKCS1_PADDING": 1,
+   "RSA_NO_PADDING": 3,
+   "RSA_PKCS1_OAEP_PADDING": 4,
+   "RSA_X931_PADDING": 5,
+   "RSA_PKCS1_PSS_PADDING": 6,
+   "RSA_PSS_SALTLEN_DIGEST": -1,
+   "RSA_PSS_SALTLEN_MAX_SIGN": -2,
+   "RSA_PSS_SALTLEN_AUTO": -2,
+   "defaultCoreCipherList": "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-SHA256:DHE-RSA-AES128-SHA256:ECDHE-RSA-AES256-SHA384:DHE-RSA-AES256-SHA384:ECDHE-RSA-AES256-SHA256:DHE-RSA-AES256-SHA256:HIGH:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!SRP:!CAMELLIA",
+   "TLS1_VERSION": 769,
+   "TLS1_1_VERSION": 770,
+   "TLS1_2_VERSION": 771,
+   "TLS1_3_VERSION": 772,
+   "POINT_CONVERSION_COMPRESSED": 2,
+   "POINT_CONVERSION_UNCOMPRESSED": 4,
+   "POINT_CONVERSION_HYBRID": 6,
+   "defaultCipherList": "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-SHA256:DHE-RSA-AES128-SHA256:ECDHE-RSA-AES256-SHA384:DHE-RSA-AES256-SHA384:ECDHE-RSA-AES256-SHA256:DHE-RSA-AES256-SHA256:HIGH:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!SRP:!CAMELLIA"
+  },
+  "zlib": {
+   "Z_NO_FLUSH": 0,
+   "Z_PARTIAL_FLUSH": 1,
+   "Z_SYNC_FLUSH": 2,
+   "Z_FULL_FLUSH": 3,
+   "Z_FINISH": 4,
+   "Z_BLOCK": 5,
+   "Z_OK": 0,
+   "Z_STREAM_END": 1,
+   "Z_NEED_DICT": 2,
+   "Z_ERRNO": -1,
+   "Z_STREAM_ERROR": -2,
+   "Z_DATA_ERROR": -3,
+   "Z_MEM_ERROR": -4,
+   "Z_BUF_ERROR": -5,
+   "Z_VERSION_ERROR": -6,
+   "Z_NO_COMPRESSION": 0,
+   "Z_BEST_SPEED": 1,
+   "Z_BEST_COMPRESSION": 9,
+   "Z_DEFAULT_COMPRESSION": -1,
+   "Z_FILTERED": 1,
+   "Z_HUFFMAN_ONLY": 2,
+   "Z_RLE": 3,
+   "Z_FIXED": 4,
+   "Z_DEFAULT_STRATEGY": 0,
+   "ZLIB_VERNUM": 4880,
+   "DEFLATE": 1,
+   "INFLATE": 2,
+   "GZIP": 3,
+   "GUNZIP": 4,
+   "DEFLATERAW": 5,
+   "INFLATERAW": 6,
+   "UNZIP": 7,
+   "BROTLI_DECODE": 8,
+   "BROTLI_ENCODE": 9,
+   "ZSTD_DECOMPRESS": 11,
+   "ZSTD_COMPRESS": 10,
+   "Z_MIN_WINDOWBITS": 8,
+   "Z_MAX_WINDOWBITS": 15,
+   "Z_DEFAULT_WINDOWBITS": 15,
+   "Z_MIN_CHUNK": 64,
+   "Z_MAX_CHUNK": {
+    "__num": "Infinity"
+   },
+   "Z_DEFAULT_CHUNK": 16384,
+   "Z_MIN_MEMLEVEL": 1,
+   "Z_MAX_MEMLEVEL": 9,
+   "Z_DEFAULT_MEMLEVEL": 8,
+   "Z_MIN_LEVEL": -1,
+   "Z_MAX_LEVEL": 9,
+   "Z_DEFAULT_LEVEL": -1,
+   "BROTLI_OPERATION_PROCESS": 0,
+   "BROTLI_OPERATION_FLUSH": 1,
+   "BROTLI_OPERATION_FINISH": 2,
+   "BROTLI_OPERATION_EMIT_METADATA": 3,
+   "BROTLI_PARAM_MODE": 0,
+   "BROTLI_MODE_GENERIC": 0,
+   "BROTLI_MODE_TEXT": 1,
+   "BROTLI_MODE_FONT": 2,
+   "BROTLI_DEFAULT_MODE": 0,
+   "BROTLI_PARAM_QUALITY": 1,
+   "BROTLI_MIN_QUALITY": 0,
+   "BROTLI_MAX_QUALITY": 11,
+   "BROTLI_DEFAULT_QUALITY": 11,
+   "BROTLI_PARAM_LGWIN": 2,
+   "BROTLI_MIN_WINDOW_BITS": 10,
+   "BROTLI_MAX_WINDOW_BITS": 24,
+   "BROTLI_LARGE_MAX_WINDOW_BITS": 30,
+   "BROTLI_DEFAULT_WINDOW": 22,
+   "BROTLI_PARAM_LGBLOCK": 3,
+   "BROTLI_MIN_INPUT_BLOCK_BITS": 16,
+   "BROTLI_MAX_INPUT_BLOCK_BITS": 24,
+   "BROTLI_PARAM_DISABLE_LITERAL_CONTEXT_MODELING": 4,
+   "BROTLI_PARAM_SIZE_HINT": 5,
+   "BROTLI_PARAM_LARGE_WINDOW": 6,
+   "BROTLI_PARAM_NPOSTFIX": 7,
+   "BROTLI_PARAM_NDIRECT": 8,
+   "BROTLI_DECODER_RESULT_ERROR": 0,
+   "BROTLI_DECODER_RESULT_SUCCESS": 1,
+   "BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT": 2,
+   "BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT": 3,
+   "BROTLI_DECODER_PARAM_DISABLE_RING_BUFFER_REALLOCATION": 0,
+   "BROTLI_DECODER_PARAM_LARGE_WINDOW": 1,
+   "BROTLI_DECODER_NO_ERROR": 0,
+   "BROTLI_DECODER_SUCCESS": 1,
+   "BROTLI_DECODER_NEEDS_MORE_INPUT": 2,
+   "BROTLI_DECODER_NEEDS_MORE_OUTPUT": 3,
+   "BROTLI_DECODER_ERROR_FORMAT_EXUBERANT_NIBBLE": -1,
+   "BROTLI_DECODER_ERROR_FORMAT_RESERVED": -2,
+   "BROTLI_DECODER_ERROR_FORMAT_EXUBERANT_META_NIBBLE": -3,
+   "BROTLI_DECODER_ERROR_FORMAT_SIMPLE_HUFFMAN_ALPHABET": -4,
+   "BROTLI_DECODER_ERROR_FORMAT_SIMPLE_HUFFMAN_SAME": -5,
+   "BROTLI_DECODER_ERROR_FORMAT_CL_SPACE": -6,
+   "BROTLI_DECODER_ERROR_FORMAT_HUFFMAN_SPACE": -7,
+   "BROTLI_DECODER_ERROR_FORMAT_CONTEXT_MAP_REPEAT": -8,
+   "BROTLI_DECODER_ERROR_FORMAT_BLOCK_LENGTH_1": -9,
+   "BROTLI_DECODER_ERROR_FORMAT_BLOCK_LENGTH_2": -10,
+   "BROTLI_DECODER_ERROR_FORMAT_TRANSFORM": -11,
+   "BROTLI_DECODER_ERROR_FORMAT_DICTIONARY": -12,
+   "BROTLI_DECODER_ERROR_FORMAT_WINDOW_BITS": -13,
+   "BROTLI_DECODER_ERROR_FORMAT_PADDING_1": -14,
+   "BROTLI_DECODER_ERROR_FORMAT_PADDING_2": -15,
+   "BROTLI_DECODER_ERROR_FORMAT_DISTANCE": -16,
+   "BROTLI_DECODER_ERROR_DICTIONARY_NOT_SET": -19,
+   "BROTLI_DECODER_ERROR_INVALID_ARGUMENTS": -20,
+   "BROTLI_DECODER_ERROR_ALLOC_CONTEXT_MODES": -21,
+   "BROTLI_DECODER_ERROR_ALLOC_TREE_GROUPS": -22,
+   "BROTLI_DECODER_ERROR_ALLOC_CONTEXT_MAP": -25,
+   "BROTLI_DECODER_ERROR_ALLOC_RING_BUFFER_1": -26,
+   "BROTLI_DECODER_ERROR_ALLOC_RING_BUFFER_2": -27,
+   "BROTLI_DECODER_ERROR_ALLOC_BLOCK_TYPE_TREES": -30,
+   "BROTLI_DECODER_ERROR_UNREACHABLE": -31,
+   "ZSTD_e_continue": 0,
+   "ZSTD_e_flush": 1,
+   "ZSTD_e_end": 2,
+   "ZSTD_fast": 1,
+   "ZSTD_dfast": 2,
+   "ZSTD_greedy": 3,
+   "ZSTD_lazy": 4,
+   "ZSTD_lazy2": 5,
+   "ZSTD_btlazy2": 6,
+   "ZSTD_btopt": 7,
+   "ZSTD_btultra": 8,
+   "ZSTD_btultra2": 9,
+   "ZSTD_c_compressionLevel": 100,
+   "ZSTD_c_windowLog": 101,
+   "ZSTD_c_hashLog": 102,
+   "ZSTD_c_chainLog": 103,
+   "ZSTD_c_searchLog": 104,
+   "ZSTD_c_minMatch": 105,
+   "ZSTD_c_targetLength": 106,
+   "ZSTD_c_strategy": 107,
+   "ZSTD_c_enableLongDistanceMatching": 160,
+   "ZSTD_c_ldmHashLog": 161,
+   "ZSTD_c_ldmMinMatch": 162,
+   "ZSTD_c_ldmBucketSizeLog": 163,
+   "ZSTD_c_ldmHashRateLog": 164,
+   "ZSTD_c_contentSizeFlag": 200,
+   "ZSTD_c_checksumFlag": 201,
+   "ZSTD_c_dictIDFlag": 202,
+   "ZSTD_c_nbWorkers": 400,
+   "ZSTD_c_jobSize": 401,
+   "ZSTD_c_overlapLog": 402,
+   "ZSTD_d_windowLogMax": 100,
+   "ZSTD_CLEVEL_DEFAULT": 3,
+   "ZSTD_error_no_error": 0,
+   "ZSTD_error_GENERIC": 1,
+   "ZSTD_error_prefix_unknown": 10,
+   "ZSTD_error_version_unsupported": 12,
+   "ZSTD_error_frameParameter_unsupported": 14,
+   "ZSTD_error_frameParameter_windowTooLarge": 16,
+   "ZSTD_error_corruption_detected": 20,
+   "ZSTD_error_checksum_wrong": 22,
+   "ZSTD_error_literals_headerWrong": 24,
+   "ZSTD_error_dictionary_corrupted": 30,
+   "ZSTD_error_dictionary_wrong": 32,
+   "ZSTD_error_dictionaryCreation_failed": 34,
+   "ZSTD_error_parameter_unsupported": 40,
+   "ZSTD_error_parameter_combination_unsupported": 41,
+   "ZSTD_error_parameter_outOfBound": 42,
+   "ZSTD_error_tableLog_tooLarge": 44,
+   "ZSTD_error_maxSymbolValue_tooLarge": 46,
+   "ZSTD_error_maxSymbolValue_tooSmall": 48,
+   "ZSTD_error_stabilityCondition_notRespected": 50,
+   "ZSTD_error_stage_wrong": 60,
+   "ZSTD_error_init_missing": 62,
+   "ZSTD_error_memory_allocation": 64,
+   "ZSTD_error_workSpace_tooSmall": 66,
+   "ZSTD_error_dstSize_tooSmall": 70,
+   "ZSTD_error_srcSize_wrong": 72,
+   "ZSTD_error_dstBuffer_null": 74,
+   "ZSTD_error_noForwardProgress_destFull": 80,
+   "ZSTD_error_noForwardProgress_inputEmpty": 82
+  },
+  "trace": {
+   "TRACE_EVENT_PHASE_BEGIN": 66,
+   "TRACE_EVENT_PHASE_END": 69,
+   "TRACE_EVENT_PHASE_COMPLETE": 88,
+   "TRACE_EVENT_PHASE_INSTANT": 73,
+   "TRACE_EVENT_PHASE_ASYNC_BEGIN": 83,
+   "TRACE_EVENT_PHASE_ASYNC_STEP_INTO": 84,
+   "TRACE_EVENT_PHASE_ASYNC_STEP_PAST": 112,
+   "TRACE_EVENT_PHASE_ASYNC_END": 70,
+   "TRACE_EVENT_PHASE_NESTABLE_ASYNC_BEGIN": 98,
+   "TRACE_EVENT_PHASE_NESTABLE_ASYNC_END": 101,
+   "TRACE_EVENT_PHASE_NESTABLE_ASYNC_INSTANT": 110,
+   "TRACE_EVENT_PHASE_FLOW_BEGIN": 115,
+   "TRACE_EVENT_PHASE_FLOW_STEP": 116,
+   "TRACE_EVENT_PHASE_FLOW_END": 102,
+   "TRACE_EVENT_PHASE_METADATA": 77,
+   "TRACE_EVENT_PHASE_COUNTER": 67,
+   "TRACE_EVENT_PHASE_SAMPLE": 80,
+   "TRACE_EVENT_PHASE_CREATE_OBJECT": 78,
+   "TRACE_EVENT_PHASE_SNAPSHOT_OBJECT": 79,
+   "TRACE_EVENT_PHASE_DELETE_OBJECT": 68,
+   "TRACE_EVENT_PHASE_MEMORY_DUMP": 118,
+   "TRACE_EVENT_PHASE_MARK": 82,
+   "TRACE_EVENT_PHASE_CLOCK_SYNC": 99,
+   "TRACE_EVENT_PHASE_ENTER_CONTEXT": 40,
+   "TRACE_EVENT_PHASE_LEAVE_CONTEXT": 41,
+   "TRACE_EVENT_PHASE_LINK_IDS": 61
+  },
+  "internal": {
+   "EXTENSIONLESS_FORMAT_JAVASCRIPT": 0,
+   "EXTENSIONLESS_FORMAT_WASM": 1
+  }
+ },
+ "contextify": {
+  "makeContext": {
+   "__fn": "makeContext"
+  },
+  "ContextifyScript": {
+   "__fn": "ContextifyScript",
+   "proto": [
+    "createCachedData",
+    "runInContext"
+   ]
+  },
+  "compileFunction": {
+   "__fn": "compileFunction"
+  },
+  "startSigintWatchdog": {
+   "__fn": "startSigintWatchdog"
+  },
+  "stopSigintWatchdog": {
+   "__fn": "stopSigintWatchdog"
+  },
+  "watchdogHasPendingSigint": {
+   "__fn": "watchdogHasPendingSigint"
+  },
+  "measureMemory": {
+   "__fn": "measureMemory"
+  },
+  "compileFunctionForCJSLoader": {
+   "__fn": "compileFunctionForCJSLoader"
+  },
+  "containsModuleSyntax": {
+   "__fn": "containsModuleSyntax"
+  },
+  "constants": {
+   "measureMemory": {
+    "mode": {
+     "SUMMARY": 0,
+     "DETAILED": 1
+    },
+    "execution": {
+     "DEFAULT": 0,
+     "EAGER": 1
+    }
+   }
+  }
+ },
+ "credentials": {
+  "safeGetenv": {
+   "__fn": "safeGetenv"
+  },
+  "getTempDir": {
+   "__fn": "getTempDir"
+  },
+  "implementsPosixCredentials": true,
+  "getuid": {
+   "__fn": "getuid"
+  },
+  "geteuid": {
+   "__fn": "geteuid"
+  },
+  "getgid": {
+   "__fn": "getgid"
+  },
+  "getegid": {
+   "__fn": "getegid"
+  },
+  "getgroups": {
+   "__fn": "getgroups"
+  },
+  "initgroups": {
+   "__fn": "initgroups"
+  },
+  "setegid": {
+   "__fn": "setegid"
+  },
+  "seteuid": {
+   "__fn": "seteuid"
+  },
+  "setgid": {
+   "__fn": "setgid"
+  },
+  "setuid": {
+   "__fn": "setuid"
+  },
+  "setgroups": {
+   "__fn": "setgroups"
+  }
+ },
+ "crypto": {
+  "AESCipherJob": {
+   "__fn": "AESCipherJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "kKeyVariantAES_CTR_128": 0,
+  "kKeyVariantAES_CTR_192": 1,
+  "kKeyVariantAES_CTR_256": 2,
+  "kKeyVariantAES_CBC_128": 3,
+  "kKeyVariantAES_CBC_192": 4,
+  "kKeyVariantAES_CBC_256": 5,
+  "kKeyVariantAES_GCM_128": 6,
+  "kKeyVariantAES_GCM_192": 7,
+  "kKeyVariantAES_GCM_256": 8,
+  "kKeyVariantAES_KW_128": 9,
+  "kKeyVariantAES_KW_192": 10,
+  "kKeyVariantAES_KW_256": 11,
+  "CipherBase": {
+   "__fn": "CipherBase",
+   "proto": [
+    "init",
+    "initiv",
+    "update",
+    "final",
+    "setAutoPadding",
+    "getAuthTag",
+    "setAuthTag",
+    "setAAD"
+   ]
+  },
+  "getSSLCiphers": {
+   "__fn": "getSSLCiphers"
+  },
+  "getCiphers": {
+   "__fn": "getCiphers"
+  },
+  "publicEncrypt": {
+   "__fn": "publicEncrypt"
+  },
+  "privateDecrypt": {
+   "__fn": "privateDecrypt"
+  },
+  "privateEncrypt": {
+   "__fn": "privateEncrypt"
+  },
+  "publicDecrypt": {
+   "__fn": "publicDecrypt"
+  },
+  "getCipherInfo": {
+   "__fn": "getCipherInfo"
+  },
+  "kWebCryptoCipherEncrypt": 0,
+  "kWebCryptoCipherDecrypt": 1,
+  "DiffieHellman": {
+   "__fn": "DiffieHellman",
+   "proto": [
+    "generateKeys",
+    "computeSecret",
+    "getPrime",
+    "getGenerator",
+    "getPublicKey",
+    "getPrivateKey",
+    "setPublicKey",
+    "setPrivateKey"
+   ]
+  },
+  "DiffieHellmanGroup": {
+   "__fn": "DiffieHellmanGroup",
+   "proto": [
+    "generateKeys",
+    "computeSecret",
+    "getPrime",
+    "getGenerator",
+    "getPublicKey",
+    "getPrivateKey",
+    "setPublicKey",
+    "setPrivateKey"
+   ]
+  },
+  "statelessDH": {
+   "__fn": "statelessDH"
+  },
+  "DhKeyPairGenJob": {
+   "__fn": "DhKeyPairGenJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "DHKeyExportJob": {
+   "__fn": "DHKeyExportJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "DHBitsJob": {
+   "__fn": "DHBitsJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "DsaKeyPairGenJob": {
+   "__fn": "DsaKeyPairGenJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "ECDH": {
+   "__fn": "ECDH",
+   "proto": [
+    "generateKeys",
+    "computeSecret",
+    "getPublicKey",
+    "getPrivateKey",
+    "setPublicKey",
+    "setPrivateKey"
+   ]
+  },
+  "ECDHConvertKey": {
+   "__fn": "ECDHConvertKey"
+  },
+  "getCurves": {
+   "__fn": "getCurves"
+  },
+  "ECDHBitsJob": {
+   "__fn": "ECDHBitsJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "EcKeyPairGenJob": {
+   "__fn": "EcKeyPairGenJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "ECKeyExportJob": {
+   "__fn": "ECKeyExportJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "OPENSSL_EC_NAMED_CURVE": 1,
+  "OPENSSL_EC_EXPLICIT_CURVE": 0,
+  "Hash": {
+   "__fn": "Hash",
+   "proto": [
+    "update",
+    "digest"
+   ]
+  },
+  "getHashes": {
+   "__fn": "getHashes"
+  },
+  "getCachedAliases": {
+   "__fn": "getCachedAliases"
+  },
+  "oneShotDigest": {
+   "__fn": "oneShotDigest"
+  },
+  "HashJob": {
+   "__fn": "HashJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "internalVerifyIntegrity": {
+   "__fn": "internalVerifyIntegrity"
+  },
+  "HKDFJob": {
+   "__fn": "HKDFJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "Hmac": {
+   "__fn": "Hmac",
+   "proto": [
+    "init",
+    "update",
+    "digest"
+   ]
+  },
+  "HmacJob": {
+   "__fn": "HmacJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "NidKeyPairGenJob": {
+   "__fn": "NidKeyPairGenJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "SecretKeyGenJob": {
+   "__fn": "SecretKeyGenJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "KeyObjectHandle": {
+   "__fn": true,
+   "proto": [
+    "init",
+    "getSymmetricKeySize",
+    "getAsymmetricKeyType",
+    "checkEcKeyData",
+    "export",
+    "exportJwk",
+    "initECRaw",
+    "initEDRaw",
+    "initJwk",
+    "keyDetail",
+    "equals"
+   ]
+  },
+  "kWebCryptoKeyFormatRaw": 0,
+  "kWebCryptoKeyFormatPKCS8": 1,
+  "kWebCryptoKeyFormatSPKI": 2,
+  "kWebCryptoKeyFormatJWK": 3,
+  "EVP_PKEY_ED25519": 1087,
+  "EVP_PKEY_ED448": 1088,
+  "EVP_PKEY_X25519": 1034,
+  "EVP_PKEY_X448": 1035,
+  "kKeyEncodingPKCS1": 0,
+  "kKeyEncodingPKCS8": 1,
+  "kKeyEncodingSPKI": 2,
+  "kKeyEncodingSEC1": 3,
+  "kKeyFormatDER": 0,
+  "kKeyFormatPEM": 1,
+  "kKeyFormatJWK": 2,
+  "kKeyTypeSecret": 0,
+  "kKeyTypePublic": 1,
+  "kKeyTypePrivate": 2,
+  "kSigEncDER": 0,
+  "kSigEncP1363": 1,
+  "createNativeKeyObjectClass": {
+   "__fn": "createNativeKeyObjectClass"
+  },
+  "PBKDF2Job": {
+   "__fn": "PBKDF2Job",
+   "proto": [
+    "run"
+   ]
+  },
+  "RandomBytesJob": {
+   "__fn": "RandomBytesJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "RandomPrimeJob": {
+   "__fn": "RandomPrimeJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "CheckPrimeJob": {
+   "__fn": "CheckPrimeJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "RsaKeyPairGenJob": {
+   "__fn": "RsaKeyPairGenJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "RSAKeyExportJob": {
+   "__fn": "RSAKeyExportJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "RSACipherJob": {
+   "__fn": "RSACipherJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "kKeyVariantRSA_SSA_PKCS1_v1_5": 0,
+  "kKeyVariantRSA_PSS": 1,
+  "kKeyVariantRSA_OAEP": 2,
+  "SecureContext": {
+   "__fn": "SecureContext",
+   "proto": [
+    "init",
+    "setKey",
+    "setCert",
+    "addCACert",
+    "setAllowPartialTrustChain",
+    "addCRL",
+    "addRootCerts",
+    "setCipherSuites",
+    "setCiphers",
+    "setSigalgs",
+    "setECDHCurve",
+    "setDHParam",
+    "setMaxProto",
+    "setMinProto",
+    "getMaxProto",
+    "getMinProto",
+    "setOptions",
+    "setSessionIdContext",
+    "setSessionTimeout",
+    "close",
+    "loadPKCS12",
+    "setTicketKeys",
+    "enableTicketKeyCallback",
+    "getTicketKeys",
+    "getCertificate",
+    "getIssuer",
+    "setEngineKey",
+    "setClientCertEngine",
+    "_external"
+   ],
+   "statics": {
+    "kTicketKeyReturnIndex": 0,
+    "kTicketKeyHMACIndex": 1,
+    "kTicketKeyAESIndex": 2,
+    "kTicketKeyNameIndex": 3,
+    "kTicketKeyIVIndex": 4
+   }
+  },
+  "getBundledRootCertificates": {
+   "__fn": "getBundledRootCertificates"
+  },
+  "getSystemCACertificates": {
+   "__fn": "getSystemCACertificates"
+  },
+  "getExtraCACertificates": {
+   "__fn": "getExtraCACertificates"
+  },
+  "resetRootCertStore": {
+   "__fn": "resetRootCertStore"
+  },
+  "getUserRootCertificates": {
+   "__fn": "getUserRootCertificates"
+  },
+  "Sign": {
+   "__fn": "Sign",
+   "proto": [
+    "init",
+    "update",
+    "sign"
+   ]
+  },
+  "SignJob": {
+   "__fn": "SignJob",
+   "proto": [
+    "run"
+   ]
+  },
+  "kSignJobModeSign": 0,
+  "kSignJobModeVerify": 1,
+  "RSA_PKCS1_PSS_PADDING": 6,
+  "certVerifySpkac": {
+   "__fn": "certVerifySpkac"
+  },
+  "certExportPublicKey": {
+   "__fn": "certExportPublicKey"
+  },
+  "certExportChallenge": {
+   "__fn": "certExportChallenge"
+  },
+  "timingSafeEqual": {
+   "__fn": true
+  },
+  "setEngine": {
+   "__fn": "setEngine"
+  },
+  "getFipsCrypto": {
+   "__fn": "getFipsCrypto"
+  },
+  "setFipsCrypto": {
+   "__fn": "setFipsCrypto"
+  },
+  "testFipsCrypto": {
+   "__fn": "testFipsCrypto"
+  },
+  "kCryptoJobAsync": 0,
+  "kCryptoJobSync": 1,
+  "secureBuffer": {
+   "__fn": "secureBuffer"
+  },
+  "secureHeapUsed": {
+   "__fn": "secureHeapUsed"
+  },
+  "getOpenSSLSecLevelCrypto": {
+   "__fn": "getOpenSSLSecLevelCrypto"
+  },
+  "Verify": {
+   "__fn": "Verify",
+   "proto": [
+    "init",
+    "update",
+    "verify"
+   ]
+  },
+  "parseX509": {
+   "__fn": "parseX509"
+  },
+  "X509_CHECK_FLAG_ALWAYS_CHECK_SUBJECT": 1,
+  "X509_CHECK_FLAG_NEVER_CHECK_SUBJECT": 32,
+  "X509_CHECK_FLAG_NO_WILDCARDS": 2,
+  "X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS": 4,
+  "X509_CHECK_FLAG_MULTI_LABEL_WILDCARDS": 8,
+  "X509_CHECK_FLAG_SINGLE_LABEL_SUBDOMAINS": 16,
+  "ScryptJob": {
+   "__fn": "ScryptJob",
+   "proto": [
+    "run"
+   ]
+  }
+ },
+ "encoding_binding": {
+  "encodeInto": {
+   "__fn": "encodeInto"
+  },
+  "encodeUtf8String": {
+   "__fn": "encodeUtf8String"
+  },
+  "decodeUTF8": {
+   "__fn": "decodeUTF8"
+  },
+  "toASCII": {
+   "__fn": "toASCII"
+  },
+  "toUnicode": {
+   "__fn": "toUnicode"
+  },
+  "decodeLatin1": {
+   "__fn": "decodeLatin1"
+  },
+  "encodeIntoResults": {
+   "__typed": "Uint32Array",
+   "length": 2,
+   "values": [
+    0,
+    0
+   ]
+  }
+ },
+ "errors": {
+  "setPrepareStackTraceCallback": {
+   "__fn": "setPrepareStackTraceCallback"
+  },
+  "setGetSourceMapErrorSource": {
+   "__fn": "setGetSourceMapErrorSource"
+  },
+  "setSourceMapsEnabled": {
+   "__fn": "setSourceMapsEnabled"
+  },
+  "setMaybeCacheGeneratedSourceMap": {
+   "__fn": "setMaybeCacheGeneratedSourceMap"
+  },
+  "setEnhanceStackForFatalException": {
+   "__fn": "setEnhanceStackForFatalException"
+  },
+  "noSideEffectsToString": {
+   "__fn": "noSideEffectsToString"
+  },
+  "triggerUncaughtException": {
+   "__fn": "triggerUncaughtException"
+  },
+  "exitCodes": {
+   "kNoFailure": 0,
+   "kGenericUserError": 1,
+   "kInternalJSParseError": 3,
+   "kInternalJSEvaluationFailure": 4,
+   "kV8FatalError": 5,
+   "kInvalidFatalExceptionMonkeyPatching": 6,
+   "kExceptionInFatalExceptionHandler": 7,
+   "kInvalidCommandLineArgument": 9,
+   "kBootstrapFailure": 10,
+   "kInvalidCommandLineArgument2": 12,
+   "kUnsettledTopLevelAwait": 13,
+   "kStartupSnapshotFailure": 14,
+   "kAbort": 134
+  }
+ },
+ "fs": {
+  "getFormatOfExtensionlessFile": {
+   "__fn": "getFormatOfExtensionlessFile"
+  },
+  "access": {
+   "__fn": "access"
+  },
+  "close": {
+   "__fn": "close"
+  },
+  "existsSync": {
+   "__fn": "existsSync"
+  },
+  "open": {
+   "__fn": "open"
+  },
+  "openFileHandle": {
+   "__fn": "openFileHandle"
+  },
+  "read": {
+   "__fn": "read"
+  },
+  "readFileUtf8": {
+   "__fn": "readFileUtf8"
+  },
+  "readBuffers": {
+   "__fn": "readBuffers"
+  },
+  "fdatasync": {
+   "__fn": "fdatasync"
+  },
+  "fsync": {
+   "__fn": "fsync"
+  },
+  "rename": {
+   "__fn": "rename"
+  },
+  "ftruncate": {
+   "__fn": "ftruncate"
+  },
+  "rmdir": {
+   "__fn": "rmdir"
+  },
+  "mkdir": {
+   "__fn": "mkdir"
+  },
+  "readdir": {
+   "__fn": "readdir"
+  },
+  "internalModuleStat": {
+   "__fn": "internalModuleStat"
+  },
+  "stat": {
+   "__fn": "stat"
+  },
+  "lstat": {
+   "__fn": "lstat"
+  },
+  "fstat": {
+   "__fn": "fstat"
+  },
+  "statfs": {
+   "__fn": "statfs"
+  },
+  "link": {
+   "__fn": "link"
+  },
+  "symlink": {
+   "__fn": "symlink"
+  },
+  "readlink": {
+   "__fn": "readlink"
+  },
+  "unlink": {
+   "__fn": "unlink"
+  },
+  "writeBuffer": {
+   "__fn": "writeBuffer"
+  },
+  "writeBuffers": {
+   "__fn": "writeBuffers"
+  },
+  "writeString": {
+   "__fn": "writeString"
+  },
+  "writeFileUtf8": {
+   "__fn": "writeFileUtf8"
+  },
+  "realpath": {
+   "__fn": "realpath"
+  },
+  "copyFile": {
+   "__fn": "copyFile"
+  },
+  "chmod": {
+   "__fn": "chmod"
+  },
+  "fchmod": {
+   "__fn": "fchmod"
+  },
+  "chown": {
+   "__fn": "chown"
+  },
+  "fchown": {
+   "__fn": "fchown"
+  },
+  "lchown": {
+   "__fn": "lchown"
+  },
+  "utimes": {
+   "__fn": "utimes"
+  },
+  "futimes": {
+   "__fn": "futimes"
+  },
+  "lutimes": {
+   "__fn": "lutimes"
+  },
+  "mkdtemp": {
+   "__fn": "mkdtemp"
+  },
+  "cpSyncCheckPaths": {
+   "__fn": "cpSyncCheckPaths"
+  },
+  "cpSyncOverrideFile": {
+   "__fn": "cpSyncOverrideFile"
+  },
+  "cpSyncCopyDir": {
+   "__fn": "cpSyncCopyDir"
+  },
+  "StatWatcher": {
+   "__fn": "StatWatcher",
+   "proto": [
+    "start"
+   ]
+  },
+  "legacyMainResolve": {
+   "__fn": "legacyMainResolve"
+  },
+  "kFsStatsFieldsNumber": 18,
+  "FSReqCallback": {
+   "__fn": "FSReqCallback"
+  },
+  "FileHandle": {
+   "__fn": "FileHandle",
+   "proto": [
+    "close",
+    "releaseFD",
+    "fd",
+    "_externalStream",
+    "bytesRead",
+    "bytesWritten",
+    "readStart",
+    "readStop",
+    "shutdown",
+    "useUserBuffer",
+    "writev",
+    "writeBuffer",
+    "writeAsciiString",
+    "writeUtf8String",
+    "writeUcs2String",
+    "writeLatin1String",
+    "isStreamBase",
+    "onread"
+   ]
+  },
+  "kUsePromises": {
+   "__symbol": "fs_use_promises_symbol"
+  },
+  "statValues": {
+   "__typed": "Float64Array",
+   "length": 36,
+   "values": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  "bigintStatValues": {
+   "__typed": "BigInt64Array",
+   "length": 36,
+   "values": [
+    "214",
+    "33188",
+    "1",
+    "0",
+    "0",
+    "0",
+    "1024",
+    "4026532542",
+    "0",
+    "0",
+    "1792756317",
+    "286555001",
+    "1792756317",
+    "286555001",
+    "1792756317",
+    "286555001",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0"
+   ]
+  },
+  "statFsValues": {
+   "__typed": "Float64Array",
+   "length": 7,
+   "values": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  "bigintStatFsValues": {
+   "__typed": "BigInt64Array",
+   "length": 7,
+   "values": [
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0",
+    "0"
+   ]
+  }
+ },
+ "fs_dir": {
+  "opendir": {
+   "__fn": "opendir"
+  },
+  "opendirSync": {
+   "__fn": "opendirSync"
+  },
+  "DirHandle": {
+   "__fn": "DirHandle",
+   "proto": [
+    "read",
+    "close"
+   ]
+  }
+ },
+ "fs_event_wrap": {
+  "FSEvent": {
+   "__fn": "FSEvent",
+   "proto": [
+    "start",
+    "initialized"
+   ]
+  }
+ },
+ "heap_utils": {
+  "buildEmbedderGraph": {
+   "__fn": "buildEmbedderGraph"
+  },
+  "triggerHeapSnapshot": {
+   "__fn": "triggerHeapSnapshot"
+  },
+  "createHeapSnapshotStream": {
+   "__fn": "createHeapSnapshotStream"
+  }
+ },
+ "http_parser": {
+  "HTTPParser": {
+   "__fn": "HTTPParser",
+   "proto": [
+    "close",
+    "free",
+    "remove",
+    "execute",
+    "finish",
+    "initialize",
+    "pause",
+    "resume",
+    "consume",
+    "unconsume",
+    "getCurrentBuffer"
+   ],
+   "statics": {
+    "REQUEST": 1,
+    "RESPONSE": 2,
+    "kOnMessageBegin": 0,
+    "kOnHeaders": 1,
+    "kOnHeadersComplete": 2,
+    "kOnBody": 3,
+    "kOnMessageComplete": 4,
+    "kOnExecute": 5,
+    "kOnTimeout": 6,
+    "kLenientNone": 0,
+    "kLenientHeaders": 1,
+    "kLenientChunkedLength": 2,
+    "kLenientKeepAlive": 4,
+    "kLenientTransferEncoding": 8,
+    "kLenientVersion": 16,
+    "kLenientDataAfterClose": 32,
+    "kLenientOptionalLFAfterCR": 64,
+    "kLenientOptionalCRLFAfterChunk": 128,
+    "kLenientOptionalCRBeforeLF": 256,
+    "kLenientSpacesAfterChunkSize": 512,
+    "kLenientAll": 1023
+   }
+  },
+  "ConnectionsList": {
+   "__fn": "ConnectionsList",
+   "proto": [
+    "all",
+    "idle",
+    "active",
+    "expired"
+   ]
+  },
+  "methods": [
+   "DELETE",
+   "GET",
+   "HEAD",
+   "POST",
+   "PUT",
+   "CONNECT",
+   "OPTIONS",
+   "TRACE",
+   "COPY",
+   "LOCK",
+   "MKCOL",
+   "MOVE",
+   "PROPFIND",
+   "PROPPATCH",
+   "SEARCH",
+   "UNLOCK",
+   "BIND",
+   "REBIND",
+   "UNBIND",
+   "ACL",
+   "REPORT",
+   "MKACTIVITY",
+   "CHECKOUT",
+   "MERGE",
+   "M-SEARCH",
+   "NOTIFY",
+   "SUBSCRIBE",
+   "UNSUBSCRIBE",
+   "PATCH",
+   "PURGE",
+   "MKCALENDAR",
+   "LINK",
+   "UNLINK",
+   "SOURCE",
+   "QUERY"
+  ],
+  "allMethods": [
+   "DELETE",
+   "GET",
+   "HEAD",
+   "POST",
+   "PUT",
+   "CONNECT",
+   "OPTIONS",
+   "TRACE",
+   "COPY",
+   "LOCK",
+   "MKCOL",
+   "MOVE",
+   "PROPFIND",
+   "PROPPATCH",
+   "SEARCH",
+   "UNLOCK",
+   "BIND",
+   "REBIND",
+   "UNBIND",
+   "ACL",
+   "REPORT",
+   "MKACTIVITY",
+   "CHECKOUT",
+   "MERGE",
+   "M-SEARCH",
+   "NOTIFY",
+   "SUBSCRIBE",
+   "UNSUBSCRIBE",
+   "PATCH",
+   "PURGE",
+   "MKCALENDAR",
+   "LINK",
+   "UNLINK",
+   "SOURCE",
+   "PRI",
+   "DESCRIBE",
+   "ANNOUNCE",
+   "SETUP",
+   "PLAY",
+   "PAUSE",
+   "TEARDOWN",
+   "GET_PARAMETER",
+   "SET_PARAMETER",
+   "REDIRECT",
+   "RECORD",
+   "FLUSH",
+   "QUERY"
+  ]
+ },
+ "icu": {
+  "getStringWidth": {
+   "__fn": "getStringWidth"
+  },
+  "icuErrName": {
+   "__fn": "icuErrName"
+  },
+  "transcode": {
+   "__fn": "transcode"
+  },
+  "getConverter": {
+   "__fn": "getConverter"
+  },
+  "decode": {
+   "__fn": "decode"
+  },
+  "hasConverter": {
+   "__fn": "hasConverter"
+  }
+ },
+ "inspector": {
+  "consoleCall": {
+   "__fn": "consoleCall"
+  },
+  "setConsoleExtensionInstaller": {
+   "__fn": "setConsoleExtensionInstaller"
+  },
+  "callAndPauseOnStart": {
+   "__fn": "callAndPauseOnStart"
+  },
+  "open": {
+   "__fn": "open"
+  },
+  "url": {
+   "__fn": "url"
+  },
+  "waitForDebugger": {
+   "__fn": "waitForDebugger"
+  },
+  "asyncTaskScheduled": {
+   "__fn": "asyncTaskScheduled"
+  },
+  "asyncTaskCanceled": {
+   "__fn": "asyncTaskCanceled"
+  },
+  "asyncTaskStarted": {
+   "__fn": "asyncTaskStarted"
+  },
+  "asyncTaskFinished": {
+   "__fn": "asyncTaskFinished"
+  },
+  "registerAsyncHook": {
+   "__fn": "registerAsyncHook"
+  },
+  "isEnabled": {
+   "__fn": "isEnabled"
+  },
+  "emitProtocolEvent": {
+   "__fn": "emitProtocolEvent"
+  },
+  "setupNetworkTracking": {
+   "__fn": "setupNetworkTracking"
+  },
+  "putNetworkResource": {
+   "__fn": "putNetworkResource"
+  },
+  "console": {
+   "debug": {
+    "__fn": "debug"
+   },
+   "error": {
+    "__fn": "error"
+   },
+   "info": {
+    "__fn": "info"
+   },
+   "log": {
+    "__fn": "log"
+   },
+   "warn": {
+    "__fn": "warn"
+   },
+   "dir": {
+    "__fn": "dir"
+   },
+   "dirxml": {
+    "__fn": "dirxml"
+   },
+   "table": {
+    "__fn": "table"
+   },
+   "trace": {
+    "__fn": "trace"
+   },
+   "group": {
+    "__fn": "group"
+   },
+   "groupCollapsed": {
+    "__fn": "groupCollapsed"
+   },
+   "groupEnd": {
+    "__fn": "groupEnd"
+   },
+   "clear": {
+    "__fn": "clear"
+   },
+   "count": {
+    "__fn": "count"
+   },
+   "countReset": {
+    "__fn": "countReset"
+   },
+   "assert": {
+    "__fn": "assert"
+   },
+   "profile": {
+    "__fn": "profile"
+   },
+   "profileEnd": {
+    "__fn": "profileEnd"
+   },
+   "time": {
+    "__fn": "time"
+   },
+   "timeLog": {
+    "__fn": "timeLog"
+   },
+   "timeEnd": {
+    "__fn": "timeEnd"
+   },
+   "timeStamp": {
+    "__fn": "timeStamp"
+   },
+   "context": {
+    "__fn": "context"
+   },
+   "@@Symbol.toStringTag": "console"
+  },
+  "Connection": {
+   "__fn": "Connection",
+   "proto": [
+    "dispatch",
+    "disconnect"
+   ]
+  },
+  "MainThreadConnection": {
+   "__fn": "MainThreadConnection",
+   "proto": [
+    "dispatch",
+    "disconnect"
+   ]
+  }
+ },
+ "js_stream": {
+  "JSStream": {
+   "__fn": "JSStream",
+   "proto": [
+    "finishWrite",
+    "finishShutdown",
+    "readBuffer",
+    "emitEOF",
+    "fd",
+    "_externalStream",
+    "bytesRead",
+    "bytesWritten",
+    "readStart",
+    "readStop",
+    "shutdown",
+    "useUserBuffer",
+    "writev",
+    "writeBuffer",
+    "writeAsciiString",
+    "writeUtf8String",
+    "writeUcs2String",
+    "writeLatin1String",
+    "isStreamBase",
+    "onread"
+   ]
+  }
+ },
+ "js_udp_wrap": {
+  "JSUDPWrap": {
+   "__fn": "JSUDPWrap",
+   "proto": [
+    "recvStart",
+    "recvStop",
+    "emitReceived",
+    "onSendDone",
+    "onAfterBind"
+   ]
+  }
+ },
+ "messaging": {
+  "MessageChannel": {
+   "__fn": "MessageChannel"
+  },
+  "MessagePort": {
+   "__fn": "MessagePort",
+   "proto": [
+    "postMessage",
+    "start"
+   ]
+  },
+  "exposeLazyDOMExceptionProperty": {
+   "__fn": "exposeLazyDOMExceptionProperty"
+  },
+  "stopMessagePort": {
+   "__fn": "stopMessagePort"
+  },
+  "drainMessagePort": {
+   "__fn": "drainMessagePort"
+  },
+  "receiveMessageOnPort": {
+   "__fn": "receiveMessageOnPort"
+  },
+  "moveMessagePortToContext": {
+   "__fn": "moveMessagePortToContext"
+  },
+  "setDeserializerCreateObjectFunction": {
+   "__fn": "setDeserializerCreateObjectFunction"
+  },
+  "broadcastChannel": {
+   "__fn": "broadcastChannel"
+  },
+  "structuredClone": {
+   "__fn": "structuredClone"
+  },
+  "DOMException": {
+   "__fn": "DOMException",
+   "proto": [
+    "name",
+    "message",
+    "code",
+    "INDEX_SIZE_ERR",
+    "DOMSTRING_SIZE_ERR",
+    "HIERARCHY_REQUEST_ERR",
+    "WRONG_DOCUMENT_ERR",
+    "INVALID_CHARACTER_ERR",
+    "NO_DATA_ALLOWED_ERR",
+    "NO_MODIFICATION_ALLOWED_ERR",
+    "NOT_FOUND_ERR",
+    "NOT_SUPPORTED_ERR",
+    "INUSE_ATTRIBUTE_ERR",
+    "INVALID_STATE_ERR",
+    "SYNTAX_ERR",
+    "INVALID_MODIFICATION_ERR",
+    "NAMESPACE_ERR",
+    "INVALID_ACCESS_ERR",
+    "VALIDATION_ERR",
+    "TYPE_MISMATCH_ERR",
+    "SECURITY_ERR",
+    "NETWORK_ERR",
+    "ABORT_ERR",
+    "URL_MISMATCH_ERR",
+    "QUOTA_EXCEEDED_ERR",
+    "TIMEOUT_ERR",
+    "INVALID_NODE_TYPE_ERR",
+    "DATA_CLONE_ERR"
+   ],
+   "statics": {
+    "INDEX_SIZE_ERR": 1,
+    "DOMSTRING_SIZE_ERR": 2,
+    "HIERARCHY_REQUEST_ERR": 3,
+    "WRONG_DOCUMENT_ERR": 4,
+    "INVALID_CHARACTER_ERR": 5,
+    "NO_DATA_ALLOWED_ERR": 6,
+    "NO_MODIFICATION_ALLOWED_ERR": 7,
+    "NOT_FOUND_ERR": 8,
+    "NOT_SUPPORTED_ERR": 9,
+    "INUSE_ATTRIBUTE_ERR": 10,
+    "INVALID_STATE_ERR": 11,
+    "SYNTAX_ERR": 12,
+    "INVALID_MODIFICATION_ERR": 13,
+    "NAMESPACE_ERR": 14,
+    "INVALID_ACCESS_ERR": 15,
+    "VALIDATION_ERR": 16,
+    "TYPE_MISMATCH_ERR": 17,
+    "SECURITY_ERR": 18,
+    "NETWORK_ERR": 19,
+    "ABORT_ERR": 20,
+    "URL_MISMATCH_ERR": 21,
+    "QUOTA_EXCEEDED_ERR": 22,
+    "TIMEOUT_ERR": 23,
+    "INVALID_NODE_TYPE_ERR": 24,
+    "DATA_CLONE_ERR": 25
+   }
+  }
+ },
+ "mksnapshot": {
+  "runEmbedderPreload": {
+   "__fn": "runEmbedderPreload"
+  },
+  "compileSerializeMain": {
+   "__fn": "compileSerializeMain"
+  },
+  "setSerializeCallback": {
+   "__fn": "setSerializeCallback"
+  },
+  "setDeserializeCallback": {
+   "__fn": "setDeserializeCallback"
+  },
+  "setDeserializeMainFunction": {
+   "__fn": "setDeserializeMainFunction"
+  },
+  "anonymousMainPath": "__node_anonymous_main",
+  "isBuildingSnapshotBuffer": {
+   "__typed": "Uint8Array",
+   "length": 1,
+   "values": [
+    0
+   ]
+  }
+ },
+ "module_wrap": {
+  "ModuleWrap": {
+   "__fn": "ModuleWrap",
+   "proto": [
+    "link",
+    "getModuleRequests",
+    "instantiateSync",
+    "evaluateSync",
+    "getNamespaceSync",
+    "instantiate",
+    "evaluate",
+    "setExport",
+    "createCachedData",
+    "getNamespace",
+    "getStatus",
+    "isGraphAsync",
+    "hasTopLevelAwait",
+    "getError"
+   ]
+  },
+  "setImportModuleDynamicallyCallback": {
+   "__fn": "setImportModuleDynamicallyCallback"
+  },
+  "setInitializeImportMetaObjectCallback": {
+   "__fn": "setInitializeImportMetaObjectCallback"
+  },
+  "createRequiredModuleFacade": {
+   "__fn": "createRequiredModuleFacade"
+  },
+  "throwIfPromiseRejected": {
+   "__fn": "throwIfPromiseRejected"
+  },
+  "kUninstantiated": 0,
+  "kInstantiating": 1,
+  "kInstantiated": 2,
+  "kEvaluating": 3,
+  "kEvaluated": 4,
+  "kErrored": 5
+ },
+ "modules": {
+  "readPackageJSON": {
+   "__fn": "readPackageJSON"
+  },
+  "getNearestParentPackageJSONType": {
+   "__fn": "getNearestParentPackageJSONType"
+  },
+  "getNearestParentPackageJSON": {
+   "__fn": "getNearestParentPackageJSON"
+  },
+  "getPackageScopeConfig": {
+   "__fn": "getPackageScopeConfig"
+  },
+  "getPackageType": {
+   "__fn": "getPackageType"
+  },
+  "enableCompileCache": {
+   "__fn": "enableCompileCache"
+  },
+  "getCompileCacheDir": {
+   "__fn": "getCompileCacheDir"
+  },
+  "flushCompileCache": {
+   "__fn": "flushCompileCache"
+  },
+  "setLazyPathHelpers": {
+   "__fn": "setLazyPathHelpers"
+  },
+  "compileCacheStatus": [
+   "FAILED",
+   "ENABLED",
+   "ALREADY_ENABLED",
+   "DISABLED"
+  ]
+ },
+ "options": {
+  "getCLIOptionsValues": {
+   "__fn": "getCLIOptionsValues"
+  },
+  "getCLIOptionsInfo": {
+   "__fn": "getCLIOptionsInfo"
+  },
+  "getEmbedderOptions": {
+   "__fn": "getEmbedderOptions"
+  },
+  "getEnvOptionsInputType": {
+   "__fn": "getEnvOptionsInputType"
+  },
+  "envSettings": {
+   "kAllowedInEnvvar": 0,
+   "kDisallowedInEnvvar": 1
+  },
+  "types": {
+   "kNoOp": 0,
+   "kV8Option": 1,
+   "kBoolean": 2,
+   "kInteger": 3,
+   "kUInteger": 4,
+   "kString": 5,
+   "kHostPort": 6,
+   "kStringList": 7
+  }
+ },
+ "os": {
+  "getHostname": {
+   "__fn": "getHostname"
+  },
+  "getLoadAvg": {
+   "__fn": "getLoadAvg"
+  },
+  "getUptime": {
+   "__fn": "getUptime"
+  },
+  "getTotalMem": {
+   "__fn": true
+  },
+  "getFreeMem": {
+   "__fn": true
+  },
+  "getCPUs": {
+   "__fn": "getCPUs"
+  },
+  "getInterfaceAddresses": {
+   "__fn": "getInterfaceAddresses"
+  },
+  "getHomeDirectory": {
+   "__fn": "getHomeDirectory"
+  },
+  "getUserInfo": {
+   "__fn": "getUserInfo"
+  },
+  "setPriority": {
+   "__fn": "setPriority"
+  },
+  "getPriority": {
+   "__fn": "getPriority"
+  },
+  "getAvailableParallelism": {
+   "__fn": true
+  },
+  "getOSInformation": {
+   "__fn": "getOSInformation"
+  },
+  "isBigEndian": false
+ },
+ "performance": {
+  "Histogram": {
+   "__fn": "Histogram",
+   "proto": [
+    "add",
+    "countBigInt",
+    "exceedsBigInt",
+    "minBigInt",
+    "maxBigInt",
+    "percentileBigInt",
+    "percentiles",
+    "percentilesBigInt"
+   ]
+  },
+  "setupObservers": {
+   "__fn": "setupObservers"
+  },
+  "installGarbageCollectionTracking": {
+   "__fn": "installGarbageCollectionTracking"
+  },
+  "removeGarbageCollectionTracking": {
+   "__fn": "removeGarbageCollectionTracking"
+  },
+  "notify": {
+   "__fn": "notify"
+  },
+  "loopIdleTime": {
+   "__fn": "loopIdleTime"
+  },
+  "createELDHistogram": {
+   "__fn": "createELDHistogram"
+  },
+  "markBootstrapComplete": {
+   "__fn": "markBootstrapComplete"
+  },
+  "uvMetricsInfo": {
+   "__fn": "uvMetricsInfo"
+  },
+  "now": {
+   "__fn": "now"
+  },
+  "observerCounts": {
+   "__typed": "Uint32Array",
+   "length": 5,
+   "values": [
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  "milestones": {
+   "__typed": "Float64Array",
+   "length": 8,
+   "values": [
+    1792756316927293,
+    68843813641523,
+    68843948524356,
+    68843828432898,
+    68843881332940,
+    -1,
+    -1,
+    68844206625232
+   ]
+  },
+  "constants": {
+   "NODE_PERFORMANCE_GC_MAJOR": 4,
+   "NODE_PERFORMANCE_GC_MINOR": 1,
+   "NODE_PERFORMANCE_GC_INCREMENTAL": 8,
+   "NODE_PERFORMANCE_GC_WEAKCB": 16,
+   "NODE_PERFORMANCE_GC_FLAGS_NO": 0,
+   "NODE_PERFORMANCE_GC_FLAGS_CONSTRUCT_RETAINED": 2,
+   "NODE_PERFORMANCE_GC_FLAGS_FORCED": 4,
+   "NODE_PERFORMANCE_GC_FLAGS_SYNCHRONOUS_PHANTOM_PROCESSING": 8,
+   "NODE_PERFORMANCE_GC_FLAGS_ALL_AVAILABLE_GARBAGE": 16,
+   "NODE_PERFORMANCE_GC_FLAGS_ALL_EXTERNAL_MEMORY": 32,
+   "NODE_PERFORMANCE_GC_FLAGS_SCHEDULE_IDLE": 64,
+   "NODE_PERFORMANCE_ENTRY_TYPE_GC": 0,
+   "NODE_PERFORMANCE_ENTRY_TYPE_HTTP": 1,
+   "NODE_PERFORMANCE_ENTRY_TYPE_HTTP2": 2,
+   "NODE_PERFORMANCE_ENTRY_TYPE_NET": 3,
+   "NODE_PERFORMANCE_ENTRY_TYPE_DNS": 4,
+   "NODE_PERFORMANCE_MILESTONE_TIME_ORIGIN_TIMESTAMP": 0,
+   "NODE_PERFORMANCE_MILESTONE_TIME_ORIGIN": 1,
+   "NODE_PERFORMANCE_MILESTONE_ENVIRONMENT": 2,
+   "NODE_PERFORMANCE_MILESTONE_NODE_START": 3,
+   "NODE_PERFORMANCE_MILESTONE_V8_START": 4,
+   "NODE_PERFORMANCE_MILESTONE_LOOP_START": 5,
+   "NODE_PERFORMANCE_MILESTONE_LOOP_EXIT": 6,
+   "NODE_PERFORMANCE_MILESTONE_BOOTSTRAP_COMPLETE": 7
+  }
+ },
+ "permission": {
+  "has": {
+   "__fn": "has"
+  }
+ },
+ "pipe_wrap": {
+  "Pipe": {
+   "__fn": "Pipe",
+   "proto": [
+    "bind",
+    "listen",
+    "connect",
+    "open",
+    "fchmod"
+   ]
+  },
+  "PipeConnectWrap": {
+   "__fn": "PipeConnectWrap"
+  },
+  "constants": {
+   "SOCKET": 0,
+   "SERVER": 1,
+   "IPC": 2,
+   "UV_READABLE": 1,
+   "UV_WRITABLE": 2
+  }
+ },
+ "process_methods": {
+  "hrtime": {
+   "__fn": "hrtime"
+  },
+  "hrtimeBigInt": {
+   "__fn": "hrtimeBigInt"
+  },
+  "_debugProcess": {
+   "__fn": "_debugProcess"
+  },
+  "abort": {
+   "__fn": "abort"
+  },
+  "causeSegfault": {
+   "__fn": "causeSegfault"
+  },
+  "chdir": {
+   "__fn": "chdir"
+  },
+  "umask": {
+   "__fn": "umask"
+  },
+  "memoryUsage": {
+   "__fn": "memoryUsage"
+  },
+  "constrainedMemory": {
+   "__fn": "constrainedMemory"
+  },
+  "availableMemory": {
+   "__fn": "availableMemory"
+  },
+  "rss": {
+   "__fn": "rss"
+  },
+  "cpuUsage": {
+   "__fn": "cpuUsage"
+  },
+  "threadCpuUsage": {
+   "__fn": "threadCpuUsage"
+  },
+  "resourceUsage": {
+   "__fn": "resourceUsage"
+  },
+  "_debugEnd": {
+   "__fn": "_debugEnd"
+  },
+  "_getActiveRequests": {
+   "__fn": "_getActiveRequests"
+  },
+  "_getActiveHandles": {
+   "__fn": "_getActiveHandles"
+  },
+  "getActiveResourcesInfo": {
+   "__fn": "getActiveResourcesInfo"
+  },
+  "_kill": {
+   "__fn": "_kill"
+  },
+  "_rawDebug": {
+   "__fn": "_rawDebug"
+  },
+  "cwd": {
+   "__fn": "cwd"
+  },
+  "dlopen": {
+   "__fn": "dlopen"
+  },
+  "reallyExit": {
+   "__fn": "reallyExit"
+  },
+  "execve": {
+   "__fn": "execve"
+  },
+  "uptime": {
+   "__fn": "uptime"
+  },
+  "patchProcessObject": {
+   "__fn": "patchProcessObject"
+  },
+  "loadEnvFile": {
+   "__fn": "loadEnvFile"
+  },
+  "setEmitWarningSync": {
+   "__fn": "setEmitWarningSync"
+  },
+  "hrtimeBuffer": {
+   "__typed": "Uint32Array",
+   "length": 3,
+   "values": [
+    0,
+    0,
+    0
+   ]
+  },
+  "resetStdioForTesting": {
+   "__fn": true
+  }
+ },
+ "process_wrap": {
+  "Process": {
+   "__fn": "Process",
+   "proto": [
+    "spawn",
+    "kill"
+   ]
+  }
+ },
+ "report": {
+  "writeReport": {
+   "__fn": "writeReport"
+  },
+  "getReport": {
+   "__fn": "getReport"
+  },
+  "getCompact": {
+   "__fn": "getCompact"
+  },
+  "setCompact": {
+   "__fn": "setCompact"
+  },
+  "getExcludeNetwork": {
+   "__fn": "getExcludeNetwork"
+  },
+  "setExcludeNetwork": {
+   "__fn": "setExcludeNetwork"
+  },
+  "getExcludeEnv": {
+   "__fn": "getExcludeEnv"
+  },
+  "setExcludeEnv": {
+   "__fn": "setExcludeEnv"
+  },
+  "getDirectory": {
+   "__fn": "getDirectory"
+  },
+  "setDirectory": {
+   "__fn": "setDirectory"
+  },
+  "getFilename": {
+   "__fn": "getFilename"
+  },
+  "setFilename": {
+   "__fn": "setFilename"
+  },
+  "getSignal": {
+   "__fn": "getSignal"
+  },
+  "setSignal": {
+   "__fn": "setSignal"
+  },
+  "shouldReportOnFatalError": {
+   "__fn": "shouldReportOnFatalError"
+  },
+  "setReportOnFatalError": {
+   "__fn": "setReportOnFatalError"
+  },
+  "shouldReportOnSignal": {
+   "__fn": "shouldReportOnSignal"
+  },
+  "setReportOnSignal": {
+   "__fn": "setReportOnSignal"
+  },
+  "shouldReportOnUncaughtException": {
+   "__fn": "shouldReportOnUncaughtException"
+  },
+  "setReportOnUncaughtException": {
+   "__fn": "setReportOnUncaughtException"
+  }
+ },
+ "serdes": {
+  "Serializer": {
+   "__fn": "Serializer",
+   "proto": [
+    "writeHeader",
+    "writeValue",
+    "releaseBuffer",
+    "transferArrayBuffer",
+    "writeUint32",
+    "writeUint64",
+    "writeDouble",
+    "writeRawBytes",
+    "_setTreatArrayBufferViewsAsHostObjects"
+   ]
+  },
+  "Deserializer": {
+   "__fn": "Deserializer",
+   "proto": [
+    "readHeader",
+    "readValue",
+    "getWireFormatVersion",
+    "transferArrayBuffer",
+    "readUint32",
+    "readUint64",
+    "readDouble",
+    "_readRawBytes"
+   ]
+  }
+ },
+ "signal_wrap": {
+  "Signal": {
+   "__fn": "Signal",
+   "proto": [
+    "start",
+    "stop"
+   ]
+  }
+ },
+ "spawn_sync": {
+  "spawn": {
+   "__fn": "spawn"
+  }
+ },
+ "stream_pipe": {
+  "StreamPipe": {
+   "__fn": "StreamPipe",
+   "proto": [
+    "unpipe",
+    "start",
+    "isClosed",
+    "pendingWrites"
+   ]
+  }
+ },
+ "stream_wrap": {
+  "ShutdownWrap": {
+   "__fn": "ShutdownWrap"
+  },
+  "WriteWrap": {
+   "__fn": "WriteWrap"
+  },
+  "kReadBytesOrError": 0,
+  "kArrayBufferOffset": 1,
+  "kBytesWritten": 2,
+  "kLastWriteWasAsync": 3,
+  "streamBaseState": {
+   "__typed": "Int32Array",
+   "length": 4,
+   "values": [
+    0,
+    0,
+    0,
+    0
+   ]
+  }
+ },
+ "string_decoder": {
+  "kIncompleteCharactersStart": 0,
+  "kIncompleteCharactersEnd": 4,
+  "kMissingBytes": 4,
+  "kBufferedBytes": 5,
+  "kEncodingField": 6,
+  "kNumFields": 7,
+  "encodings": [
+   "ascii",
+   "utf8",
+   "base64",
+   "utf16le",
+   "latin1",
+   "hex",
+   "buffer",
+   "base64url"
+  ],
+  "kSize": 7,
+  "decode": {
+   "__fn": "decode"
+  },
+  "flush": {
+   "__fn": "flush"
+  }
+ },
+ "symbols": {
+  "fs_use_promises_symbol": {
+   "__symbol": "fs_use_promises_symbol"
+  },
+  "async_id_symbol": {
+   "__symbol": "async_id_symbol"
+  },
+  "constructor_key_symbol": {
+   "__symbol": "constructor_key_symbol"
+  },
+  "handle_onclose": {
+   "__symbol": "handle_onclose"
+  },
+  "no_message_symbol": {
+   "__symbol": "no_message_symbol"
+  },
+  "messaging_deserialize_symbol": {
+   "__symbol": "messaging_deserialize_symbol"
+  },
+  "imported_cjs_symbol": {
+   "__symbol": "imported_cjs_symbol"
+  },
+  "messaging_transfer_symbol": {
+   "__symbol": "messaging_transfer_symbol"
+  },
+  "messaging_clone_symbol": {
+   "__symbol": "messaging_clone_symbol"
+  },
+  "messaging_transfer_list_symbol": {
+   "__symbol": "messaging_transfer_list_symbol"
+  },
+  "oninit": {
+   "__symbol": "oninit"
+  },
+  "owner_symbol": {
+   "__symbol": "owner_symbol"
+  },
+  "onpskexchange": {
+   "__symbol": "onpskexchange"
+  },
+  "resource_symbol": {
+   "__symbol": "resource_symbol"
+  },
+  "trigger_async_id_symbol": {
+   "__symbol": "trigger_async_id_symbol"
+  },
+  "source_text_module_default_hdo": {
+   "__symbol": "source_text_module_default_hdo"
+  },
+  "vm_context_no_contextify": {
+   "__symbol": "vm_context_no_contextify"
+  },
+  "vm_dynamic_import_default_internal": {
+   "__symbol": "vm_dynamic_import_default_internal"
+  },
+  "vm_dynamic_import_main_context_default": {
+   "__symbol": "vm_dynamic_import_main_context_default"
+  },
+  "vm_dynamic_import_missing_flag": {
+   "__symbol": "vm_dynamic_import_missing_flag"
+  },
+  "vm_dynamic_import_no_callback": {
+   "__symbol": "vm_dynamic_import_no_callback"
+  }
+ },
+ "task_queue": {
+  "enqueueMicrotask": {
+   "__fn": "enqueueMicrotask"
+  },
+  "setTickCallback": {
+   "__fn": "setTickCallback"
+  },
+  "runMicrotasks": {
+   "__fn": "runMicrotasks"
+  },
+  "tickInfo": {
+   "__typed": "Uint8Array",
+   "length": 2,
+   "values": [
+    1,
+    0
+   ]
+  },
+  "promiseRejectEvents": {
+   "kPromiseRejectWithNoHandler": 0,
+   "kPromiseHandlerAddedAfterReject": 1,
+   "kPromiseResolveAfterResolved": 3,
+   "kPromiseRejectAfterResolved": 2
+  },
+  "setPromiseRejectCallback": {
+   "__fn": "setPromiseRejectCallback"
+  }
+ },
+ "tcp_wrap": {
+  "TCP": {
+   "__fn": "TCP",
+   "proto": [
+    "open",
+    "bind",
+    "listen",
+    "connect",
+    "bind6",
+    "connect6",
+    "getsockname",
+    "getpeername",
+    "setNoDelay",
+    "setKeepAlive",
+    "reset"
+   ]
+  },
+  "TCPConnectWrap": {
+   "__fn": "TCPConnectWrap"
+  },
+  "constants": {
+   "SOCKET": 0,
+   "SERVER": 1,
+   "UV_TCP_IPV6ONLY": 1,
+   "UV_TCP_REUSEPORT": 2
+  }
+ },
+ "timers": {
+  "setupTimers": {
+   "__fn": "setupTimers"
+  },
+  "getLibuvNow": {
+   "__fn": "getLibuvNow"
+  },
+  "scheduleTimer": {
+   "__fn": "scheduleTimer"
+  },
+  "toggleTimerRef": {
+   "__fn": "toggleTimerRef"
+  },
+  "toggleImmediateRef": {
+   "__fn": "toggleImmediateRef"
+  },
+  "immediateInfo": {
+   "__typed": "Uint32Array",
+   "length": 3,
+   "values": [
+    0,
+    0,
+    0
+   ]
+  },
+  "timeoutInfo": {
+   "__typed": "Int32Array",
+   "length": 1,
+   "values": [
+    0
+   ]
+  }
+ },
+ "tls_wrap": {
+  "wrap": {
+   "__fn": "wrap"
+  },
+  "HAVE_SSL_TRACE": 1,
+  "TLSWrap": {
+   "__fn": "TLSWrap",
+   "proto": [
+    "writeQueueSize",
+    "certCbDone",
+    "destroySSL",
+    "enableCertCb",
+    "enableALPNCb",
+    "endParser",
+    "enableKeylogCallback",
+    "enableSessionCallbacks",
+    "enableTrace",
+    "getServername",
+    "loadSession",
+    "newSessionDone",
+    "receive",
+    "renegotiate",
+    "requestOCSP",
+    "setALPNProtocols",
+    "setKeyCert",
+    "setOCSPResponse",
+    "setServername",
+    "setSession",
+    "setVerifyMode",
+    "start",
+    "writesIssuedByPrevListenerDone",
+    "exportKeyingMaterial",
+    "isSessionReused",
+    "getALPNNegotiatedProtocol",
+    "getCertificate",
+    "getX509Certificate",
+    "getCipher",
+    "getEphemeralKeyInfo",
+    "getFinished",
+    "getPeerCertificate",
+    "getPeerX509Certificate",
+    "getPeerFinished",
+    "getProtocol",
+    "getSession",
+    "getSharedSigalgs",
+    "getTLSTicket",
+    "verifyError",
+    "setMaxSendFragment",
+    "enablePskCallback",
+    "setPskIdentityHint",
+    "fd",
+    "_externalStream",
+    "bytesRead",
+    "bytesWritten",
+    "readStart",
+    "readStop",
+    "shutdown",
+    "useUserBuffer",
+    "writev",
+    "writeBuffer",
+    "writeAsciiString",
+    "writeUtf8String",
+    "writeUcs2String",
+    "writeLatin1String",
+    "isStreamBase",
+    "onread"
+   ]
+  }
+ },
+ "trace_events": {
+  "getEnabledCategories": {
+   "__fn": "getEnabledCategories"
+  },
+  "setTraceCategoryStateUpdateHandler": {
+   "__fn": "setTraceCategoryStateUpdateHandler"
+  },
+  "getCategoryEnabledBuffer": {
+   "__fn": "getCategoryEnabledBuffer"
+  },
+  "CategorySet": {
+   "__fn": "CategorySet",
+   "proto": [
+    "enable",
+    "disable"
+   ]
+  },
+  "isTraceCategoryEnabled": {
+   "__fn": "isTraceCategoryEnabled"
+  },
+  "trace": {
+   "__fn": "trace"
+  }
+ },
+ "tty_wrap": {
+  "isTTY": {
+   "__fn": "isTTY"
+  },
+  "TTY": {
+   "__fn": "TTY",
+   "proto": [
+    "getWindowSize",
+    "setRawMode"
+   ]
+  }
+ },
+ "types": {
+  "isExternal": {
+   "__fn": true
+  },
+  "isDate": {
+   "__fn": true
+  },
+  "isArgumentsObject": {
+   "__fn": true
+  },
+  "isBigIntObject": {
+   "__fn": true
+  },
+  "isBooleanObject": {
+   "__fn": true
+  },
+  "isNumberObject": {
+   "__fn": true
+  },
+  "isStringObject": {
+   "__fn": true
+  },
+  "isSymbolObject": {
+   "__fn": true
+  },
+  "isNativeError": {
+   "__fn": true
+  },
+  "isRegExp": {
+   "__fn": true
+  },
+  "isAsyncFunction": {
+   "__fn": true
+  },
+  "isGeneratorFunction": {
+   "__fn": true
+  },
+  "isGeneratorObject": {
+   "__fn": true
+  },
+  "isPromise": {
+   "__fn": true
+  },
+  "isMap": {
+   "__fn": true
+  },
+  "isSet": {
+   "__fn": true
+  },
+  "isMapIterator": {
+   "__fn": true
+  },
+  "isSetIterator": {
+   "__fn": true
+  },
+  "isWeakMap": {
+   "__fn": true
+  },
+  "isWeakSet": {
+   "__fn": true
+  },
+  "isArrayBuffer": {
+   "__fn": true
+  },
+  "isDataView": {
+   "__fn": true
+  },
+  "isSharedArrayBuffer": {
+   "__fn": true
+  },
+  "isProxy": {
+   "__fn": true
+  },
+  "isModuleNamespaceObject": {
+   "__fn": true
+  },
+  "isAnyArrayBuffer": {
+   "__fn": true
+  },
+  "isBoxedPrimitive": {
+   "__fn": true
+  }
+ },
+ "udp_wrap": {
+  "UDP": {
+   "__fn": "UDP",
+   "proto": [
+    "fd",
+    "recvStart",
+    "recvStop",
+    "open",
+    "bind",
+    "connect",
+    "send",
+    "bind6",
+    "connect6",
+    "send6",
+    "disconnect",
+    "getpeername",
+    "getsockname",
+    "addMembership",
+    "dropMembership",
+    "addSourceSpecificMembership",
+    "dropSourceSpecificMembership",
+    "setMulticastInterface",
+    "setMulticastTTL",
+    "setMulticastLoopback",
+    "setBroadcast",
+    "setTTL",
+    "bufferSize",
+    "getSendQueueSize",
+    "getSendQueueCount"
+   ]
+  },
+  "SendWrap": {
+   "__fn": "SendWrap"
+  },
+  "constants": {
+   "UV_UDP_IPV6ONLY": 1,
+   "UV_UDP_REUSEADDR": 4,
+   "UV_UDP_REUSEPORT": 64
+  }
+ },
+ "url": {
+  "domainToASCII": {
+   "__fn": "domainToASCII"
+  },
+  "domainToUnicode": {
+   "__fn": "domainToUnicode"
+  },
+  "format": {
+   "__fn": "format"
+  },
+  "getOrigin": {
+   "__fn": "getOrigin"
+  },
+  "parse": {
+   "__fn": "parse"
+  },
+  "pathToFileURL": {
+   "__fn": "pathToFileURL"
+  },
+  "update": {
+   "__fn": "update"
+  },
+  "canParse": {
+   "__fn": "canParse"
+  },
+  "urlComponents": {
+   "__typed": "Uint32Array",
+   "length": 9,
+   "values": [
+    5,
+    7,
+    7,
+    7,
+    4294967295,
+    7,
+    4294967295,
+    4294967295,
+    6
+   ]
+  }
+ },
+ "url_pattern": {
+  "__missing": "No such binding: url_pattern"
+ },
+ "util": {
+  "privateSymbols": {
+   "arrow_message_private_symbol": {
+    "__symbol": "node:arrowMessage"
+   },
+   "contextify_context_private_symbol": {
+    "__symbol": "node:contextify:context"
+   },
+   "decorated_private_symbol": {
+    "__symbol": "node:decorated"
+   },
+   "transfer_mode_private_symbol": {
+    "__symbol": "node:transfer_mode"
+   },
+   "host_defined_option_symbol": {
+    "__symbol": "node:host_defined_option_symbol"
+   },
+   "js_transferable_wrapper_private_symbol": {
+    "__symbol": "node:js_transferable_wrapper"
+   },
+   "entry_point_module_private_symbol": {
+    "__symbol": "node:entry_point_module"
+   },
+   "entry_point_promise_private_symbol": {
+    "__symbol": "node:entry_point_promise"
+   },
+   "module_source_private_symbol": {
+    "__symbol": "node:module_source"
+   },
+   "module_export_names_private_symbol": {
+    "__symbol": "node:module_export_names"
+   },
+   "module_circular_visited_private_symbol": {
+    "__symbol": "node:module_circular_visited"
+   },
+   "module_export_private_symbol": {
+    "__symbol": "node:module_export"
+   },
+   "module_parent_private_symbol": {
+    "__symbol": "node:module_parent"
+   },
+   "napi_type_tag": {
+    "__symbol": "node:napi:type_tag"
+   },
+   "napi_wrapper": {
+    "__symbol": "node:napi:wrapper"
+   },
+   "untransferable_object_private_symbol": {
+    "__symbol": "node:untransferableObject"
+   },
+   "exit_info_private_symbol": {
+    "__symbol": "node:exit_info_private_symbol"
+   },
+   "promise_trace_id": {
+    "__symbol": "node:promise_trace_id"
+   },
+   "source_map_data_private_symbol": {
+    "__symbol": "node:source_map_data_private_symbol"
+   }
+  },
+  "constants": {
+   "kPending": 0,
+   "kFulfilled": 1,
+   "kRejected": 2,
+   "kExiting": 0,
+   "kExitCode": 1,
+   "kHasExitCode": 2,
+   "ALL_PROPERTIES": 0,
+   "ONLY_WRITABLE": 1,
+   "ONLY_ENUMERABLE": 2,
+   "ONLY_CONFIGURABLE": 4,
+   "SKIP_STRINGS": 8,
+   "SKIP_SYMBOLS": 16,
+   "kDisallowCloneAndTransfer": 0,
+   "kTransferable": 1,
+   "kCloneable": 2
+  },
+  "isInsideNodeModules": {
+   "__fn": "isInsideNodeModules"
+  },
+  "defineLazyProperties": {
+   "__fn": "defineLazyProperties"
+  },
+  "getPromiseDetails": {
+   "__fn": "getPromiseDetails"
+  },
+  "getProxyDetails": {
+   "__fn": "getProxyDetails"
+  },
+  "getCallerLocation": {
+   "__fn": "getCallerLocation"
+  },
+  "previewEntries": {
+   "__fn": "previewEntries"
+  },
+  "getOwnNonIndexProperties": {
+   "__fn": "getOwnNonIndexProperties"
+  },
+  "getConstructorName": {
+   "__fn": "getConstructorName"
+  },
+  "getExternalValue": {
+   "__fn": "getExternalValue"
+  },
+  "getCallSites": {
+   "__fn": "getCallSites"
+  },
+  "sleep": {
+   "__fn": "sleep"
+  },
+  "parseEnv": {
+   "__fn": "parseEnv"
+  },
+  "arrayBufferViewHasBuffer": {
+   "__fn": "arrayBufferViewHasBuffer"
+  },
+  "shouldAbortOnUncaughtToggle": {
+   "__typed": "Uint32Array",
+   "length": 1,
+   "values": [
+    1
+   ]
+  },
+  "guessHandleType": {
+   "__fn": true
+  },
+  "isArrayBuffer": {
+   "__fn": true
+  },
+  "isArrayBufferView": {
+   "__fn": "isView"
+  },
+  "isAsyncFunction": {
+   "__fn": true
+  },
+  "isDataView": {
+   "__fn": true
+  },
+  "isDate": {
+   "__fn": true
+  },
+  "isExternal": {
+   "__fn": true
+  },
+  "isMap": {
+   "__fn": true
+  },
+  "isMapIterator": {
+   "__fn": true
+  },
+  "isNativeError": {
+   "__fn": true
+  },
+  "isPromise": {
+   "__fn": true
+  },
+  "isRegExp": {
+   "__fn": true
+  },
+  "isSet": {
+   "__fn": true
+  },
+  "isSetIterator": {
+   "__fn": true
+  },
+  "isTypedArray": {
+   "__fn": "isTypedArray"
+  },
+  "isUint8Array": {
+   "__fn": "isUint8Array"
+  },
+  "isAnyArrayBuffer": {
+   "__fn": true
+  }
+ },
+ "uv": {
+  "errname": {
+   "__fn": "errname"
+  },
+  "UV_E2BIG": -7,
+  "UV_EACCES": -13,
+  "UV_EADDRINUSE": -98,
+  "UV_EADDRNOTAVAIL": -99,
+  "UV_EAFNOSUPPORT": -97,
+  "UV_EAGAIN": -11,
+  "UV_EAI_ADDRFAMILY": -3000,
+  "UV_EAI_AGAIN": -3001,
+  "UV_EAI_BADFLAGS": -3002,
+  "UV_EAI_BADHINTS": -3013,
+  "UV_EAI_CANCELED": -3003,
+  "UV_EAI_FAIL": -3004,
+  "UV_EAI_FAMILY": -3005,
+  "UV_EAI_MEMORY": -3006,
+  "UV_EAI_NODATA": -3007,
+  "UV_EAI_NONAME": -3008,
+  "UV_EAI_OVERFLOW": -3009,
+  "UV_EAI_PROTOCOL": -3014,
+  "UV_EAI_SERVICE": -3010,
+  "UV_EAI_SOCKTYPE": -3011,
+  "UV_EALREADY": -114,
+  "UV_EBADF": -9,
+  "UV_EBUSY": -16,
+  "UV_ECANCELED": -125,
+  "UV_ECHARSET": -4080,
+  "UV_ECONNABORTED": -103,
+  "UV_ECONNREFUSED": -111,
+  "UV_ECONNRESET": -104,
+  "UV_EDESTADDRREQ": -89,
+  "UV_EEXIST": -17,
+  "UV_EFAULT": -14,
+  "UV_EFBIG": -27,
+  "UV_EHOSTUNREACH": -113,
+  "UV_EINTR": -4,
+  "UV_EINVAL": -22,
+  "UV_EIO": -5,
+  "UV_EISCONN": -106,
+  "UV_EISDIR": -21,
+  "UV_ELOOP": -40,
+  "UV_EMFILE": -24,
+  "UV_EMSGSIZE": -90,
+  "UV_ENAMETOOLONG": -36,
+  "UV_ENETDOWN": -100,
+  "UV_ENETUNREACH": -101,
+  "UV_ENFILE": -23,
+  "UV_ENOBUFS": -105,
+  "UV_ENODEV": -19,
+  "UV_ENOENT": -2,
+  "UV_ENOMEM": -12,
+  "UV_ENONET": -64,
+  "UV_ENOPROTOOPT": -92,
+  "UV_ENOSPC": -28,
+  "UV_ENOSYS": -38,
+  "UV_ENOTCONN": -107,
+  "UV_ENOTDIR": -20,
+  "UV_ENOTEMPTY": -39,
+  "UV_ENOTSOCK": -88,
+  "UV_ENOTSUP": -95,
+  "UV_EOVERFLOW": -75,
+  "UV_EPERM": -1,
+  "UV_EPIPE": -32,
+  "UV_EPROTO": -71,
+  "UV_EPROTONOSUPPORT": -93,
+  "UV_EPROTOTYPE": -91,
+  "UV_ERANGE": -34,
+  "UV_EROFS": -30,
+  "UV_ESHUTDOWN": -108,
+  "UV_ESPIPE": -29,
+  "UV_ESRCH": -3,
+  "UV_ETIMEDOUT": -110,
+  "UV_ETXTBSY": -26,
+  "UV_EXDEV": -18,
+  "UV_UNKNOWN": -4094,
+  "UV_EOF": -4095,
+  "UV_ENXIO": -6,
+  "UV_EMLINK": -31,
+  "UV_EHOSTDOWN": -112,
+  "UV_EREMOTEIO": -121,
+  "UV_ENOTTY": -25,
+  "UV_EFTYPE": -4028,
+  "UV_EILSEQ": -84,
+  "UV_ESOCKTNOSUPPORT": -94,
+  "UV_ENODATA": -61,
+  "UV_EUNATCH": -49,
+  "UV_ENOEXEC": -8,
+  "getErrorMap": {
+   "__fn": "getErrorMap"
+  },
+  "getErrorMessage": {
+   "__fn": "getErrorMessage"
+  },
+  "__errmap": [
+   [
+    -7,
+    [
+     "E2BIG",
+     "argument list too long"
+    ]
+   ],
+   [
+    -13,
+    [
+     "EACCES",
+     "permission denied"
+    ]
+   ],
+   [
+    -98,
+    [
+     "EADDRINUSE",
+     "address already in use"
+    ]
+   ],
+   [
+    -99,
+    [
+     "EADDRNOTAVAIL",
+     "address not available"
+    ]
+   ],
+   [
+    -97,
+    [
+     "EAFNOSUPPORT",
+     "address family not supported"
+    ]
+   ],
+   [
+    -11,
+    [
+     "EAGAIN",
+     "resource temporarily unavailable"
+    ]
+   ],
+   [
+    -3000,
+    [
+     "EAI_ADDRFAMILY",
+     "address family not supported"
+    ]
+   ],
+   [
+    -3001,
+    [
+     "EAI_AGAIN",
+     "temporary failure"
+    ]
+   ],
+   [
+    -3002,
+    [
+     "EAI_BADFLAGS",
+     "bad ai_flags value"
+    ]
+   ],
+   [
+    -3013,
+    [
+     "EAI_BADHINTS",
+     "invalid value for hints"
+    ]
+   ],
+   [
+    -3003,
+    [
+     "EAI_CANCELED",
+     "request canceled"
+    ]
+   ],
+   [
+    -3004,
+    [
+     "EAI_FAIL",
+     "permanent failure"
+    ]
+   ],
+   [
+    -3005,
+    [
+     "EAI_FAMILY",
+     "ai_family not supported"
+    ]
+   ],
+   [
+    -3006,
+    [
+     "EAI_MEMORY",
+     "out of memory"
+    ]
+   ],
+   [
+    -3007,
+    [
+     "EAI_NODATA",
+     "no address"
+    ]
+   ],
+   [
+    -3008,
+    [
+     "EAI_NONAME",
+     "unknown node or service"
+    ]
+   ],
+   [
+    -3009,
+    [
+     "EAI_OVERFLOW",
+     "argument buffer overflow"
+    ]
+   ],
+   [
+    -3014,
+    [
+     "EAI_PROTOCOL",
+     "resolved protocol is unknown"
+    ]
+   ],
+   [
+    -3010,
+    [
+     "EAI_SERVICE",
+     "service not available for socket type"
+    ]
+   ],
+   [
+    -3011,
+    [
+     "EAI_SOCKTYPE",
+     "socket type not supported"
+    ]
+   ],
+   [
+    -114,
+    [
+     "EALREADY",
+     "connection already in progress"
+    ]
+   ],
+   [
+    -9,
+    [
+     "EBADF",
+     "bad file descriptor"
+    ]
+   ],
+   [
+    -16,
+    [
+     "EBUSY",
+     "resource busy or locked"
+    ]
+   ],
+   [
+    -125,
+    [
+     "ECANCELED",
+     "operation canceled"
+    ]
+   ],
+   [
+    -4080,
+    [
+     "ECHARSET",
+     "invalid Unicode character"
+    ]
+   ],
+   [
+    -103,
+    [
+     "ECONNABORTED",
+     "software caused connection abort"
+    ]
+   ],
+   [
+    -111,
+    [
+     "ECONNREFUSED",
+     "connection refused"
+    ]
+   ],
+   [
+    -104,
+    [
+     "ECONNRESET",
+     "connection reset by peer"
+    ]
+   ],
+   [
+    -89,
+    [
+     "EDESTADDRREQ",
+     "destination address required"
+    ]
+   ],
+   [
+    -17,
+    [
+     "EEXIST",
+     "file already exists"
+    ]
+   ],
+   [
+    -14,
+    [
+     "EFAULT",
+     "bad address in system call argument"
+    ]
+   ],
+   [
+    -27,
+    [
+     "EFBIG",
+     "file too large"
+    ]
+   ],
+   [
+    -113,
+    [
+     "EHOSTUNREACH",
+     "host is unreachable"
+    ]
+   ],
+   [
+    -4,
+    [
+     "EINTR",
+     "interrupted system call"
+    ]
+   ],
+   [
+    -22,
+    [
+     "EINVAL",
+     "invalid argument"
+    ]
+   ],
+   [
+    -5,
+    [
+     "EIO",
+     "i/o error"
+    ]
+   ],
+   [
+    -106,
+    [
+     "EISCONN",
+     "socket is already connected"
+    ]
+   ],
+   [
+    -21,
+    [
+     "EISDIR",
+     "illegal operation on a directory"
+    ]
+   ],
+   [
+    -40,
+    [
+     "ELOOP",
+     "too many symbolic links encountered"
+    ]
+   ],
+   [
+    -24,
+    [
+     "EMFILE",
+     "too many open files"
+    ]
+   ],
+   [
+    -90,
+    [
+     "EMSGSIZE",
+     "message too long"
+    ]
+   ],
+   [
+    -36,
+    [
+     "ENAMETOOLONG",
+     "name too long"
+    ]
+   ],
+   [
+    -100,
+    [
+     "ENETDOWN",
+     "network is down"
+    ]
+   ],
+   [
+    -101,
+    [
+     "ENETUNREACH",
+     "network is unreachable"
+    ]
+   ],
+   [
+    -23,
+    [
+     "ENFILE",
+     "file table overflow"
+    ]
+   ],
+   [
+    -105,
+    [
+     "ENOBUFS",
+     "no buffer space available"
+    ]
+   ],
+   [
+    -19,
+    [
+     "ENODEV",
+     "no such device"
+    ]
+   ],
+   [
+    -2,
+    [
+     "ENOENT",
+     "no such file or directory"
+    ]
+   ],
+   [
+    -12,
+    [
+     "ENOMEM",
+     "not enough memory"
+    ]
+   ],
+   [
+    -64,
+    [
+     "ENONET",
+     "machine is not on the network"
+    ]
+   ],
+   [
+    -92,
+    [
+     "ENOPROTOOPT",
+     "protocol not available"
+    ]
+   ],
+   [
+    -28,
+    [
+     "ENOSPC",
+     "no space left on device"
+    ]
+   ],
+   [
+    -38,
+    [
+     "ENOSYS",
+     "function not implemented"
+    ]
+   ],
+   [
+    -107,
+    [
+     "ENOTCONN",
+     "socket is not connected"
+    ]
+   ],
+   [
+    -20,
+    [
+     "ENOTDIR",
+     "not a directory"
+    ]
+   ],
+   [
+    -39,
+    [
+     "ENOTEMPTY",
+     "directory not empty"
+    ]
+   ],
+   [
+    -88,
+    [
+     "ENOTSOCK",
+     "socket operation on non-socket"
+    ]
+   ],
+   [
+    -95,
+    [
+     "ENOTSUP",
+     "operation not supported on socket"
+    ]
+   ],
+   [
+    -75,
+    [
+     "EOVERFLOW",
+     "value too large for defined data type"
+    ]
+   ],
+   [
+    -1,
+    [
+     "EPERM",
+     "operation not permitted"
+    ]
+   ],
+   [
+    -32,
+    [
+     "EPIPE",
+     "broken pipe"
+    ]
+   ],
+   [
+    -71,
+    [
+     "EPROTO",
+     "protocol error"
+    ]
+   ],
+   [
+    -93,
+    [
+     "EPROTONOSUPPORT",
+     "protocol not supported"
+    ]
+   ],
+   [
+    -91,
+    [
+     "EPROTOTYPE",
+     "protocol wrong type for socket"
+    ]
+   ],
+   [
+    -34,
+    [
+     "ERANGE",
+     "result too large"
+    ]
+   ],
+   [
+    -30,
+    [
+     "EROFS",
+     "read-only file system"
+    ]
+   ],
+   [
+    -108,
+    [
+     "ESHUTDOWN",
+     "cannot send after transport endpoint shutdown"
+    ]
+   ],
+   [
+    -29,
+    [
+     "ESPIPE",
+     "invalid seek"
+    ]
+   ],
+   [
+    -3,
+    [
+     "ESRCH",
+     "no such process"
+    ]
+   ],
+   [
+    -110,
+    [
+     "ETIMEDOUT",
+     "connection timed out"
+    ]
+   ],
+   [
+    -26,
+    [
+     "ETXTBSY",
+     "text file is busy"
+    ]
+   ],
+   [
+    -18,
+    [
+     "EXDEV",
+     "cross-device link not permitted"
+    ]
+   ],
+   [
+    -4094,
+    [
+     "UNKNOWN",
+     "unknown error"
+    ]
+   ],
+   [
+    -4095,
+    [
+     "EOF",
+     "end of file"
+    ]
+   ],
+   [
+    -6,
+    [
+     "ENXIO",
+     "no such device or address"
+    ]
+   ],
+   [
+    -31,
+    [
+     "EMLINK",
+     "too many links"
+    ]
+   ],
+   [
+    -112,
+    [
+     "EHOSTDOWN",
+     "host is down"
+    ]
+   ],
+   [
+    -121,
+    [
+     "EREMOTEIO",
+     "remote I/O error"
+    ]
+   ],
+   [
+    -25,
+    [
+     "ENOTTY",
+     "inappropriate ioctl for device"
+    ]
+   ],
+   [
+    -4028,
+    [
+     "EFTYPE",
+     "inappropriate file type or format"
+    ]
+   ],
+   [
+    -84,
+    [
+     "EILSEQ",
+     "illegal byte sequence"
+    ]
+   ],
+   [
+    -94,
+    [
+     "ESOCKTNOSUPPORT",
+     "socket type not supported"
+    ]
+   ],
+   [
+    -61,
+    [
+     "ENODATA",
+     "no data available"
+    ]
+   ],
+   [
+    -49,
+    [
+     "EUNATCH",
+     "protocol driver not attached"
+    ]
+   ],
+   [
+    -8,
+    [
+     "ENOEXEC",
+     "exec format error"
+    ]
+   ]
+  ]
+ },
+ "v8": {
+  "heapStatisticsBuffer": {
+   "__typed": "Float64Array",
+   "length": 14,
+   "values": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  "heapCodeStatisticsBuffer": {
+   "__typed": "Float64Array",
+   "length": 4,
+   "values": [
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  "heapSpaceStatisticsBuffer": {
+   "__typed": "Float64Array",
+   "length": 4,
+   "values": [
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  "cachedDataVersionTag": {
+   "__fn": "cachedDataVersionTag"
+  },
+  "setHeapSnapshotNearHeapLimit": {
+   "__fn": "setHeapSnapshotNearHeapLimit"
+  },
+  "updateHeapStatisticsBuffer": {
+   "__fn": "updateHeapStatisticsBuffer"
+  },
+  "updateHeapCodeStatisticsBuffer": {
+   "__fn": "updateHeapCodeStatisticsBuffer"
+  },
+  "getCppHeapStatistics": {
+   "__fn": "getCppHeapStatistics"
+  },
+  "kHeapSpaces": [
+   "read_only_space",
+   "new_space",
+   "old_space",
+   "code_space",
+   "shared_space",
+   "trusted_space",
+   "new_large_object_space",
+   "large_object_space",
+   "code_large_object_space",
+   "shared_large_object_space",
+   "trusted_large_object_space"
+  ],
+  "updateHeapSpaceStatisticsBuffer": {
+   "__fn": "updateHeapSpaceStatisticsBuffer"
+  },
+  "kTotalHeapSizeIndex": 0,
+  "kTotalHeapSizeExecutableIndex": 1,
+  "kTotalPhysicalSizeIndex": 2,
+  "kTotalAvailableSize": 3,
+  "kUsedHeapSizeIndex": 4,
+  "kHeapSizeLimitIndex": 5,
+  "kMallocedMemoryIndex": 6,
+  "kPeakMallocedMemoryIndex": 7,
+  "kDoesZapGarbageIndex": 8,
+  "kNumberOfNativeContextsIndex": 9,
+  "kNumberOfDetachedContextsIndex": 10,
+  "kTotalGlobalHandlesSizeIndex": 11,
+  "kUsedGlobalHandlesSizeIndex": 12,
+  "kExternalMemoryIndex": 13,
+  "kCodeAndMetadataSizeIndex": 0,
+  "kBytecodeAndMetadataSizeIndex": 1,
+  "kExternalScriptSourceSizeIndex": 2,
+  "kCPUProfilerMetaDataSizeIndex": 3,
+  "kSpaceSizeIndex": 0,
+  "kSpaceUsedSizeIndex": 1,
+  "kSpaceAvailableSizeIndex": 2,
+  "kPhysicalSpaceSizeIndex": 3,
+  "setFlagsFromString": {
+   "__fn": "setFlagsFromString"
+  },
+  "isStringOneByteRepresentation": {
+   "__fn": true
+  },
+  "GCProfiler": {
+   "__fn": "GCProfiler",
+   "proto": [
+    "start",
+    "stop"
+   ]
+  },
+  "detailLevel": {
+   "DETAILED": 1,
+   "BRIEF": 0
+  }
+ },
+ "wasi": {
+  "WASI": {
+   "__fn": "WASI",
+   "proto": [
+    "args_get",
+    "args_sizes_get",
+    "clock_res_get",
+    "clock_time_get",
+    "environ_get",
+    "environ_sizes_get",
+    "fd_advise",
+    "fd_allocate",
+    "fd_close",
+    "fd_datasync",
+    "fd_fdstat_get",
+    "fd_fdstat_set_flags",
+    "fd_fdstat_set_rights",
+    "fd_filestat_get",
+    "fd_filestat_set_size",
+    "fd_filestat_set_times",
+    "fd_pread",
+    "fd_prestat_get",
+    "fd_prestat_dir_name",
+    "fd_pwrite",
+    "fd_read",
+    "fd_readdir",
+    "fd_renumber",
+    "fd_seek",
+    "fd_sync",
+    "fd_tell",
+    "fd_write",
+    "path_create_directory",
+    "path_filestat_get",
+    "path_filestat_set_times",
+    "path_link",
+    "path_open",
+    "path_readlink",
+    "path_remove_directory",
+    "path_rename",
+    "path_symlink",
+    "path_unlink_file",
+    "poll_oneoff",
+    "proc_exit",
+    "proc_raise",
+    "random_get",
+    "sched_yield",
+    "sock_accept",
+    "sock_recv",
+    "sock_send",
+    "sock_shutdown"
+   ]
+  }
+ },
+ "wasm_web_api": {
+  "setImplementation": {
+   "__fn": "setImplementation"
+  }
+ },
+ "watchdog": {
+  "TraceSigintWatchdog": {
+   "__fn": "TraceSigintWatchdog",
+   "proto": [
+    "start",
+    "stop"
+   ]
+  }
+ },
+ "worker": {
+  "Worker": {
+   "__fn": "Worker",
+   "proto": [
+    "startThread",
+    "stopThread",
+    "hasRef",
+    "ref",
+    "unref",
+    "getResourceLimits",
+    "takeHeapSnapshot",
+    "loopIdleTime",
+    "loopStartTime",
+    "getHeapStatistics",
+    "cpuUsage",
+    "startCpuProfile",
+    "stopCpuProfile"
+   ]
+  },
+  "getEnvMessagePort": {
+   "__fn": "getEnvMessagePort"
+  },
+  "threadId": 0,
+  "threadName": "",
+  "isMainThread": true,
+  "isInternalThread": false,
+  "ownsProcessState": true,
+  "kMaxYoungGenerationSizeMb": 0,
+  "kMaxOldGenerationSizeMb": 1,
+  "kCodeRangeSizeMb": 2,
+  "kStackSizeMb": 3,
+  "kTotalResourceLimitCount": 4
+ },
+ "zlib": {
+  "Zlib": {
+   "__fn": "Zlib",
+   "proto": [
+    "write",
+    "writeSync",
+    "close",
+    "init",
+    "params",
+    "reset"
+   ]
+  },
+  "BrotliEncoder": {
+   "__fn": "BrotliEncoder",
+   "proto": [
+    "write",
+    "writeSync",
+    "close",
+    "init",
+    "params",
+    "reset"
+   ]
+  },
+  "BrotliDecoder": {
+   "__fn": "BrotliDecoder",
+   "proto": [
+    "write",
+    "writeSync",
+    "close",
+    "init",
+    "params",
+    "reset"
+   ]
+  },
+  "ZstdCompress": {
+   "__fn": "ZstdCompress",
+   "proto": [
+    "write",
+    "writeSync",
+    "close",
+    "init",
+    "params",
+    "reset"
+   ]
+  },
+  "ZstdDecompress": {
+   "__fn": "ZstdDecompress",
+   "proto": [
+    "write",
+    "writeSync",
+    "close",
+    "init",
+    "params",
+    "reset"
+   ]
+  },
+  "crc32": {
+   "__fn": "crc32"
+  },
+  "ZLIB_VERSION": "1.3.1"
+ },
+ "sea": {
+  "isSea": {
+   "__fn": "isSea"
+  },
+  "isExperimentalSeaWarningNeeded": {
+   "__fn": "isExperimentalSeaWarningNeeded"
+  },
+  "getAsset": {
+   "__fn": "getAsset"
+  },
+  "getAssetKeys": {
+   "__fn": "getAssetKeys"
+  }
+ },
+ "profiler": {
+  "setCoverageDirectory": {
+   "__fn": "setCoverageDirectory"
+  },
+  "setSourceMapCacheGetter": {
+   "__fn": "setSourceMapCacheGetter"
+  },
+  "takeCoverage": {
+   "__fn": "takeCoverage"
+  },
+  "stopCoverage": {
+   "__fn": "stopCoverage"
+  },
+  "endCoverage": {
+   "__fn": "endCoverage"
+  }
+ },
+ "internal_only_v8": {
+  "__missing": "No such binding: internal_only_v8"
+ },
+ "async_context_frame": {
+  "getContinuationPreservedEmbedderData": {
+   "__fn": "getContinuationPreservedEmbedderData"
+  },
+  "setContinuationPreservedEmbedderData": {
+   "__fn": "setContinuationPreservedEmbedderData"
+  }
+ },
+ "webstorage": {
+  "Storage": {
+   "__fn": "Storage",
+   "proto": [
+    "length",
+    "clear",
+    "getItem",
+    "key",
+    "removeItem",
+    "setItem"
+   ]
+  },
+  "kConstructorKey": {
+   "__symbol": "constructor_key_symbol"
+  }
+ },
+ "locks": {
+  "__missing": "No such binding: locks"
+ },
+ "http2": {
+  "sessionState": {
+   "__typed": "Float64Array",
+   "length": 9,
+   "values": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  "streamState": {
+   "__typed": "Float64Array",
+   "length": 6,
+   "values": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  "settingsBuffer": {
+   "__typed": "Uint32Array",
+   "length": 29,
+   "values": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  "optionsBuffer": {
+   "__typed": "Uint32Array",
+   "length": 14,
+   "values": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  "streamStats": {
+   "__typed": "Float64Array",
+   "length": 6,
+   "values": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  "sessionStats": {
+   "__typed": "Float64Array",
+   "length": 9,
+   "values": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  "kBitfield": 0,
+  "kSessionPriorityListenerCount": 1,
+  "kSessionFrameErrorListenerCount": 2,
+  "kSessionMaxInvalidFrames": 4,
+  "kSessionMaxRejectedStreams": 8,
+  "kSessionUint8FieldCount": 12,
+  "kSessionHasRemoteSettingsListeners": 0,
+  "kSessionRemoteSettingsIsUpToDate": 1,
+  "kSessionHasPingListeners": 2,
+  "kSessionHasAltsvcListeners": 3,
+  "nghttp2ErrorString": {
+   "__fn": "nghttp2ErrorString"
+  },
+  "refreshDefaultSettings": {
+   "__fn": "refreshDefaultSettings"
+  },
+  "packSettings": {
+   "__fn": "packSettings"
+  },
+  "setCallbackFunctions": {
+   "__fn": "setCallbackFunctions"
+  },
+  "Http2Stream": {
+   "__fn": "Http2Stream",
+   "proto": [
+    "id",
+    "destroy",
+    "priority",
+    "pushPromise",
+    "info",
+    "trailers",
+    "respond",
+    "rstStream",
+    "refreshState",
+    "fd",
+    "_externalStream",
+    "bytesRead",
+    "bytesWritten",
+    "readStart",
+    "readStop",
+    "shutdown",
+    "useUserBuffer",
+    "writev",
+    "writeBuffer",
+    "writeAsciiString",
+    "writeUtf8String",
+    "writeUcs2String",
+    "writeLatin1String",
+    "isStreamBase",
+    "onread"
+   ]
+  },
+  "Http2Session": {
+   "__fn": "Http2Session",
+   "proto": [
+    "origin",
+    "altsvc",
+    "ping",
+    "consume",
+    "receive",
+    "destroy",
+    "goaway",
+    "hasPendingData",
+    "settings",
+    "request",
+    "setNextStreamID",
+    "setLocalWindowSize",
+    "updateChunksSent",
+    "refreshState",
+    "localSettings",
+    "remoteSettings",
+    "setGracefulClose"
+   ]
+  },
+  "nameForErrorCode": [
+   "NGHTTP2_NO_ERROR",
+   "NGHTTP2_PROTOCOL_ERROR",
+   "NGHTTP2_INTERNAL_ERROR",
+   "NGHTTP2_FLOW_CONTROL_ERROR",
+   "NGHTTP2_SETTINGS_TIMEOUT",
+   "NGHTTP2_STREAM_CLOSED",
+   "NGHTTP2_FRAME_SIZE_ERROR",
+   "NGHTTP2_REFUSED_STREAM",
+   "NGHTTP2_CANCEL",
+   "NGHTTP2_COMPRESSION_ERROR",
+   "NGHTTP2_CONNECT_ERROR",
+   "NGHTTP2_ENHANCE_YOUR_CALM",
+   "NGHTTP2_INADEQUATE_SECURITY",
+   "NGHTTP2_HTTP_1_1_REQUIRED"
+  ],
+  "constants": {
+   "NGHTTP2_HCAT_REQUEST": 0,
+   "NGHTTP2_HCAT_RESPONSE": 1,
+   "NGHTTP2_HCAT_PUSH_RESPONSE": 2,
+   "NGHTTP2_HCAT_HEADERS": 3,
+   "NGHTTP2_NV_FLAG_NONE": 0,
+   "NGHTTP2_NV_FLAG_NO_INDEX": 1,
+   "NGHTTP2_ERR_DEFERRED": -508,
+   "NGHTTP2_ERR_STREAM_ID_NOT_AVAILABLE": -509,
+   "NGHTTP2_ERR_INVALID_ARGUMENT": -501,
+   "NGHTTP2_ERR_STREAM_CLOSED": -510,
+   "NGHTTP2_ERR_NOMEM": -901,
+   "STREAM_OPTION_EMPTY_PAYLOAD": 1,
+   "STREAM_OPTION_GET_TRAILERS": 2,
+   "NGHTTP2_ERR_FRAME_SIZE_ERROR": -522,
+   "NGHTTP2_SESSION_SERVER": 0,
+   "NGHTTP2_SESSION_CLIENT": 1,
+   "NGHTTP2_STREAM_STATE_IDLE": 1,
+   "NGHTTP2_STREAM_STATE_OPEN": 2,
+   "NGHTTP2_STREAM_STATE_RESERVED_LOCAL": 3,
+   "NGHTTP2_STREAM_STATE_RESERVED_REMOTE": 4,
+   "NGHTTP2_STREAM_STATE_HALF_CLOSED_LOCAL": 5,
+   "NGHTTP2_STREAM_STATE_HALF_CLOSED_REMOTE": 6,
+   "NGHTTP2_STREAM_STATE_CLOSED": 7,
+   "NGHTTP2_FLAG_NONE": 0,
+   "NGHTTP2_FLAG_END_STREAM": 1,
+   "NGHTTP2_FLAG_END_HEADERS": 4,
+   "NGHTTP2_FLAG_ACK": 1,
+   "NGHTTP2_FLAG_PADDED": 8,
+   "NGHTTP2_FLAG_PRIORITY": 32,
+   "DEFAULT_SETTINGS_HEADER_TABLE_SIZE": 4096,
+   "DEFAULT_SETTINGS_ENABLE_PUSH": 1,
+   "DEFAULT_SETTINGS_MAX_CONCURRENT_STREAMS": 4294967295,
+   "DEFAULT_SETTINGS_INITIAL_WINDOW_SIZE": 65535,
+   "DEFAULT_SETTINGS_MAX_FRAME_SIZE": 16384,
+   "DEFAULT_SETTINGS_MAX_HEADER_LIST_SIZE": 65535,
+   "DEFAULT_SETTINGS_ENABLE_CONNECT_PROTOCOL": 0,
+   "MAX_MAX_FRAME_SIZE": 16777215,
+   "MIN_MAX_FRAME_SIZE": 16384,
+   "MAX_INITIAL_WINDOW_SIZE": 2147483647,
+   "NGHTTP2_SETTINGS_HEADER_TABLE_SIZE": 1,
+   "NGHTTP2_SETTINGS_ENABLE_PUSH": 2,
+   "NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS": 3,
+   "NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE": 4,
+   "NGHTTP2_SETTINGS_MAX_FRAME_SIZE": 5,
+   "NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE": 6,
+   "NGHTTP2_SETTINGS_ENABLE_CONNECT_PROTOCOL": 8,
+   "PADDING_STRATEGY_NONE": 0,
+   "PADDING_STRATEGY_ALIGNED": 1,
+   "PADDING_STRATEGY_MAX": 2,
+   "PADDING_STRATEGY_CALLBACK": 1,
+   "NGHTTP2_NO_ERROR": 0,
+   "NGHTTP2_PROTOCOL_ERROR": 1,
+   "NGHTTP2_INTERNAL_ERROR": 2,
+   "NGHTTP2_FLOW_CONTROL_ERROR": 3,
+   "NGHTTP2_SETTINGS_TIMEOUT": 4,
+   "NGHTTP2_STREAM_CLOSED": 5,
+   "NGHTTP2_FRAME_SIZE_ERROR": 6,
+   "NGHTTP2_REFUSED_STREAM": 7,
+   "NGHTTP2_CANCEL": 8,
+   "NGHTTP2_COMPRESSION_ERROR": 9,
+   "NGHTTP2_CONNECT_ERROR": 10,
+   "NGHTTP2_ENHANCE_YOUR_CALM": 11,
+   "NGHTTP2_INADEQUATE_SECURITY": 12,
+   "NGHTTP2_HTTP_1_1_REQUIRED": 13,
+   "NGHTTP2_DEFAULT_WEIGHT": 16,
+   "HTTP2_HEADER_STATUS": ":status",
+   "HTTP2_HEADER_METHOD": ":method",
+   "HTTP2_HEADER_AUTHORITY": ":authority",
+   "HTTP2_HEADER_SCHEME": ":scheme",
+   "HTTP2_HEADER_PATH": ":path",
+   "HTTP2_HEADER_PROTOCOL": ":protocol",
+   "HTTP2_HEADER_ACCEPT_ENCODING": "accept-encoding",
+   "HTTP2_HEADER_ACCEPT_LANGUAGE": "accept-language",
+   "HTTP2_HEADER_ACCEPT_RANGES": "accept-ranges",
+   "HTTP2_HEADER_ACCEPT": "accept",
+   "HTTP2_HEADER_ACCESS_CONTROL_ALLOW_CREDENTIALS": "access-control-allow-credentials",
+   "HTTP2_HEADER_ACCESS_CONTROL_ALLOW_HEADERS": "access-control-allow-headers",
+   "HTTP2_HEADER_ACCESS_CONTROL_ALLOW_METHODS": "access-control-allow-methods",
+   "HTTP2_HEADER_ACCESS_CONTROL_ALLOW_ORIGIN": "access-control-allow-origin",
+   "HTTP2_HEADER_ACCESS_CONTROL_EXPOSE_HEADERS": "access-control-expose-headers",
+   "HTTP2_HEADER_ACCESS_CONTROL_REQUEST_HEADERS": "access-control-request-headers",
+   "HTTP2_HEADER_ACCESS_CONTROL_REQUEST_METHOD": "access-control-request-method",
+   "HTTP2_HEADER_AGE": "age",
+   "HTTP2_HEADER_AUTHORIZATION": "authorization",
+   "HTTP2_HEADER_CACHE_CONTROL": "cache-control",
+   "HTTP2_HEADER_CONNECTION": "connection",
+   "HTTP2_HEADER_CONTENT_DISPOSITION": "content-disposition",
+   "HTTP2_HEADER_CONTENT_ENCODING": "content-encoding",
+   "HTTP2_HEADER_CONTENT_LENGTH": "content-length",
+   "HTTP2_HEADER_CONTENT_TYPE": "content-type",
+   "HTTP2_HEADER_COOKIE": "cookie",
+   "HTTP2_HEADER_DATE": "date",
+   "HTTP2_HEADER_ETAG": "etag",
+   "HTTP2_HEADER_FORWARDED": "forwarded",
+   "HTTP2_HEADER_HOST": "host",
+   "HTTP2_HEADER_IF_MODIFIED_SINCE": "if-modified-since",
+   "HTTP2_HEADER_IF_NONE_MATCH": "if-none-match",
+   "HTTP2_HEADER_IF_RANGE": "if-range",
+   "HTTP2_HEADER_LAST_MODIFIED": "last-modified",
+   "HTTP2_HEADER_LINK": "link",
+   "HTTP2_HEADER_LOCATION": "location",
+   "HTTP2_HEADER_RANGE": "range",
+   "HTTP2_HEADER_REFERER": "referer",
+   "HTTP2_HEADER_SERVER": "server",
+   "HTTP2_HEADER_SET_COOKIE": "set-cookie",
+   "HTTP2_HEADER_STRICT_TRANSPORT_SECURITY": "strict-transport-security",
+   "HTTP2_HEADER_TRANSFER_ENCODING": "transfer-encoding",
+   "HTTP2_HEADER_TE": "te",
+   "HTTP2_HEADER_UPGRADE_INSECURE_REQUESTS": "upgrade-insecure-requests",
+   "HTTP2_HEADER_UPGRADE": "upgrade",
+   "HTTP2_HEADER_USER_AGENT": "user-agent",
+   "HTTP2_HEADER_VARY": "vary",
+   "HTTP2_HEADER_X_CONTENT_TYPE_OPTIONS": "x-content-type-options",
+   "HTTP2_HEADER_X_FRAME_OPTIONS": "x-frame-options",
+   "HTTP2_HEADER_KEEP_ALIVE": "keep-alive",
+   "HTTP2_HEADER_PROXY_CONNECTION": "proxy-connection",
+   "HTTP2_HEADER_X_XSS_PROTECTION": "x-xss-protection",
+   "HTTP2_HEADER_ALT_SVC": "alt-svc",
+   "HTTP2_HEADER_CONTENT_SECURITY_POLICY": "content-security-policy",
+   "HTTP2_HEADER_EARLY_DATA": "early-data",
+   "HTTP2_HEADER_EXPECT_CT": "expect-ct",
+   "HTTP2_HEADER_ORIGIN": "origin",
+   "HTTP2_HEADER_PURPOSE": "purpose",
+   "HTTP2_HEADER_TIMING_ALLOW_ORIGIN": "timing-allow-origin",
+   "HTTP2_HEADER_X_FORWARDED_FOR": "x-forwarded-for",
+   "HTTP2_HEADER_PRIORITY": "priority",
+   "HTTP2_HEADER_ACCEPT_CHARSET": "accept-charset",
+   "HTTP2_HEADER_ACCESS_CONTROL_MAX_AGE": "access-control-max-age",
+   "HTTP2_HEADER_ALLOW": "allow",
+   "HTTP2_HEADER_CONTENT_LANGUAGE": "content-language",
+   "HTTP2_HEADER_CONTENT_LOCATION": "content-location",
+   "HTTP2_HEADER_CONTENT_MD5": "content-md5",
+   "HTTP2_HEADER_CONTENT_RANGE": "content-range",
+   "HTTP2_HEADER_DNT": "dnt",
+   "HTTP2_HEADER_EXPECT": "expect",
+   "HTTP2_HEADER_EXPIRES": "expires",
+   "HTTP2_HEADER_FROM": "from",
+   "HTTP2_HEADER_IF_MATCH": "if-match",
+   "HTTP2_HEADER_IF_UNMODIFIED_SINCE": "if-unmodified-since",
+   "HTTP2_HEADER_MAX_FORWARDS": "max-forwards",
+   "HTTP2_HEADER_PREFER": "prefer",
+   "HTTP2_HEADER_PROXY_AUTHENTICATE": "proxy-authenticate",
+   "HTTP2_HEADER_PROXY_AUTHORIZATION": "proxy-authorization",
+   "HTTP2_HEADER_REFRESH": "refresh",
+   "HTTP2_HEADER_RETRY_AFTER": "retry-after",
+   "HTTP2_HEADER_TRAILER": "trailer",
+   "HTTP2_HEADER_TK": "tk",
+   "HTTP2_HEADER_VIA": "via",
+   "HTTP2_HEADER_WARNING": "warning",
+   "HTTP2_HEADER_WWW_AUTHENTICATE": "www-authenticate",
+   "HTTP2_HEADER_HTTP2_SETTINGS": "http2-settings",
+   "HTTP2_METHOD_ACL": "ACL",
+   "HTTP2_METHOD_BASELINE_CONTROL": "BASELINE-CONTROL",
+   "HTTP2_METHOD_BIND": "BIND",
+   "HTTP2_METHOD_CHECKIN": "CHECKIN",
+   "HTTP2_METHOD_CHECKOUT": "CHECKOUT",
+   "HTTP2_METHOD_CONNECT": "CONNECT",
+   "HTTP2_METHOD_COPY": "COPY",
+   "HTTP2_METHOD_DELETE": "DELETE",
+   "HTTP2_METHOD_GET": "GET",
+   "HTTP2_METHOD_HEAD": "HEAD",
+   "HTTP2_METHOD_LABEL": "LABEL",
+   "HTTP2_METHOD_LINK": "LINK",
+   "HTTP2_METHOD_LOCK": "LOCK",
+   "HTTP2_METHOD_MERGE": "MERGE",
+   "HTTP2_METHOD_MKACTIVITY": "MKACTIVITY",
+   "HTTP2_METHOD_MKCALENDAR": "MKCALENDAR",
+   "HTTP2_METHOD_MKCOL": "MKCOL",
+   "HTTP2_METHOD_MKREDIRECTREF": "MKREDIRECTREF",
+   "HTTP2_METHOD_MKWORKSPACE": "MKWORKSPACE",
+   "HTTP2_METHOD_MOVE": "MOVE",
+   "HTTP2_METHOD_OPTIONS": "OPTIONS",
+   "HTTP2_METHOD_ORDERPATCH": "ORDERPATCH",
+   "HTTP2_METHOD_PATCH": "PATCH",
+   "HTTP2_METHOD_POST": "POST",
+   "HTTP2_METHOD_PRI": "PRI",
+   "HTTP2_METHOD_PROPFIND": "PROPFIND",
+   "HTTP2_METHOD_PROPPATCH": "PROPPATCH",
+   "HTTP2_METHOD_PUT": "PUT",
+   "HTTP2_METHOD_REBIND": "REBIND",
+   "HTTP2_METHOD_REPORT": "REPORT",
+   "HTTP2_METHOD_SEARCH": "SEARCH",
+   "HTTP2_METHOD_TRACE": "TRACE",
+   "HTTP2_METHOD_UNBIND": "UNBIND",
+   "HTTP2_METHOD_UNCHECKOUT": "UNCHECKOUT",
+   "HTTP2_METHOD_UNLINK": "UNLINK",
+   "HTTP2_METHOD_UNLOCK": "UNLOCK",
+   "HTTP2_METHOD_UPDATE": "UPDATE",
+   "HTTP2_METHOD_UPDATEREDIRECTREF": "UPDATEREDIRECTREF",
+   "HTTP2_METHOD_VERSION_CONTROL": "VERSION-CONTROL",
+   "HTTP_STATUS_CONTINUE": 100,
+   "HTTP_STATUS_SWITCHING_PROTOCOLS": 101,
+   "HTTP_STATUS_PROCESSING": 102,
+   "HTTP_STATUS_EARLY_HINTS": 103,
+   "HTTP_STATUS_OK": 200,
+   "HTTP_STATUS_CREATED": 201,
+   "HTTP_STATUS_ACCEPTED": 202,
+   "HTTP_STATUS_NON_AUTHORITATIVE_INFORMATION": 203,
+   "HTTP_STATUS_NO_CONTENT": 204,
+   "HTTP_STATUS_RESET_CONTENT": 205,
+   "HTTP_STATUS_PARTIAL_CONTENT": 206,
+   "HTTP_STATUS_MULTI_STATUS": 207,
+   "HTTP_STATUS_ALREADY_REPORTED": 208,
+   "HTTP_STATUS_IM_USED": 226,
+   "HTTP_STATUS_MULTIPLE_CHOICES": 300,
+   "HTTP_STATUS_MOVED_PERMANENTLY": 301,
+   "HTTP_STATUS_FOUND": 302,
+   "HTTP_STATUS_SEE_OTHER": 303,
+   "HTTP_STATUS_NOT_MODIFIED": 304,
+   "HTTP_STATUS_USE_PROXY": 305,
+   "HTTP_STATUS_TEMPORARY_REDIRECT": 307,
+   "HTTP_STATUS_PERMANENT_REDIRECT": 308,
+   "HTTP_STATUS_BAD_REQUEST": 400,
+   "HTTP_STATUS_UNAUTHORIZED": 401,
+   "HTTP_STATUS_PAYMENT_REQUIRED": 402,
+   "HTTP_STATUS_FORBIDDEN": 403,
+   "HTTP_STATUS_NOT_FOUND": 404,
+   "HTTP_STATUS_METHOD_NOT_ALLOWED": 405,
+   "HTTP_STATUS_NOT_ACCEPTABLE": 406,
+   "HTTP_STATUS_PROXY_AUTHENTICATION_REQUIRED": 407,
+   "HTTP_STATUS_REQUEST_TIMEOUT": 408,
+   "HTTP_STATUS_CONFLICT": 409,
+   "HTTP_STATUS_GONE": 410,
+   "HTTP_STATUS_LENGTH_REQUIRED": 411,
+   "HTTP_STATUS_PRECONDITION_FAILED": 412,
+   "HTTP_STATUS_PAYLOAD_TOO_LARGE": 413,
+   "HTTP_STATUS_URI_TOO_LONG": 414,
+   "HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE": 415,
+   "HTTP_STATUS_RANGE_NOT_SATISFIABLE": 416,
+   "HTTP_STATUS_EXPECTATION_FAILED": 417,
+   "HTTP_STATUS_TEAPOT": 418,
+   "HTTP_STATUS_MISDIRECTED_REQUEST": 421,
+   "HTTP_STATUS_UNPROCESSABLE_ENTITY": 422,
+   "HTTP_STATUS_LOCKED": 423,
+   "HTTP_STATUS_FAILED_DEPENDENCY": 424,
+   "HTTP_STATUS_TOO_EARLY": 425,
+   "HTTP_STATUS_UPGRADE_REQUIRED": 426,
+   "HTTP_STATUS_PRECONDITION_REQUIRED": 428,
+   "HTTP_STATUS_TOO_MANY_REQUESTS": 429,
+   "HTTP_STATUS_REQUEST_HEADER_FIELDS_TOO_LARGE": 431,
+   "HTTP_STATUS_UNAVAILABLE_FOR_LEGAL_REASONS": 451,
+   "HTTP_STATUS_INTERNAL_SERVER_ERROR": 500,
+   "HTTP_STATUS_NOT_IMPLEMENTED": 501,
+   "HTTP_STATUS_BAD_GATEWAY": 502,
+   "HTTP_STATUS_SERVICE_UNAVAILABLE": 503,
+   "HTTP_STATUS_GATEWAY_TIMEOUT": 504,
+   "HTTP_STATUS_HTTP_VERSION_NOT_SUPPORTED": 505,
+   "HTTP_STATUS_VARIANT_ALSO_NEGOTIATES": 506,
+   "HTTP_STATUS_INSUFFICIENT_STORAGE": 507,
+   "HTTP_STATUS_LOOP_DETECTED": 508,
+   "HTTP_STATUS_BANDWIDTH_LIMIT_EXCEEDED": 509,
+   "HTTP_STATUS_NOT_EXTENDED": 510,
+   "HTTP_STATUS_NETWORK_AUTHENTICATION_REQUIRED": 511
+  }
+ },
+ "quic": {
+  "__missing": "No such binding: quic"
+ },
+ "sqlite": {
+  "DatabaseSync": {
+   "__fn": "DatabaseSync",
+   "proto": [
+    "open",
+    "close",
+    "prepare",
+    "exec",
+    "function",
+    "location",
+    "aggregate",
+    "createSession",
+    "applyChangeset",
+    "enableLoadExtension",
+    "loadExtension"
+   ]
+  },
+  "StatementSync": {
+   "__fn": "StatementSync",
+   "proto": [
+    "iterate",
+    "all",
+    "get",
+    "run",
+    "columns",
+    "setAllowBareNamedParameters",
+    "setAllowUnknownNamedParameters",
+    "setReadBigInts",
+    "setReturnArrays"
+   ]
+  },
+  "constants": {
+   "SQLITE_CHANGESET_OMIT": 0,
+   "SQLITE_CHANGESET_REPLACE": 1,
+   "SQLITE_CHANGESET_ABORT": 2,
+   "SQLITE_CHANGESET_DATA": 1,
+   "SQLITE_CHANGESET_NOTFOUND": 2,
+   "SQLITE_CHANGESET_CONFLICT": 3,
+   "SQLITE_CHANGESET_CONSTRAINT": 4,
+   "SQLITE_CHANGESET_FOREIGN_KEY": 5
+  },
+  "backup": {
+   "__fn": "backup"
+  }
+ }
+}

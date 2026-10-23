@@ -1,0 +1,332 @@
+// The libuv side of Node, in a Web Worker: handle/request accounting, timers, immediates,
+// the callback scope that runs process.nextTick work, and process exit.
+
+import { S } from './state.ts';
+
+const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
+const nativeClearTimeout = globalThis.clearTimeout.bind(globalThis);
+const perfNow = performance.now.bind(performance);
+
+// -----------------------------------------------------------------------------
+// macrotasks (faster than setTimeout(0))
+
+const channel = new MessageChannel();
+const macroQueue: (() => void)[] = [];
+channel.port1.onmessage = () => {
+  const fn = macroQueue.shift();
+  fn?.();
+};
+export function macrotask(fn: () => void) {
+  macroQueue.push(fn);
+  channel.port2.postMessage(0);
+}
+
+// -----------------------------------------------------------------------------
+// handles and requests
+
+/** Anything that can keep the loop alive (uv_handle_t). */
+export interface LoopHandle {
+  /** uv_is_active */
+  active: boolean;
+  /** uv_has_ref */
+  refed: boolean;
+  /** shown by process.getActiveResourcesInfo() */
+  resourceName?: string;
+}
+
+export const handles = new Set<LoopHandle>();
+let pendingReqs = 0;
+const reqNames: string[] = [];
+
+export function addHandle(h: LoopHandle) {
+  handles.add(h);
+}
+export function removeHandle(h: LoopHandle) {
+  handles.delete(h);
+  scheduleAliveCheck();
+}
+
+/** A request (uv_req_t) in flight keeps the loop alive until done(). */
+export function startReq(name = 'FSReqCallback'): () => void {
+  pendingReqs++;
+  reqNames.push(name);
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    pendingReqs--;
+    const i = reqNames.indexOf(name);
+    if (i >= 0) reqNames.splice(i, 1);
+    scheduleAliveCheck();
+  };
+}
+
+/** Keeps the loop alive while native browser async work (WebAssembly.compile, crypto.subtle…) is pending. */
+export function track<T>(p: Promise<T>): Promise<T> {
+  const done = startReq('Promise');
+  return p.finally(done);
+}
+
+export function activeResources(): string[] {
+  const out = [...reqNames];
+  for (const h of handles) if (h.active && h.refed) out.push(h.resourceName ?? 'Handle');
+  if (timer.id !== null && timer.refed) out.push('Timeout');
+  if (immediateInfo && immediateInfo[kRefCount] > 0) out.push('Immediate');
+  return out;
+}
+
+// -----------------------------------------------------------------------------
+// callback scope (InternalCallbackScope)
+
+let tickCallback: (() => void) | null = null;
+let tickInfo: Uint8Array | null = null;
+const kHasTickScheduled = 0;
+const kHasRejectionToWarn = 1;
+let inTicks = false;
+let scopeDepth = 0;
+
+export function setTickCallback(fn: () => void, info: Uint8Array) {
+  tickCallback = fn;
+  tickInfo = info;
+}
+
+/** Runs pending nextTicks and promise-rejection processing if any are due. */
+export function runTicks() {
+  if (!tickCallback || !tickInfo || inTicks) return;
+  if (tickInfo[kHasTickScheduled] !== 1 && tickInfo[kHasRejectionToWarn] !== 1) return;
+  inTicks = true;
+  try {
+    tickCallback.call(S.process);
+  } catch (e) {
+    inTicks = false;
+    triggerUncaughtException(e, false);
+    return;
+  } finally {
+    inTicks = false;
+  }
+}
+
+let tickMicrotaskQueued = false;
+/** nextTick was called outside a callback scope (e.g. from a promise job): run ticks soon. */
+export function onTickScheduled() {
+  if (inTicks || scopeDepth > 0 || tickMicrotaskQueued) return;
+  tickMicrotaskQueued = true;
+  queueMicrotask(() => {
+    tickMicrotaskQueued = false;
+    if (scopeDepth === 0) {
+      runTicks();
+      afterCallback();
+    }
+  });
+}
+
+/** Calls a JS entry point the way libuv → C++ → JS would, then drains ticks. */
+export function scope<T>(fn: (...a: any[]) => T, thisArg?: unknown, ...args: any[]): T | undefined {
+  scopeDepth++;
+  let r: T | undefined;
+  try {
+    r = fn.apply(thisArg, args);
+  } catch (e) {
+    scopeDepth--;
+    triggerUncaughtException(e, false);
+    afterCallback();
+    return undefined;
+  }
+  scopeDepth--;
+  if (scopeDepth === 0) {
+    runTicks();
+    afterCallback();
+  }
+  return r;
+}
+
+function afterCallback() {
+  scheduleImmediates();
+  scheduleAliveCheck();
+}
+
+// -----------------------------------------------------------------------------
+// timers (one uv_timer for all of Node's JS timers)
+
+let processTimers: ((now: number) => number) | null = null;
+let processImmediate: (() => void) | null = null;
+const loopStart = perfNow();
+const timer = { id: null as ReturnType<typeof setTimeout> | null, refed: true, due: 0 };
+
+export function setupTimers(immediate: () => void, timers: (now: number) => number) {
+  processImmediate = immediate;
+  processTimers = timers;
+}
+
+/** uv_now(): milliseconds since the loop started. */
+export function now(): number {
+  return Math.floor(perfNow() - loopStart) + 1;
+}
+
+export function scheduleTimer(ms: number) {
+  if (timer.id !== null) nativeClearTimeout(timer.id);
+  const delay = Math.max(1, ms);
+  timer.due = now() + delay;
+  timer.id = nativeSetTimeout(fireTimers, delay);
+}
+
+export function toggleTimerRef(refed: boolean) {
+  timer.refed = refed;
+  scheduleAliveCheck();
+}
+
+function fireTimers() {
+  timer.id = null;
+  if (!processTimers || S.exiting) return;
+  const t = now();
+  const next = scope(processTimers, S.process, t) ?? 0;
+  if (next !== 0 && timer.id === null) {
+    const abs = Math.abs(next);
+    timer.refed = next > 0;
+    scheduleTimer(Math.max(1, abs - now()));
+  }
+  scheduleAliveCheck();
+}
+
+// -----------------------------------------------------------------------------
+// immediates (the check phase)
+
+let immediateInfo: Uint32Array | null = null;
+const kCount = 0;
+const kRefCount = 1;
+const kHasOutstanding = 2;
+let immediateQueued = false;
+
+export function setImmediateInfo(info: Uint32Array) {
+  immediateInfo = info;
+}
+
+export function toggleImmediateRef(_refed: boolean) {
+  scheduleImmediates();
+  scheduleAliveCheck();
+}
+
+function scheduleImmediates() {
+  if (immediateQueued || !immediateInfo || !processImmediate) return;
+  if (immediateInfo[kCount] === 0 && immediateInfo[kHasOutstanding] === 0) return;
+  immediateQueued = true;
+  macrotask(() => {
+    immediateQueued = false;
+    if (S.exiting || !immediateInfo) return;
+    if (immediateInfo[kCount] === 0 && immediateInfo[kHasOutstanding] === 0) return;
+    scope(processImmediate!, S.process);
+  });
+}
+
+// -----------------------------------------------------------------------------
+// liveness and exit
+
+export function alive(): boolean {
+  if (pendingReqs > 0) return true;
+  if (timer.id !== null && timer.refed) return true;
+  if (immediateInfo && immediateInfo[kRefCount] > 0) return true;
+  for (const h of handles) if (h.active && h.refed) return true;
+  return false;
+}
+
+let checkQueued = false;
+let checkGen = 0;
+export function scheduleAliveCheck() {
+  checkGen++;
+  if (checkQueued || S.exiting) return;
+  checkQueued = true;
+  const gen = checkGen;
+  // a macrotask and a short timeout, so work the browser finishes on its own (blob reads, …) can land
+  macrotask(() => {
+    nativeSetTimeout(() => {
+      checkQueued = false;
+      if (S.exiting) return;
+      if (gen !== checkGen) return scheduleAliveCheck();
+      if (!alive()) onLoopEmpty();
+    }, 2);
+  });
+}
+
+let started = false;
+/** Called once the main script has run (uv_run starts). */
+export function startLoop() {
+  started = true;
+  scheduleImmediates();
+  scheduleAliveCheck();
+}
+
+function exitInfo(): Int32Array {
+  return S.process[S.privateSymbols.exit_info_private_symbol];
+}
+
+export function currentExitCode(): number {
+  const f = exitInfo();
+  return f[2] /* kHasExitCode */ ? f[1] /* kExitCode */ : 0;
+}
+
+function onLoopEmpty() {
+  if (!started || S.exiting) return;
+  // EmitProcessBeforeExit
+  if (!exitInfo()[0]) {
+    scope(() => S.process.emit('beforeExit', currentExitCode()));
+    if (alive()) return;
+  }
+  emitProcessExit();
+}
+
+/** EmitProcessExitInternal: 'exit' event, then terminate with process.exitCode. */
+export function emitProcessExit(): never {
+  const f = exitInfo();
+  if (!f[0]) {
+    f[0] = 1; // kExiting
+    try {
+      S.process.emit('exit', currentExitCode());
+    } catch (e) {
+      triggerUncaughtException(e, false);
+    }
+  }
+  return reallyExit(currentExitCode());
+}
+
+let exitHook: (code: number) => never = () => {
+  throw new Error('exit hook not installed');
+};
+export function setExitHook(fn: (code: number) => never) {
+  exitHook = fn;
+}
+export function reallyExit(code: number): never {
+  S.exiting = true;
+  return exitHook(code | 0);
+}
+
+// -----------------------------------------------------------------------------
+// uncaught exceptions (node::errors::TriggerUncaughtException)
+
+let printFatal: (err: unknown) => void = (e) => console.error(e);
+export function setFatalPrinter(fn: (err: unknown) => void) {
+  printFatal = fn;
+}
+
+let inFatal = false;
+export function triggerUncaughtException(err: unknown, fromPromise: boolean) {
+  if (S.exiting) return;
+  const fe = S.process?._fatalException;
+  if (inFatal || typeof fe !== 'function') {
+    printFatal(err);
+    reallyExit(7);
+  }
+  inFatal = true;
+  let handled = false;
+  try {
+    handled = fe.call(S.process, err, fromPromise);
+  } catch (e2) {
+    inFatal = false;
+    printFatal(e2);
+    reallyExit(7); // kExceptionInFatalExceptionHandler
+  }
+  inFatal = false;
+  if (handled) return;
+  printFatal(err);
+  const f = exitInfo();
+  reallyExit(f[2] && f[1] ? f[1] : 1);
+}
