@@ -160,15 +160,16 @@ async function runOv(tests) {
   const t0 = Date.now();
   try {
     const queue = [...tests];
-    const worker = async () => {
+    // each worker gets its own tmpdir (test/common/tmpdir.js: .tmp.<TEST_THREAD_ID>), as Node's test runner does
+    const worker = async (_, id) => {
       for (let t; (t = queue.shift()); ) {
         let r;
         try {
           r = await session.page.evaluate(
-            async ({ file, ms }) => {
+            async ({ file, ms, id }) => {
               const ov = window.ov;
               const t0 = performance.now();
-              const p = await ov.spawn('node', [`test/parallel/${file}`], { cwd: '/node' });
+              const p = await ov.spawn('node', [`test/parallel/${file}`], { cwd: '/node', env: { TEST_THREAD_ID: String(id) } });
               let timedOut = false;
               const timer = setTimeout(() => {
                 timedOut = true;
@@ -178,7 +179,7 @@ async function runOv(tests) {
               clearTimeout(timer);
               return { code, timedOut: timedOut || code === -1, out: p.collected.slice(-20000), ms: Math.round(performance.now() - t0) };
             },
-            { file: t.file, ms: PER_TEST_MS },
+            { file: t.file, ms: PER_TEST_MS, id },
             { timeout: PER_TEST_MS + 15000 },
           );
         } catch (e) {
