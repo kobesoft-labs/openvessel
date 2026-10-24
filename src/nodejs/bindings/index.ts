@@ -106,7 +106,7 @@ export const factories: Record<string, BindingFactory> = {
   zlib: createZlib,
   v8: createV8,
   wasi: createWasiBinding,
-  // HTTP/2 needs TLS sessions, which a browser process can't hold; the module still has to load
+  // HTTP/2 (node_http2.cc over nghttp2) is not ported; the module still has to load
   http2: () =>
     Object.assign(fromShape('http2'), {
       setCallbackFunctions: () => {},

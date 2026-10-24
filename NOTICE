@@ -9,9 +9,13 @@ Bundled into the runtime (dist/)
 - Node.js lib/ and deps/ (v22.23.4) — MIT and the licenses of Node.js's bundled
   dependencies; shipped as dist/runtime/nodelib.js with dist/runtime/NODE-LICENSE.txt.
   https://github.com/nodejs/node
-- Brotli (compiled to WebAssembly) — MIT. https://github.com/google/brotli
+- Brotli 1.1.0 (compiled to WebAssembly, with the decoder change Node.js carries in
+  deps/brotli) — MIT. https://github.com/google/brotli
 - Zstandard (compiled to WebAssembly) — BSD-3-Clause. https://github.com/facebook/zstd
 - @noble/ciphers, @noble/curves, @noble/hashes — MIT. https://paulmillr.com/noble/
+- amaro 1.1.8 (Node.js's TypeScript type stripper; swc compiled to WebAssembly) — MIT, and
+  Apache-2.0 for swc. Shipped as dist/runtime/amaro.js with
+  dist/runtime/AMARO-LICENSE.txt. https://github.com/nodejs/amaro
 - sucrase — MIT. https://github.com/alangpierce/sucrase
 - pako — MIT and Zlib. https://github.com/nodeca/pako
 - fflate — MIT. https://github.com/101arrowz/fflate

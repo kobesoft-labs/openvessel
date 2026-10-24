@@ -20,8 +20,52 @@ How it is measured (`test/node-compat/run.mjs`):
 - Tests that can't pass in a browser are listed with the reason in `test/node-compat/limits/*.json`.
   **The target is every other test**: `pass / target` is what the report shows, and the goal is 100%.
 
-Current result: see the table in `test/node-compat/results/port/REPORT.md` after
-`node test/node-compat/run.mjs --port && node test/node-compat/run.mjs --port --report`.
+Result (2026-10-24, Chrome):
+
+| Module | Pass | Target | Listed as limits |
+|---|---:|---:|---:|
+| fs | 173 | 173 | 4 |
+| stream | 165 | 165 | 1 |
+| worker_threads | 118 | 118 | 11 |
+| crypto | 96 | 96 | 2 |
+| child_process | 94 | 94 | 1 |
+| vm | 78 | 78 | 11 |
+| process | 73 | 73 | 1 |
+| buffer | 60 | 60 | 1 |
+| zlib | 60 | 60 | 0 |
+| timers | 47 | 47 | 0 |
+| module, require | 48 | 48 | 0 |
+| events, event-emitter | 33 | 33 | 0 |
+| stream2, stream3, readable | 35 | 35 | 0 |
+| url, whatwg-url | 36 | 36 | 0 |
+| console | 19 | 19 | 0 |
+| util | 18 | 18 | 0 |
+| assert | 17 | 17 | 1 |
+| path | 16 | 16 | 0 |
+| readline | 13 | 13 | 0 |
+| process.nextTick, microtasks, promises | 18 | 18 | 0 |
+| async_hooks (AsyncLocalStorage) | 7 | 7 | 1 |
+| os | 6 | 6 | 0 |
+| querystring | 4 | 4 | 0 |
+| string_decoder | 3 | 3 | 0 |
+| **All** | **1237** | **1237 (100%)** | **34** |
+
+The 34 tests listed as limits, by reason (each file in `test/node-compat/limits/` gives the reason per test):
+
+| Reason | Tests |
+|---|---:|
+| Stopping JavaScript while it runs (`vm` `timeout`, `breakOnSigint`) or a context with its own microtask queue (`microtaskMode`) | 9 |
+| The inspector, heap snapshots or per-thread heap limits | 7 |
+| A context with its own built-ins (a separate V8 realm) | 4 |
+| HTTP/2 — not implemented (porting `node_http2.cc` over nghttp2 is a large project of its own), not a browser limit | 4 |
+| No OS underneath: another program (`python3`), `RLIMIT_FSIZE`, changing the time zone at run time, UDP | 4 |
+| One allocation of 2 GiB or more | 2 |
+| macOS-only tests (OpenVessel is a Linux system, so they skip themselves) | 2 |
+| `AsyncLocalStorage` after `await` (V8 promise hooks) | 1 |
+| An OpenSSL configuration file | 1 |
+
+To measure again: `node test/node-compat/run.mjs --port && node test/node-compat/run.mjs --port --report`
+(the table lands in `test/node-compat/results/port/REPORT.md`).
 <!-- numbers: updated with each full run -->
 
 ## What can't work in a browser, and why
@@ -38,6 +82,7 @@ These are limits of the platform, not missing work. Each has a reason a browser 
 | WebSocket client connections to outside hosts over `net`/`tls` | The HTTP bridge handles request/response only. | Answered with `501 Not Implemented`. (The browser's `WebSocket` global is available.) |
 | Custom CAs, client certificates, TLS details | TLS is done — and verified — by the browser's `fetch`; the process sees plaintext. | `tls.connect` succeeds with `authorized: true` when the browser accepted the certificate. `getPeerCertificate()` returns a summary, not the real certificate. |
 | Listening on a real port | Nothing outside the tab can connect to it. | Servers listen on virtual ports; the preview iframe reaches them through a service worker. |
+| HTTP/2 (`node:http2`) | Not a browser limit: the binding (`node_http2.cc` over nghttp2) is not implemented yet; it is a large port of its own. | `require('node:http2')` loads; creating a server or a session throws "HTTP/2 is not supported in OpenVessel". HTTP/1.1 servers and clients work. |
 
 ### Native code
 

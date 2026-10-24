@@ -20,8 +20,52 @@ OpenVessel は Node.js 自身の JavaScript（`lib/`）を動かし、ネイテ�
 - ブラウザでは通せない試験は、理由と一緒に `test/node-compat/limits/*.json` に書きます。
   **目標はそれ以外のすべて**で、集計は「通過 / 目標」を出し、100% を目指します。
 
-いまの数字は、`node test/node-compat/run.mjs --port && node test/node-compat/run.mjs --port --report` の後の
-`test/node-compat/results/port/REPORT.md` の表にあります。
+結果（2026-10-24・Chrome）:
+
+| モジュール | 通過 | 目標 | 対象外（理由つき） |
+|---|---:|---:|---:|
+| fs | 173 | 173 | 4 |
+| stream | 165 | 165 | 1 |
+| worker_threads | 118 | 118 | 11 |
+| crypto | 96 | 96 | 2 |
+| child_process | 94 | 94 | 1 |
+| vm | 78 | 78 | 11 |
+| process | 73 | 73 | 1 |
+| buffer | 60 | 60 | 1 |
+| zlib | 60 | 60 | 0 |
+| timers | 47 | 47 | 0 |
+| module, require | 48 | 48 | 0 |
+| events, event-emitter | 33 | 33 | 0 |
+| stream2, stream3, readable | 35 | 35 | 0 |
+| url, whatwg-url | 36 | 36 | 0 |
+| console | 19 | 19 | 0 |
+| util | 18 | 18 | 0 |
+| assert | 17 | 17 | 1 |
+| path | 16 | 16 | 0 |
+| readline | 13 | 13 | 0 |
+| process.nextTick, microtasks, promises | 18 | 18 | 0 |
+| async_hooks (AsyncLocalStorage) | 7 | 7 | 1 |
+| os | 6 | 6 | 0 |
+| querystring | 4 | 4 | 0 |
+| string_decoder | 3 | 3 | 0 |
+| **合計** | **1237** | **1237 (100%)** | **34** |
+
+対象外にした 34 本の理由の内訳です（試験ごとの理由は `test/node-compat/limits/` の各ファイルにあります）。
+
+| 理由 | 本数 |
+|---|---:|
+| 動いている JavaScript を止める（`vm` の `timeout`・`breakOnSigint`）、または専用のマイクロタスクキューを持つコンテキスト（`microtaskMode`） | 9 |
+| inspector・ヒープスナップショット・スレッドごとのヒープ上限 | 7 |
+| 専用の組み込みオブジェクトを持つコンテキスト（別の V8 realm） | 4 |
+| HTTP/2。ブラウザの制約ではなく未実装です（nghttp2 の上の `node_http2.cc` の移植は、それだけで大きな仕事です） | 4 |
+| 下に OS がない: 別のプログラム（`python3`）・`RLIMIT_FSIZE`・実行中のタイムゾーン変更・UDP | 4 |
+| 2 GiB 以上を一度に確保する | 2 |
+| macOS だけの試験（OpenVessel は Linux として振る舞うので、試験が自分で飛ばします） | 2 |
+| `await` の後の `AsyncLocalStorage`（V8 の promise hooks） | 1 |
+| OpenSSL の設定ファイル | 1 |
+
+測り直すには `node test/node-compat/run.mjs --port && node test/node-compat/run.mjs --port --report`
+（表は `test/node-compat/results/port/REPORT.md` に出ます）。
 <!-- numbers: updated with each full run -->
 
 ## ブラウザでは動かせないものと、その理由
@@ -38,6 +82,7 @@ OpenVessel は Node.js 自身の JavaScript（`lib/`）を動かし、ネイテ�
 | `net`/`tls` 経由の外への WebSocket | HTTP の橋渡しは要求と応答だけ | `501 Not Implemented` を返す（グローバルの `WebSocket` は使える） |
 | 独自の CA・クライアント証明書・TLS の細部 | TLS とその確認はブラウザの `fetch` が行い、プロセスには平文が届く | ブラウザが証明書を受け入れれば `tls.connect` は `authorized: true` でつながる。`getPeerCertificate()` は本物の証明書ではなく要約を返す |
 | 実際のポートでの待ち受け | タブの外からはつなげない | サーバーは仮想ポートで待ち受け、プレビューの iframe は Service Worker 経由でつながる |
+| HTTP/2（`node:http2`） | ブラウザの制約ではなく未実装（nghttp2 の上の `node_http2.cc` の移植は、それだけで大きな仕事） | `require('node:http2')` は読み込める。サーバーやセッションを作ると「HTTP/2 is not supported in OpenVessel」を投げる。HTTP/1.1 のサーバーとクライアントは動く |
 
 ### ネイティブのコード
 

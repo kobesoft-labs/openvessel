@@ -49,8 +49,8 @@ OpenVessel はクリーンルームで作っています（ほかのブラウザ
 | | |
 |---|---|
 | Node.js | v22.23.4（`src/node/version.ts`） |
-| Node 自身の試験 | 数字は [docs/compatibility.ja.md](docs/compatibility.ja.md) |
-| Astro のサイト | 実際のサイト 147 本の中で 129 本がビルドできる（Astro 5・6・7）。[docs/compatibility.ja.md](docs/compatibility.ja.md) |
+| Node 自身の試験 | 対象モジュールの 1271 本のうち、ブラウザで通せる 1237 本すべて（100%）が通る。残り 34 本は理由つきで対象外。[docs/compatibility.ja.md](docs/compatibility.ja.md) |
+| Astro のサイト | 実際のサイト 147 本の中で 131 本がビルドできる（Astro 5・6・7）。[docs/compatibility.ja.md](docs/compatibility.ja.md) |
 | ブラウザ | Chromium 系。クロスオリジン分離（`SharedArrayBuffer`）が必要 |
 
 ブラウザでは動かせないものと、その理由は [docs/compatibility.ja.md](docs/compatibility.ja.md) にまとめています。

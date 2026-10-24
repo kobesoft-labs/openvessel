@@ -50,8 +50,8 @@ in-browser runtimes. It is open source under the [Apache License 2.0](LICENSE).
 | | |
 |---|---|
 | Node.js | v22.23.4 (`src/node/version.ts`) |
-| Node's own test suite | see [docs/compatibility.md](docs/compatibility.md) for the current numbers |
-| Astro sites | 129 of a corpus of 147 real sites build (Astro 5, 6 and 7); see [docs/compatibility.md](docs/compatibility.md) |
+| Node's own test suite | 1237 of 1237 (100%) of the tests a browser can pass, across 1271 tests of the targeted modules; the other 34 are listed with the reason — see [docs/compatibility.md](docs/compatibility.md) |
+| Astro sites | 131 of a corpus of 147 real sites build (Astro 5, 6 and 7); see [docs/compatibility.md](docs/compatibility.md) |
 | Browsers | Chromium-based browsers; cross-origin isolation (`SharedArrayBuffer`) is required |
 
 What can't work in a browser, and why, is listed in [docs/compatibility.md](docs/compatibility.md).
