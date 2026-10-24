@@ -601,10 +601,14 @@ export class Installer {
         added++;
         continue;
       }
+      // clear the old copy now, before any extraction, and keep its node_modules: that holds the
+      // packages nested in it, which may be up to date or extracted before it
+      const existing = vfs.tryLookup(n.dir, false);
+      if (existing && !isDir(existing)) vfs.rmrf(n.dir); // a symlink (an earlier link) or a file
+      else if (existing) for (const name of vfs.readdir(n.dir)) if (name !== 'node_modules') vfs.rmrf(path.join(n.dir, name));
       jobs.push(
         (async () => {
           const entries = await this.o.registry.tarball(n.source.tarball!, n.source.integrity, n.source.shasum);
-          if (vfs.exists(n.dir)) vfs.rmrf(n.dir);
           mkdirp(n.dir);
           for (const e of entries) {
             const rel = e.path.replace(/^[^/]*\/?/, '');
