@@ -19,6 +19,8 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
   const readers = new Map<string, { active: boolean }>(); // `${pid}:${fd}`
   const reservedTids = new Set<number>();
   let nextTid = 100000;
+  /** Node's threadId: per process, 1, 2, … (the main thread is 0) */
+  const nodeThreadIds = new WeakMap<Proc, number>();
 
   const abs = (proc: Proc, p: string) => {
     if (typeof p !== 'string' || p === '') throw kerr('ENOENT');
@@ -467,7 +469,10 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       case 'threadReserve': {
         const tid = nextTid++;
         reservedTids.add(tid);
-        return tid;
+        if (!a.nodeId) return tid;
+        const threadId = (nodeThreadIds.get(proc) ?? 0) + 1;
+        nodeThreadIds.set(proc, threadId);
+        return { tid, threadId };
       }
       case 'threadExit': {
         const t = proc.threads.get(thread.tid);
@@ -643,6 +648,10 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
             envData: msg.envData,
             port: msg.port,
             name: msg.name,
+            threadId: msg.threadId,
+            resourceLimits: msg.resourceLimits,
+            envRings: msg.envRings,
+            trackUnmanagedFds: msg.trackUnmanagedFds,
           },
           [msg.port, ...(msg.transfer ?? [])],
           thread.tid,

@@ -52,6 +52,11 @@ function bootFailure(e: unknown): never {
 loop.setExitHook((code: number): never => {
   S.exiting = true;
   if (!S.isMainThread) {
+    for (const fn of S.atThreadExit.splice(0)) {
+      try {
+        fn();
+      } catch {}
+    }
     try {
       sys('threadExit', { code });
     } catch {}
@@ -138,7 +143,7 @@ function createEnvProxy(initial: Record<string, string>) {
     },
     defineProperty(t, k, d) {
       if (typeof k === 'symbol') return false;
-      if ('get' in d || 'set' in d || d.configurable === false || d.writable === false || d.enumerable === false) {
+      if ('get' in d || 'set' in d || d.configurable !== true || d.writable !== true || d.enumerable !== true) {
         const e = new TypeError(`'process.env' only accepts a configurable, writable, and enumerable data descriptor`) as TypeError & { code: string };
         e.code = 'ERR_INVALID_OBJECT_DEFINE_PROPERTY';
         throw e;
@@ -359,7 +364,8 @@ function boot(init: InitMsg) {
     S.argv = cl.argv;
     S.hasEval = cl.execArgv.some((a) => /^(-e|-p|-pe|--eval|--print)(=|$)/.test(a));
   } else {
-    const cl = parseCommandLine(['node', ...(init.execArgv ?? [])], '');
+    // a thread starts with its execArgv and the NODE_OPTIONS of its env (Worker::New)
+    const cl = parseCommandLine(['node', ...(init.execArgv ?? [])], init.env.NODE_OPTIONS ?? '');
     S.optionValues = cl.values;
     S.execArgv = init.execArgv ?? [];
     S.argv = init.argv;

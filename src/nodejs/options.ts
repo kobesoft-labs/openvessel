@@ -149,3 +149,23 @@ export function parseCommandLine(argv: string[], nodeOptions = ''): ParsedComman
   rest.push(...argv.slice(i));
   return { execArgv, argv: rest, values };
 }
+
+/** Options of PerProcessOptionsParser (node_options.cc): a worker thread can't take these. */
+const PER_PROCESS = new Set(
+  '--completion-bash --debug-arraybuffer-allocations --disable-proto --enable-fips --experimental-sea-config --force-fips --help --icu-data-dir --node-memory-debug --node-snapshot --openssl-config --openssl-legacy-provider --openssl-shared-config --report-compact --report-dir --report-directory --report-filename --report-on-fatalerror --run --secure-heap --secure-heap-min --security-revert --security-reverts --snapshot-blob --title --tls-cipher-list --trace-event-categories --trace-event-file-pattern --trace-events-enabled --trace-sigint --use-bundled-ca --use-largepages --use-openssl-ca --use-system-ca --v8-options --v8-pool-size --zero-fill-buffers -h -v'.split(' '),
+);
+
+/** Worker::New's checks of a thread's execArgv (or of the NODE_OPTIONS in its env): the errors, or null. */
+export function workerOptionErrors(args: string[] | string, fromEnv: boolean): string[] | null {
+  const list = typeof args === 'string' ? splitNodeOptions(args) : args;
+  const values = defaultOptionValues();
+  for (let i = 0; i < list.length; i++) {
+    const a = list[i];
+    if (!a.startsWith('-') || a === '-' || a === '--') continue;
+    if (PER_PROCESS.has(a.split('=')[0])) return [a];
+    const r = apply(values, a, takesValue(a) ? list[i + 1] : undefined, fromEnv);
+    if (typeof r === 'string') return [r.startsWith('bad option: ') ? a : r];
+    i += r;
+  }
+  return null;
+}

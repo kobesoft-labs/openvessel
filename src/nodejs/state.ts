@@ -21,6 +21,13 @@ export interface InitMsg {
   envData?: [unknown, unknown][];
   port?: MessagePort;
   name?: string;
+  /** Node's threadId (per process) */
+  threadId?: number;
+  /** rings of the env port for receiveMessageOnPort/drain: [send, recv] from the thread's side */
+  envRings?: [SharedArrayBuffer, SharedArrayBuffer];
+  trackUnmanagedFds?: boolean;
+  /** maxYoungGenerationSizeMb, maxOldGenerationSizeMb, codeRangeSizeMb, stackSizeMb */
+  resourceLimits?: number[];
 }
 
 /** Filled in during bootstrap; bindings read it lazily. */
@@ -60,6 +67,8 @@ export const S = {
   sourceLine: null as null | ((file: string, line: number) => string | undefined),
   /** Handlers for messages the kernel posts to this worker, by message type. */
   kernelHandlers: new Map<string, (msg: any) => void>(),
+  /** Run before a worker thread exits (Environment cleanup hooks). */
+  atThreadExit: [] as (() => void)[],
 };
 
 /** Lazily requires a Node builtin (only valid after realm bootstrap). */
