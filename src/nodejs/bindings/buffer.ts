@@ -4,6 +4,18 @@ import { fromShape } from './shape.ts';
 import { setCryptoBufferPrototype } from './crypto.ts';
 
 const utf8Enc = new TextEncoder();
+
+/** TextEncoder.encodeInto, also into shared memory (the browser rejects views on a SharedArrayBuffer). */
+export function utf8EncodeInto(str: string, dest: Uint8Array): { read: number; written: number } {
+  if (typeof SharedArrayBuffer !== 'undefined' && dest.buffer instanceof SharedArrayBuffer) {
+    const tmp = new Uint8Array(dest.length);
+    const r = utf8Enc.encodeInto(str, tmp);
+    dest.set(tmp.subarray(0, r.written!));
+    return { read: r.read!, written: r.written! };
+  }
+  const r = utf8Enc.encodeInto(str, dest);
+  return { read: r.read!, written: r.written! };
+}
 const utf8Dec = new TextDecoder('utf-8');
 const utf8Strict = new TextDecoder('utf-8', { fatal: true });
 
@@ -287,7 +299,7 @@ export function createBuffer() {
     const [off, len] = writeArgs(buf, offset, length);
     if (enc === Enc.UTF8) {
       if (len === 0) return 0;
-      return utf8Enc.encodeInto(str, buf.subarray(off, off + len)).written!;
+      return utf8EncodeInto(str, buf.subarray(off, off + len)).written;
     }
     return writeInto(buf, encode(str, enc), off, len);
   };

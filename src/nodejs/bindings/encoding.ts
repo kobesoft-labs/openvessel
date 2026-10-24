@@ -2,7 +2,7 @@
 // (toASCII / toUnicode), which url.ts shares.
 
 import { fromShape } from './shape.ts';
-import { latin1 } from './buffer.ts';
+import { latin1, utf8EncodeInto } from './buffer.ts';
 
 const utf8Enc = new TextEncoder();
 const utf8Dec = new TextDecoder('utf-8', { ignoreBOM: true });
@@ -186,9 +186,9 @@ export function createEncodingBinding() {
     encodeIntoResults,
 
     encodeInto(source: string, dest: Uint8Array) {
-      const r = utf8Enc.encodeInto(source, dest);
-      encodeIntoResults[0] = r.read!;
-      encodeIntoResults[1] = r.written!;
+      const r = utf8EncodeInto(source, dest);
+      encodeIntoResults[0] = r.read;
+      encodeIntoResults[1] = r.written;
     },
 
     encodeUtf8String(str: string) {

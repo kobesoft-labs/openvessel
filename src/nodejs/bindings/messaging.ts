@@ -13,7 +13,19 @@ import * as loop from '../loop.ts';
 import { S } from '../state.ts';
 import { fromShape } from './shape.ts';
 import { emitAsyncInit } from './process.ts';
+import { cloneKeyObject, deserializeKeyObject, isKeyObjectClone } from './crypto/keys.ts';
 import { NativeBlob, NativeBroadcastChannel, NativeMessageChannel, NativeMessagePort, nativeStructuredClone } from '../web.ts';
+
+// Natives captured up front, and no for-of/spread over user-reachable iterators: user code may
+// replace Array.prototype[Symbol.iterator], Object.keys… and serialization must not call it.
+const objectKeys = Object.keys;
+const mapForEach = Map.prototype.forEach;
+const setForEach = Set.prototype.forEach;
+const copyArray = <T>(a: readonly T[]): T[] => {
+  const out: T[] = new Array(a.length);
+  for (let i = 0; i < a.length; i++) out[i] = a[i];
+  return out;
+};
 
 const kToken = Symbol('construct');
 const CLOSE = '__ovMessagePortClosed';
@@ -91,15 +103,13 @@ function modeOf(o: object): number | undefined {
   if (o instanceof NodeMessagePort) return kTransferable;
   const spec = (o as any)[kHostSpec] as HostObjectSpec | undefined;
   if (spec) return spec.mode;
-  // private symbols are own properties only
-  if (Object.prototype.hasOwnProperty.call(o, syms().mode)) {
-    const m = (o as any)[syms().mode];
-    return typeof m === 'number' && m >>> 0 === m ? m : kDisallowCloneAndTransfer;
-  }
-  return undefined;
+  // a private symbol (see emulatePrivateSymbols in util.ts): not inherited
+  const m = (o as any)[syms().mode];
+  if (m === undefined) return undefined;
+  return typeof m === 'number' && m >>> 0 === m ? m : kDisallowCloneAndTransfer;
 }
 
-const isUntransferable = (o: object) => Object.prototype.hasOwnProperty.call(o, syms().untransferable) && (o as any)[syms().untransferable] !== undefined;
+const isUntransferable = (o: object) => (o as any)[syms().untransferable] !== undefined;
 
 // Brand checks (internal slots), not instanceof: lib's Safe* classes have a null-prototype chain.
 const getter = (proto: object, name: string) => Object.getOwnPropertyDescriptor(proto, name)!.get!;
@@ -164,7 +174,7 @@ function readTransferList(arg: unknown): unknown[] {
 }
 
 function readIterable(o: any): unknown[] | null {
-  if (Array.isArray(o)) return [...o];
+  if (Array.isArray(o)) return copyArray(o);
   const m = o[Symbol.iterator];
   if (typeof m !== 'function') return null;
   const it = m.call(o);
@@ -187,29 +197,42 @@ function readIterable(o: any): unknown[] | null {
 // synchronously. A message that can't be serialized (ports, host objects…) leaves a gap record
 // and is only delivered the normal way.
 
-const RING_SIZE = 1 << 20; // power of two
+// A ring starts small and grows (a growable SharedArrayBuffer) while it is empty, so the many
+// channels a program makes don't each hold a megabyte. Sizes are powers of two.
+const RING_INIT = 1 << 14;
+const RING_MAX = 1 << 26;
+const RING_FIXED = 1 << 20; // without growable SharedArrayBuffers
 const GAP = 0xffffffff;
+const HDR = 16;
 
 class Ring {
-  readonly head: Int32Array; // [0] write position, [1] read position (wrapping int32)
-  readonly data: Uint8Array;
+  readonly head: Int32Array; // [0] write position, [1] read position (wrapping int32), [2] size
+  readonly data: Uint8Array; // tracks the buffer's length as it grows
   constructor(readonly sab: SharedArrayBuffer) {
-    this.head = new Int32Array(sab, 0, 2);
-    this.data = new Uint8Array(sab, 8);
+    this.head = new Int32Array(sab, 0, 3);
+    this.data = new Uint8Array(sab, HDR);
   }
   static create() {
-    return new Ring(new SharedArrayBuffer(8 + RING_SIZE));
+    let sab: SharedArrayBuffer;
+    try {
+      sab = new (SharedArrayBuffer as any)(HDR + RING_INIT, { maxByteLength: HDR + RING_MAX });
+    } catch {
+      sab = new SharedArrayBuffer(HDR + RING_FIXED);
+    }
+    const r = new Ring(sab);
+    r.head[2] = (sab as any).growable ? RING_INIT : RING_FIXED;
+    return r;
   }
-  #copyIn(pos: number, bytes: Uint8Array) {
-    const at = pos & (RING_SIZE - 1);
-    const first = Math.min(bytes.length, RING_SIZE - at);
+  #copyIn(size: number, pos: number, bytes: Uint8Array) {
+    const at = pos & (size - 1);
+    const first = Math.min(bytes.length, size - at);
     this.data.set(bytes.subarray(0, first), at);
     if (first < bytes.length) this.data.set(bytes.subarray(first), 0);
   }
-  #copyOut(pos: number, len: number) {
+  #copyOut(size: number, pos: number, len: number) {
     const out = new Uint8Array(len);
-    const at = pos & (RING_SIZE - 1);
-    const first = Math.min(len, RING_SIZE - at);
+    const at = pos & (size - 1);
+    const first = Math.min(len, size - at);
     out.set(this.data.subarray(at, at + first));
     if (first < len) out.set(this.data.subarray(0, len - first), first);
     return out;
@@ -219,18 +242,32 @@ class Ring {
     const len = payload ? payload.length : 0;
     const head = Atomics.load(this.head, 0);
     const tail = Atomics.load(this.head, 1);
+    let size = Atomics.load(this.head, 2);
+    const used = (head - tail) | 0;
     const need = 8 + len;
-    if (RING_SIZE - ((head - tail) | 0) < need + 8) {
+    if (size - used < need + 8 && used === 0 && (this.sab as any).growable) {
+      // the reader has nothing to read, so the size may change under the same positions
+      let want = size;
+      while (want < need + 8 && want < RING_MAX) want *= 2;
+      if (want > size) {
+        try {
+          (this.sab as any).grow(HDR + want);
+          size = want;
+          Atomics.store(this.head, 2, size);
+        } catch {}
+      }
+    }
+    if (size - used < need + 8) {
       // full: record only the gap, if even that fits
-      if (RING_SIZE - ((head - tail) | 0) < 8) return;
+      if (size - used < 8) return;
       payload = null;
     }
     const hdr = new Uint8Array(8);
     const dv = new DataView(hdr.buffer);
     dv.setUint32(0, payload ? payload.length : GAP, true);
     dv.setUint32(4, seq, true);
-    this.#copyIn(head, hdr);
-    if (payload) this.#copyIn((head + 8) | 0, payload);
+    this.#copyIn(size, head, hdr);
+    if (payload) this.#copyIn(size, (head + 8) | 0, payload);
     Atomics.store(this.head, 0, (head + 8 + (payload ? payload.length : 0)) | 0);
   }
   /** The next record without consuming it. */
@@ -238,11 +275,12 @@ class Ring {
     const head = Atomics.load(this.head, 0);
     const tail = Atomics.load(this.head, 1);
     if (head === tail) return null;
-    const dv = new DataView(this.#copyOut(tail, 8).buffer);
+    const size = Atomics.load(this.head, 2);
+    const dv = new DataView(this.#copyOut(size, tail, 8).buffer);
     const len = dv.getUint32(0, true);
     const seq = dv.getUint32(4, true);
     if (len === GAP) return { seq, payload: null, size: 8 };
-    return { seq, payload: this.#copyOut((tail + 8) | 0, len), size: 8 + len };
+    return { seq, payload: this.#copyOut(size, (tail + 8) | 0, len), size: 8 + len };
   }
   skip(size: number) {
     Atomics.store(this.head, 1, (Atomics.load(this.head, 1) + size) | 0);
@@ -275,7 +313,8 @@ function serialize(value: unknown, list: unknown[], source: NodeMessagePort | nu
   const S_ = S.perIsolateSymbols;
   const arrayBuffers: ArrayBuffer[] = [];
   const hosts: object[] = [];
-  for (const entry of list) {
+  for (let li = 0; li < list.length; li++) {
+    const entry = list[li];
     if (entry === null || (typeof entry !== 'object' && typeof entry !== 'function')) throw dataCloneError(E.untransferable);
     if (isUntransferable(entry)) throw dataCloneError(E.transferUnsupported);
     if (isArrayBuffer(entry)) {
@@ -300,7 +339,8 @@ function serialize(value: unknown, list: unknown[], source: NodeMessagePort | nu
     if (typeof fn !== 'function') continue;
     const nested = fn.call(h);
     if (!Array.isArray(nested)) continue;
-    for (const n of nested) {
+    for (let ni = 0; ni < nested.length; ni++) {
+      const n = nested[ni];
       if (n === null || typeof n !== 'object' || hosts.includes(n)) continue;
       if (modeOf(n) !== undefined) hosts.push(n);
     }
@@ -308,6 +348,7 @@ function serialize(value: unknown, list: unknown[], source: NodeMessagePort | nu
   const transferred = hosts.length;
 
   const memo = new Map<object, unknown>();
+  let hasKeys = false;
   const ref = (o: object, mode: number) => {
     if (mode === kDisallowCloneAndTransfer) throw dataCloneError(E.cloneUnsupported);
     const i = hosts.indexOf(o);
@@ -332,6 +373,15 @@ function serialize(value: unknown, list: unknown[], source: NodeMessagePort | nu
     const proto = Object.getPrototypeOf(v);
     const plain = proto === Object.prototype || proto === null;
     if (!plain && isNativeCloneable(v)) return v;
+    if (!plain) {
+      // a KeyObject (NativeKeyObject, a cloneable BaseObject in C++)
+      const key = cloneKeyObject(v);
+      if (key) {
+        hasKeys = true;
+        memo.set(v, key);
+        return key;
+      }
+    }
     const mode = modeOf(v);
     if (mode !== undefined) {
       const r = ref(v, mode);
@@ -356,13 +406,14 @@ function serialize(value: unknown, list: unknown[], source: NodeMessagePort | nu
     // any other object is written as a plain object of its own enumerable properties
     const out: Record<string, unknown> = {};
     memo.set(v, out);
-    for (const k of Object.keys(v)) out[k] = enc((v as any)[k]);
+    const keys = objectKeys(v);
+    for (let i = 0; i < keys.length; i++) out[keys[i]] = enc((v as any)[keys[i]]);
     return out;
   };
   const d = enc(value);
 
   // Finish: transferred objects give up their contents, cloned ones are copied
-  const transfer: Transferable[] = [...arrayBuffers];
+  const transfer: Transferable[] = copyArray(arrayBuffers);
   const ports: NodeMessagePort[] = [];
   let h: HostRec[] | undefined;
   let rings: Envelope['r'];
@@ -394,7 +445,7 @@ function serialize(value: unknown, list: unknown[], source: NodeMessagePort | nu
     }
   }
   const env: Envelope = { [ENV]: 0, d };
-  if (h) env.h = h;
+  if (h || hasKeys) env.h = h ?? [];
   if (rings) env.r = rings;
   return { env, transfer, ports, arrayBuffers };
 }
@@ -427,22 +478,26 @@ function deserialize(env: Envelope): { data: unknown; ports: NodeMessagePort[] |
   const fix = (v: unknown): unknown => {
     if (v === null || typeof v !== 'object' || seen.has(v)) return v;
     const proto = Object.getPrototypeOf(v);
-    if (proto === Object.prototype && typeof (v as any)[REF] === 'number' && Object.keys(v).length === 1) return objs[(v as any)[REF]];
+    if (proto === Object.prototype && typeof (v as any)[REF] === 'number' && objectKeys(v).length === 1) return objs[(v as any)[REF]];
+    if (isKeyObjectClone(v)) return deserializeKeyObject(v);
     seen.add(v);
     if (Array.isArray(v)) {
       for (let i = 0; i < v.length; i++) if (i in v) v[i] = fix(v[i]);
     } else if (isMap(v)) {
       const m = v as Map<unknown, unknown>;
-      const entries = [...m];
+      const entries: [unknown, unknown][] = [];
+      mapForEach.call(m, (x, k) => entries.push([k, x]));
       m.clear();
-      for (const [k, x] of entries) m.set(fix(k), fix(x));
+      for (let i = 0; i < entries.length; i++) m.set(fix(entries[i][0]), fix(entries[i][1]));
     } else if (isSet(v)) {
       const st = v as Set<unknown>;
-      const items = [...st];
+      const items: unknown[] = [];
+      setForEach.call(st, (x) => items.push(x));
       st.clear();
-      for (const x of items) st.add(fix(x));
+      for (let i = 0; i < items.length; i++) st.add(fix(items[i]));
     } else if (proto === Object.prototype || proto === null) {
-      for (const k of Object.keys(v)) (v as any)[k] = fix((v as any)[k]);
+      const keys = objectKeys(v);
+      for (let i = 0; i < keys.length; i++) (v as any)[keys[i]] = fix((v as any)[keys[i]]);
     }
     return v;
   };
@@ -639,7 +694,9 @@ export class NodeMessagePort {
     bcFlushPending = true;
     loop.macrotask(() => {
       bcFlushPending = false;
-      for (const p of [...bcAll]) {
+      const all = copyArray(bcAll);
+      for (let i = 0; i < all.length; i++) {
+        const p = all[i];
         while (p.#queue.length && p.#started && !p.#stopped && !p.#shut) p.#emit(p.#queue.shift()!);
         p.#checkDrained();
       }
@@ -704,7 +761,7 @@ export class NodeMessagePort {
     if (sib && msg.ports.includes(sib)) {
       // SiblingGroup::Dispatch: the message carrying the target port is dropped, and with it the channel
       if (msg.arrayBuffers.length) nativeStructuredClone(undefined, { transfer: msg.arrayBuffers });
-      for (const p of msg.ports) p.#detach();
+      for (let i = 0; i < msg.ports.length; i++) msg.ports[i].#detach();
       this.#peerClosed();
       S.process.emitWarning('The target port was posted to itself, and the communication channel was lost');
       return true;
@@ -719,7 +776,7 @@ export class NodeMessagePort {
       throw fromNativeError(e);
     }
     if (sib) sib.#inflight++;
-    for (const p of msg.ports) p.#detach();
+    for (let i = 0; i < msg.ports.length; i++) msg.ports[i].#detach();
     return true;
   }
 
@@ -765,7 +822,7 @@ export class NodeMessagePort {
   static drain(p: NodeMessagePort) {
     const q = p.#queue;
     p.#queue = [];
-    for (const e of q) p.#emit(e);
+    for (let i = 0; i < q.length; i++) p.#emit(q[i]);
     const ring = p.#recvRing;
     if (!ring || p.#shut) return;
     for (let r = ring.peek(); r && r.payload; r = ring.peek()) {
@@ -947,7 +1004,7 @@ export function createMessaging() {
         } catch (e) {
           throw fromNativeError(e);
         }
-        for (const p of msg.ports) NodeMessagePort.detach(p);
+        for (let i = 0; i < msg.ports.length; i++) NodeMessagePort.detach(msg.ports[i]);
         return deserialize(cloned).data;
       },
     },
