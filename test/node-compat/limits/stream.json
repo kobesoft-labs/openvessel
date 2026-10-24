@@ -1,0 +1,3 @@
+{
+  "test-stream-pipeline-http2.js": "Needs the HTTP/2 binding (node_http2.cc over nghttp2), which OpenVessel does not implement; porting it is a large project of its own."
+}

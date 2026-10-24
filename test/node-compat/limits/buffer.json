@@ -1,0 +1,3 @@
+{
+  "test-buffer-tostring-4gb.js": "Allocates a Buffer larger than 4 GiB, more memory than a browser tab can hand to one ArrayBuffer."
+}

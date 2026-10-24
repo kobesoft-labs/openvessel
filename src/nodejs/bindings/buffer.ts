@@ -4,8 +4,12 @@ import { fromShape } from './shape.ts';
 import { setCryptoBufferPrototype } from './crypto.ts';
 
 const utf8Enc = new TextEncoder();
-const utf8Dec = new TextDecoder('utf-8');
-const utf8Strict = new TextDecoder('utf-8', { fatal: true });
+// ignoreBOM: Node keeps a leading U+FEFF (the WHATWG decoder would strip it)
+const utf8Dec = new TextDecoder('utf-8', { ignoreBOM: true });
+const utf8Strict = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
+// v8::String::kMaxLength (64-bit)
+const kStringMaxLength = 0x1fffffe8;
 
 // string_decoder.encodings order: ascii, utf8, base64, utf16le, latin1, hex, buffer, base64url
 export const enum Enc {
@@ -30,6 +34,15 @@ function bytesOf(v: ArrayBufferView | ArrayBufferLike): Uint8Array {
   if (v instanceof Uint8Array) return v;
   if (ArrayBuffer.isView(v)) return new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
   return new Uint8Array(v as ArrayBuffer);
+}
+
+function notDetached(v: ArrayBufferView | ArrayBufferLike) {
+  const ab = (ArrayBuffer.isView(v) ? v.buffer : v) as ArrayBuffer & { detached?: boolean };
+  if (ab.detached) {
+    const e = new Error('Cannot validate on a detached buffer') as Error & { code: string };
+    e.code = 'ERR_INVALID_STATE';
+    throw e;
+  }
 }
 
 function sliceArgs(buf: Uint8Array, start: unknown, end: unknown): [number, number] {
@@ -104,7 +117,30 @@ function base64(b: Uint8Array, s: number, e: number, url: boolean): string {
   return out;
 }
 
+/** Length of the string StringBytes::Encode would ask V8 for (UTF-8: the byte count). */
+function encodedLength(enc: Enc, n: number): number {
+  switch (enc) {
+    case Enc.UCS2:
+      return n >> 1;
+    case Enc.HEX:
+      return n * 2;
+    case Enc.BASE64:
+      return Math.ceil(n / 3) * 4;
+    case Enc.BASE64URL:
+      return Math.ceil((n * 4) / 3);
+    default:
+      return n;
+  }
+}
+
+function stringTooLong(): never {
+  const e = new Error(`Cannot create a string longer than 0x${kStringMaxLength.toString(16)} characters`) as Error & { code: string };
+  e.code = 'ERR_STRING_TOO_LONG';
+  throw e;
+}
+
 export function decode(b: Uint8Array, enc: Enc, s = 0, e = b.length): string {
+  if (encodedLength(enc, e - s) > kStringMaxLength) stringTooLong();
   switch (enc) {
     case Enc.UTF8:
     case Enc.BUFFER:
@@ -320,7 +356,8 @@ export function createBuffer() {
       return n;
     },
     copy(source: Uint8Array, target: Uint8Array, targetStart: number, sourceStart: number, nb: number) {
-      target.set(source.subarray(sourceStart, sourceStart + nb), targetStart);
+      // the target may be any TypedArray (a Uint16Array…): copy bytes, not elements
+      bytesOf(target).set(bytesOf(source).subarray(sourceStart, sourceStart + nb), targetStart);
       return nb;
     },
     copyArrayBuffer(dest: ArrayBuffer, destOffset: number, src: ArrayBuffer, srcOffset: number, len: number) {
@@ -340,8 +377,13 @@ export function createBuffer() {
       const t = bytesOf(target).subarray(targetStart, Math.min(targetEnd, target.length));
       return b.compare(s, t);
     },
-    fill(buf: Uint8Array, value: string | Uint8Array, start: number, end: number, encoding?: string) {
+    fill(buf: Uint8Array, value: unknown, start: number, end: number, encoding?: string) {
       if (start > end || end > buf.length) return -2;
+      if (typeof value !== 'string' && !ArrayBuffer.isView(value)) {
+        // everything else is coerced to a uint32 and its low byte repeated (node_buffer.cc Fill)
+        Uint8Array.prototype.fill.call(buf, Number(value) >>> 0 & 255, start, end);
+        return undefined;
+      }
       const bytes = typeof value === 'string' ? encode(value, encodingOf(encoding)) : bytesOf(value);
       if (bytes.length === 0) return -1;
       for (let i = start; i < end; i += bytes.length) buf.set(bytes.subarray(0, Math.min(bytes.length, end - i)), i);
@@ -368,7 +410,8 @@ export function createBuffer() {
       const off = indexOfOffset(buf.length, Math.trunc(byteOffset), 1, forward);
       if (off <= -1 || buf.length === 0) return -1;
       const v = num & 0xff;
-      return forward ? buf.indexOf(v, off) : buf.lastIndexOf(v, off);
+      // (not buf.indexOf: that is Buffer.prototype.indexOf, which calls back here)
+      return forward ? Uint8Array.prototype.indexOf.call(buf, v, off) : Uint8Array.prototype.lastIndexOf.call(buf, v, off);
     },
     swap16(buf: Uint8Array) {
       for (let i = 0; i + 1 < buf.length; i += 2) {
@@ -391,6 +434,7 @@ export function createBuffer() {
       for (let i = 0; i + 7 < buf.length; i += 8) buf.subarray(i, i + 8).reverse();
     },
     isUtf8(v: ArrayBufferView | ArrayBuffer) {
+      notDetached(v);
       try {
         utf8Strict.decode(bytesOf(v));
         return true;
@@ -399,6 +443,7 @@ export function createBuffer() {
       }
     },
     isAscii(v: ArrayBufferView | ArrayBuffer) {
+      notDetached(v);
       const x = bytesOf(v);
       for (let i = 0; i < x.length; i++) if (x[i] > 0x7f) return false;
       return true;

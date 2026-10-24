@@ -263,8 +263,20 @@ export function createAsyncWrap() {
   ids[C.kTriggerAsyncId] = 0;
   ids[C.kAsyncIdCounter] = 1;
   ids[C.kDefaultTriggerAsyncId] = -1;
+  // AsyncWrap::EmitDestroy: ids collect in a list that a native immediate drains
+  let destroyHook: ((id: number) => void) | null = null;
+  let destroyIds: number[] = [];
+  const drainDestroyIds = () => {
+    while (destroyIds.length) {
+      const list = destroyIds;
+      destroyIds = [];
+      for (const id of list) destroyHook?.(id);
+    }
+  };
   return Object.assign(b, {
-    setupHooks: () => {},
+    setupHooks(hooks: { destroy?: (id: number) => void }) {
+      destroyHook = hooks.destroy ?? null;
+    },
     setCallbackTrampoline: () => {},
     pushAsyncContext(asyncId: number, triggerId: number, resource: unknown) {
       const f = b.async_hook_fields as Uint32Array;
@@ -307,7 +319,11 @@ export function createAsyncWrap() {
       native.length = 0;
       resources.length = 0;
     },
-    queueDestroyAsyncId: () => {},
+    queueDestroyAsyncId(id: number) {
+      if ((b.async_hook_fields as Uint32Array)[C.kDestroy] === 0 || !destroyHook) return;
+      if (destroyIds.length === 0) loop.macrotask(() => loop.scope(drainDestroyIds));
+      destroyIds.push(id);
+    },
     setPromiseHooks: () => {},
     getPromiseHooks: () => [undefined, undefined, undefined, undefined],
     registerDestroyHook: () => {},
