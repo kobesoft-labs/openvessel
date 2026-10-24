@@ -1,5 +1,5 @@
 node_modules/
-dist/
+/dist/
 corpus/sites/
 .DS_Store
 test/node-compat/.node/

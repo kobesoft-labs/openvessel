@@ -1,42 +1,45 @@
-// globalThis.__ovAmaro: what Node's internal/deps/amaro expects (transformSync), served by sucrase.
-// The transform lives in ts-strip.js, fetched synchronously the first time TypeScript is loaded.
+// globalThis.__ovAmaro: Node's internal/deps/amaro. The runtime serves Node's own amaro (amaro.js, the
+// version Node bundles: swc compiled to WebAssembly), fetched synchronously the first time TypeScript
+// is stripped. sucrase (ts-strip.js) is kept for require(esm)'s ESM → CommonJS rewrite.
 
 import { S } from './state.ts';
 import { NativeXMLHttpRequest } from './web.ts';
 
-let transform: ((source: string, options: object) => { code: string; map?: string }) | null = null;
-
-function load() {
-  if (transform) return transform;
+function runtimeFile(name: string): string {
   const xhr = new NativeXMLHttpRequest();
-  xhr.open('GET', `${S.runtimeBase}/ts-strip.js`, false);
+  xhr.open('GET', `${S.runtimeBase}/${name}`, false);
   xhr.send();
-  if (xhr.status !== 200) throw new Error(`could not load the TypeScript transform (${xhr.status})`);
-  (0, eval)(`${xhr.responseText}\n//# sourceURL=${S.runtimeBase}/ts-strip.js`);
-  transform = (globalThis as any).__ovSucraseTransform;
-  return transform!;
+  if (xhr.status !== 200) throw new Error(`could not load ${name} (${xhr.status})`);
+  return xhr.responseText;
 }
+
+let sucraseLoaded = false;
 
 /** sucrase's transform (loaded on first use). */
 export function sucrase(): { transform: (source: string, options: object) => { code: string } } {
-  load();
+  if (!sucraseLoaded) {
+    (0, eval)(`${runtimeFile('ts-strip.js')}\n//# sourceURL=${S.runtimeBase}/ts-strip.js`);
+    sucraseLoaded = true;
+  }
   return (globalThis as any).__ovSucrase;
 }
 
-Object.defineProperty(globalThis, '__ovAmaro', {
-  value: {
-    transformSync(source: string, options: { mode?: string; sourceMap?: boolean; filename?: string } = {}) {
-      try {
-        return load()(source, options);
-      } catch (e: any) {
-        if (e instanceof SyntaxError || /Unexpected token|Expected/.test(String(e?.message))) {
-          // the shape amaro throws for invalid syntax
-          throw { code: 'InvalidSyntax', message: e.message, filename: options.filename ?? '', startLine: e.loc?.line ?? 0, snippet: '' };
-        }
-        throw e;
+type Amaro = { transformSync(source: string, options?: object): { code: string; map?: string } };
+let amaro: Amaro | null = null;
+
+/** Called by the amaro override with Node's internal require (for buffer and util). */
+function amaroModule(require: (id: string) => unknown): Amaro {
+  return {
+    transformSync(source, options) {
+      if (!amaro) {
+        const module = { exports: {} as Amaro };
+        const fn = (0, eval)(`(function (exports, require, module) {${runtimeFile('amaro.js')}\n})\n//# sourceURL=${S.runtimeBase}/amaro.js`);
+        fn(module.exports, (id: string) => require(id.replace(/^node:/, '')), module);
+        amaro = module.exports;
       }
+      return amaro.transformSync(source, options);
     },
-  },
-  configurable: true,
-  enumerable: false,
-});
+  };
+}
+
+Object.defineProperty(globalThis, '__ovAmaro', { value: amaroModule, configurable: true, enumerable: false });

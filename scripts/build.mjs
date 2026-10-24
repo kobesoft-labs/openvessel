@@ -74,6 +74,12 @@ if (watch) {
     cpSync(join(root, 'vendor/node/LICENSE'), join(dist, 'runtime/NODE-LICENSE.txt'));
   }
   else console.warn('vendor/node missing: run node scripts/gen-node-data.mjs to build the ported Node runtime');
+  // Node's amaro (swc as WebAssembly), the same version Node bundles; loaded on first type stripping
+  cpSync(join(root, 'node_modules/amaro/dist/index.js'), join(dist, 'runtime/amaro.js'));
+  writeFileSync(
+    join(dist, 'runtime/AMARO-LICENSE.txt'),
+    `${readFileSync(join(root, 'node_modules/amaro/LICENSE.md'), 'utf8')}\n\nswc (compiled into amaro.js):\n\n${readFileSync(join(root, 'node_modules/amaro/dist/LICENSE'), 'utf8')}`,
+  );
   await buildCompat(join(dist, 'runtime/compat'));
   console.log('built dist/');
 }
