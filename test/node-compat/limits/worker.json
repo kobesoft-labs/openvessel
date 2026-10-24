@@ -1,0 +1,13 @@
+{
+  "test-worker-debug.js": "Drives the V8 inspector's NodeWorker domain (attaching to worker threads); a browser worker exposes no inspector to connect to.",
+  "test-worker-heap-statistics.js": "Its fixture waits for the inspector's NodeWorker.attachedToWorker event; a browser worker exposes no inspector.",
+  "test-worker-name.js": "Its fixture reads the worker title from the inspector's NodeWorker.attachedToWorker event; a browser worker exposes no inspector.",
+  "test-worker-heap-snapshot.js": "Needs a V8 heap snapshot of the worker thread; the browser gives JavaScript no heap snapshot API.",
+  "test-worker-exit-heapsnapshot.js": "Needs v8.getHeapSnapshot(); the browser gives JavaScript no heap snapshot API.",
+  "test-worker-resource-limits.js": "Needs V8 heap limits per thread and the worker's out-of-memory termination; a Web Worker's heap size can't be limited from JavaScript.",
+  "test-worker-nearheaplimit-deadlock.js": "Needs V8 heap limits per thread and the worker's out-of-memory termination; a Web Worker's heap size can't be limited from JavaScript.",
+  "test-worker-dns-terminate-during-query.js": "Runs a DNS server on a UDP socket; a browser can't open UDP sockets.",
+  "test-worker-http2-generic-streams-terminate.js": "Needs http2 over a JS stream (internalBinding('js_stream') feeding nghttp2), which OpenVessel doesn't provide.",
+  "test-worker-http2-stream-terminate.js": "Needs http2 over a JS stream (internalBinding('js_stream') feeding nghttp2), which OpenVessel doesn't provide.",
+  "test-worker-terminate-http2-respond-with-file.js": "Needs http2 over a JS stream (internalBinding('js_stream') feeding nghttp2), which OpenVessel doesn't provide."
+}

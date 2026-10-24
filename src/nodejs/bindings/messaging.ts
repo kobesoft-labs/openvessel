@@ -230,7 +230,7 @@ function readIterable(o: any): unknown[] | null {
 // A ring starts small and grows (a growable SharedArrayBuffer) while it is empty, so the many
 // channels a program makes don't each hold a megabyte. Sizes are powers of two.
 const RING_INIT = 1 << 14;
-const RING_MAX = 1 << 26;
+const RING_MAX = 1 << 20; // reserved address space per ring: keep it small, programs make thousands
 const RING_FIXED = 1 << 20; // without growable SharedArrayBuffers
 const GAP = 0xffffffff;
 const HDR = 16;
@@ -987,13 +987,11 @@ export class NodeMessagePort {
   }
 
   ref() {
-    if (this.#shut) return;
     this.#handle.refed = true;
     loop.scheduleAliveCheck();
   }
 
   unref() {
-    if (this.#shut) return;
     this.#handle.refed = false;
     loop.scheduleAliveCheck();
   }
