@@ -2,7 +2,6 @@
 // the callback scope that runs process.nextTick work, and process exit.
 
 import { S } from './state.ts';
-import { nativeQueueMicrotask } from './web.ts';
 
 const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
 const nativeClearTimeout = globalThis.clearTimeout.bind(globalThis);
@@ -87,6 +86,10 @@ const kHasTickScheduled = 0;
 const kHasRejectionToWarn = 1;
 let inTicks = false;
 let scopeDepth = 0;
+/** set when a scope() call ended in an uncaught exception */
+let scopeThrew = false;
+/** calling a phase's callback again after an uncaught exception: no tick processing in between */
+let retrying = false;
 
 export function setTickCallback(fn: () => void, info: Uint8Array) {
   tickCallback = fn;
@@ -109,13 +112,18 @@ export function runTicks() {
   }
 }
 
-let tickMicrotaskQueued = false;
-/** nextTick was called outside a callback scope (e.g. from a promise job): run ticks soon. */
+let tickTaskQueued = false;
+/**
+ * nextTick was called outside a callback scope (e.g. from a promise job). Node runs such ticks
+ * only once the microtask queue has drained (runMicrotasks() inside processTicksAndRejections, or
+ * the checkpoint when a callback scope closes), so: a task, not a microtask. Any callback that
+ * gets in first runs them before itself (see scope()).
+ */
 export function onTickScheduled() {
-  if (inTicks || scopeDepth > 0 || tickMicrotaskQueued) return;
-  tickMicrotaskQueued = true;
-  nativeQueueMicrotask(() => {
-    tickMicrotaskQueued = false;
+  if (inTicks || scopeDepth > 0 || tickTaskQueued) return;
+  tickTaskQueued = true;
+  macrotask(() => {
+    tickTaskQueued = false;
     if (scopeDepth === 0) {
       runTicks();
       afterCallback();
@@ -125,12 +133,15 @@ export function onTickScheduled() {
 
 /** Calls a JS entry point the way libuv → C++ → JS would, then drains ticks. */
 export function scope<T>(fn: (...a: any[]) => T, thisArg?: unknown, ...args: any[]): T | undefined {
+  // ticks left by promise jobs come before the next callback from the loop
+  if (scopeDepth === 0 && tickTaskQueued && !retrying) runTicks();
   scopeDepth++;
   let r: T | undefined;
   try {
     r = fn.apply(thisArg, args);
   } catch (e) {
     scopeDepth--;
+    scopeThrew = true;
     triggerUncaughtException(e, false);
     afterCallback();
     return undefined;
@@ -182,7 +193,15 @@ function fireTimers() {
   timer.id = null;
   if (!processTimers || S.exiting) return;
   const t = now();
-  const next = scope(processTimers, S.process, t) ?? 0;
+  // Environment::RunTimers calls processTimers again after an uncaught exception: the rest of
+  // the due timers still run
+  let next: number;
+  do {
+    scopeThrew = false;
+    next = scope(processTimers, S.process, t) ?? 0;
+    retrying = true;
+  } while (scopeThrew && !S.exiting);
+  retrying = false;
   if (next !== 0 && timer.id === null) {
     const abs = Math.abs(next);
     timer.refed = next > 0;
@@ -222,7 +241,14 @@ function scheduleImmediates(force = false) {
     if (immediateInfo[kCount] === 0 && immediateInfo[kHasOutstanding] === 0) return;
     // only unref'd immediates and nothing else alive: the loop ends without running them
     if (started && immediateInfo[kRefCount] === 0 && !alive()) return scheduleAliveCheck();
-    scope(processImmediate!, S.process);
+    // Environment::CheckImmediate: after an uncaught exception, the rest of the queue
+    // (kHasOutstanding) runs in the same check phase
+    do {
+      scopeThrew = false;
+      scope(processImmediate!, S.process);
+      retrying = true;
+    } while (scopeThrew && immediateInfo[kHasOutstanding] && !S.exiting);
+    retrying = false;
   });
 }
 
