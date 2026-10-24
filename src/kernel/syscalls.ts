@@ -16,7 +16,7 @@ const enc = new TextEncoder();
 export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter) {
   const vfs = kernel.vfs;
   const watchers = new Map<string, () => void>(); // `${pid}:${id}` → stop
-  const readers = new Map<string, { active: boolean }>(); // `${pid}:${fd}`
+  const readers = new Map<string, { active: boolean; release?: () => void; file?: OpenFile; rid?: number }>(); // `${pid}:${fd}`
   const reservedTids = new Set<number>();
   let nextTid = 100000;
 
@@ -106,6 +106,9 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       }
       case 'close':
         if ((globalThis as any).__ovTrace && proc.fds.get(a.fd)?.kind === 'pipe') console.warn(`[trace] pid ${proc.pid} (${proc.argv.slice(0, 3).join(' ')}) close pipe fd ${a.fd}`, new Error().stack?.split('\n').slice(0, 1).join(''));
+        // a read loop still waiting on this fd holds a reference: drop it, so closing the last fd
+        // really closes the file (the peer of a socket sees EOF)
+        readers.get(`${proc.pid}:${a.fd}`)?.release?.();
         proc.closeFd(a.fd);
         return null;
       case 'read': {
@@ -563,13 +566,19 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
     switch (msg?.t) {
       case 'readStart': {
         const key = `${proc.pid}:${msg.fd}`;
-        const existing = readers.get(key);
-        if (existing?.active) return;
-        const state = { active: true };
-        readers.set(key, state);
         const f = proc.fds.get(msg.fd);
+        const existing = readers.get(key);
+        // a loop still waiting on this file (stopped, not yet ended) just carries on
+        if (f && existing && existing.file === f) {
+          existing.active = true;
+          existing.rid = msg.rid;
+          return;
+        }
+        // rid: the reader's tag, echoed so data for a closed reader never reaches a reused fd
+        const state: { active: boolean; release?: () => void; file?: OpenFile; rid?: number } = { active: true, file: f, rid: msg.rid };
+        readers.set(key, state);
         if (!f) {
-          kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, data: null });
+          kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, rid: msg.rid, data: null });
           return;
         }
         f.ref();
@@ -582,6 +591,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
           state.active = false;
           f.unref();
         };
+        state.release = release;
         proc.onExit.add(release);
         (async () => {
           try {
@@ -589,14 +599,14 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
               const d = await f.read(65536);
               if (proc.state !== 'running') break;
               if (d.length === 0) {
-                kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, data: null });
+                kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, rid: state.rid, data: null });
                 state.active = false;
                 break;
               }
-              kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, data: d });
+              kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, rid: state.rid, data: d });
             }
           } catch (e) {
-            kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, data: null });
+            kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, rid: state.rid, data: null });
           } finally {
             proc.onExit.delete(release);
             release();

@@ -20,21 +20,22 @@ function errno(code: string): number {
   return S.internalBinding('uv')[`UV_${code}`] ?? -1;
 }
 
-// fd → stream receiving its 'fd-data'
+// reader tag → stream receiving its 'fd-data' (by tag, not fd: a closed stream's late data must
+// not reach the stream that reuses its fd number)
 const readers = new Map<number, LibuvStreamWrap>();
+let nextRid = 1;
 let handlerInstalled = false;
 function installHandler() {
   if (handlerInstalled) return;
   handlerInstalled = true;
-  S.kernelHandlers.set('fd-data', (msg: { fd?: number; id?: number; data: Uint8Array | null; err?: string }) => {
+  S.kernelHandlers.set('fd-data', (msg: { fd?: number; rid?: number; id?: number; data: Uint8Array | null; err?: string }) => {
     if (msg.id !== undefined) {
       const cb = oneShot.get(msg.id);
       oneShot.delete(msg.id);
       cb?.(msg.data, msg.err);
       return;
     }
-    if (msg.fd === undefined) return;
-    readers.get(msg.fd)?._onData(msg.data);
+    if (msg.rid !== undefined) readers.get(msg.rid)?._onData(msg.data);
   });
 }
 
@@ -109,6 +110,9 @@ export class LibuvStreamWrap extends HandleWrap {
   isStreamBase = true;
   protected _fd = -1;
   #userBuffer: Uint8Array | null = null;
+  #rid = 0;
+  /** data the kernel had already read when reading stopped, delivered on the next readStart */
+  #stash: (Uint8Array | null)[] = [];
 
   get fd() {
     return this._fd;
@@ -120,18 +124,29 @@ export class LibuvStreamWrap extends HandleWrap {
   readStart(): number {
     if (this._fd < 0) return errno('EBADF');
     installHandler();
-    readers.set(this._fd, this);
+    if (!this.#rid) {
+      this.#rid = nextRid++;
+      readers.set(this.#rid, this);
+    }
     this.reading = true;
     this.setActive(true);
-    post({ t: 'readStart', fd: this._fd });
+    post({ t: 'readStart', fd: this._fd, rid: this.#rid });
+    if (this.#stash.length) this.#scheduleFlush();
     return 0;
   }
 
+  #flushQueued = false;
+  #scheduleFlush() {
+    if (this.#flushQueued) return;
+    this.#flushQueued = true;
+    loop.macrotask(() => {
+      this.#flushQueued = false;
+      while (this.reading && !this._closed && this.#stash.length) this.#deliver(this.#stash.shift()!);
+    });
+  }
+
   readStop(): number {
-    if (this._fd >= 0 && readers.get(this._fd) === this) {
-      post({ t: 'readStop', fd: this._fd });
-      readers.delete(this._fd);
-    }
+    if (this._fd >= 0 && this.reading) post({ t: 'readStop', fd: this._fd });
     this.reading = false;
     this.setActive(false);
     return 0;
@@ -144,28 +159,43 @@ export class LibuvStreamWrap extends HandleWrap {
   /** @internal kernel data (null = EOF) */
   _onData(data: Uint8Array | null) {
     if (this._closed || !this.onread) return;
+    // stopped (or older data still waiting): keep it, in order, for the next readStart
+    if (!this.reading || this.#stash.length) {
+      this.#stash.push(data);
+      if (this.reading) this.#scheduleFlush();
+      return;
+    }
+    this.#deliver(data);
+  }
+
+  #deliver(data: Uint8Array | null) {
+    const onread = this.onread;
+    if (!onread) return;
     if (data === null) {
-      readers.delete(this._fd);
       this.reading = false;
       this.setActive(false);
       streamBaseState[kReadBytesOrError] = UV_EOF;
       streamBaseState[kArrayBufferOffset] = 0;
-      loop.scope(this.onread, this, undefined);
+      loop.scope(onread, this, undefined);
       return;
     }
     this.bytesRead += data.length;
     if (this.#userBuffer) {
       const n = Math.min(data.length, this.#userBuffer.length);
       this.#userBuffer.set(data.subarray(0, n));
+      if (n < data.length) {
+        this.#stash.unshift(data.subarray(n));
+        this.#scheduleFlush();
+      }
       streamBaseState[kReadBytesOrError] = n;
       streamBaseState[kArrayBufferOffset] = 0;
-      loop.scope(this.onread, this, this.#userBuffer.buffer);
+      loop.scope(onread, this, this.#userBuffer.buffer);
       return;
     }
     const ab = data.byteOffset === 0 && data.byteLength === data.buffer.byteLength ? (data.buffer as ArrayBuffer) : data.slice().buffer;
     streamBaseState[kReadBytesOrError] = data.length;
     streamBaseState[kArrayBufferOffset] = 0;
-    loop.scope(this.onread, this, ab);
+    loop.scope(onread, this, ab);
   }
 
   #write(bytes: Uint8Array): number {
@@ -184,6 +214,11 @@ export class LibuvStreamWrap extends HandleWrap {
   }
 
   writeBuffer(_req: unknown, buf: ArrayBufferView) {
+    if (!ArrayBuffer.isView(buf)) {
+      const e = new TypeError('Second argument must be a buffer') as TypeError & { code: string };
+      e.code = 'ERR_INVALID_ARG_TYPE';
+      throw e;
+    }
     return this.#write(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength));
   }
   writev(_req: unknown, chunks: unknown[], allBuffers: boolean) {
@@ -241,6 +276,8 @@ export class LibuvStreamWrap extends HandleWrap {
 
   protected override _onClose() {
     if (this.reading) this.readStop();
+    readers.delete(this.#rid);
+    this.#stash = [];
     if (this._fd > 2) {
       try {
         sys('close', { fd: this._fd });
