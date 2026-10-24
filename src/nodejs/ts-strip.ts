@@ -2,7 +2,7 @@
 // WebAssembly module). Built as its own script and loaded on first use by typescript.ts.
 import { transform } from 'sucrase';
 
-(globalThis as any).__ovSucraseTransform = (source: string, options: { mode?: string; sourceMap?: boolean; filename?: string }) => {
+const sucraseTransform = (source: string, options: { mode?: string; sourceMap?: boolean; filename?: string }) => {
   const r = transform(source, {
     transforms: ['typescript'],
     disableESTransforms: true,
@@ -13,5 +13,9 @@ import { transform } from 'sucrase';
   return { code: r.code, map: r.sourceMap ? JSON.stringify(r.sourceMap) : undefined };
 };
 
-// the raw transform, for require(esm) (ESM → CommonJS shape, see module_wrap.ts)
-(globalThis as any).__ovSucrase = { transform };
+// non-enumerable: Node's tests check that nothing leaks onto the global
+Object.defineProperties(globalThis, {
+  __ovSucraseTransform: { value: sucraseTransform, configurable: true, writable: true },
+  // the raw transform, for require(esm) (ESM → CommonJS shape, see module_wrap.ts)
+  __ovSucrase: { value: { transform }, configurable: true, writable: true },
+});

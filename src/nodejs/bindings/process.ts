@@ -397,7 +397,7 @@ export function createMksnapshot() {
 
 export function createConfig() {
   const b = fromShape('config');
-  return Object.assign(b, { hasInspector: false, isDebugBuild: false, noBrowserGlobals: false, getDefaultLocale: () => 'en-US' });
+  return Object.assign(b, { hasInspector: true, isDebugBuild: false, noBrowserGlobals: false, getDefaultLocale: () => 'en-US' });
 }
 
 export function createUv() {

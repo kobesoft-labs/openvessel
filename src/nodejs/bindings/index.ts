@@ -47,6 +47,7 @@ import { createV8 } from './v8.ts';
 import { createHeapUtils } from './heap_utils.ts';
 import { createWasiBinding } from './wasi.ts';
 import { createTlsWrap } from './tls_wrap.ts';
+import { createInspector } from './inspector.ts';
 
 export type BindingFactory = () => any;
 
@@ -89,6 +90,7 @@ export const factories: Record<string, BindingFactory> = {
   task_queue: createTaskQueue,
   tcp_wrap: createTcpWrap,
   tls_wrap: createTlsWrap,
+  inspector: createInspector,
   timers: createTimers,
   trace_events: createTraceEvents,
   tty_wrap: createTtyWrap,

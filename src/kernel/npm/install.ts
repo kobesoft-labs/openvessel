@@ -65,6 +65,29 @@ function pinnedSpec(from: Node, dep: string, spec: string): string {
   return pin ? pin.spec : spec;
 }
 
+/**
+ * Old majors with only native builds, moved to the first line that has a wasm build (same API for
+ * what the callers use). sharp before 0.33 bundled libvips as a .node addon.
+ */
+const UPGRADES: { name: string; range: string; to: string }[] = [{ name: 'sharp', range: '<0.33.0', to: '^0.34.0' }];
+
+/** The `packages:` list of pnpm-workspace.yaml (other keys hold lists too: overrides, excludes…). */
+function pnpmWorkspacePackages(yaml: string): string[] {
+  const out: string[] = [];
+  let inPackages = false;
+  for (const line of yaml.split(/\r?\n/)) {
+    if (/^\S/.test(line)) {
+      inPackages = /^packages\s*:/.test(line);
+      const inline = /^packages\s*:\s*\[(.*)\]/.exec(line);
+      if (inline) for (const p of inline[1].split(',')) out.push(p.trim().replace(/^['"]|['"]$/g, ''));
+      continue;
+    }
+    const m = inPackages && /^\s*-\s*['"]?([^'"#\n]+?)['"]?\s*(#.*)?$/.exec(line);
+    if (m) out.push(m[1]);
+  }
+  return out.filter(Boolean);
+}
+
 /** Packages that are never installed (native-only and optional at runtime). */
 const SKIP = new Set(['fsevents', 'bufferutil', 'utf-8-validate', 'cpu-features', 'ssh2']);
 
@@ -144,6 +167,16 @@ function withEmnapi(name: string, deps: Record<string, string> | undefined): Rec
   return { '@emnapi/core': '^1.4.0', '@emnapi/runtime': '^1.4.0', ...deps };
 }
 
+/**
+ * sharp 0.35+ ships its wasm build only under @img/sharp-webcontainers-wasm32, but on linux-x64
+ * it falls back to require('@img/sharp-wasm32'), which then finds whatever version is hoisted.
+ * Its own version, as its own dependency, lands next to it.
+ */
+function withSharpWasm(n: { name: string; version: string }, opt: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (n.name !== 'sharp' || !semver.satisfies(n.version, '>=0.35.0-0', { includePrerelease: true }) || opt?.['@img/sharp-wasm32']) return opt;
+  return { ...opt, '@img/sharp-wasm32': n.version };
+}
+
 function platformOk(pkg: { os?: string[]; cpu?: string[] }): boolean {
   const check = (list: string[] | undefined, want: string) => {
     if (!list || !list.length) return true;
@@ -200,7 +233,7 @@ export class Installer {
       // (written into the package's own dependencies so peer-set checks see it too)
       if (!n.isRoot) pkg.dependencies = withEmnapi(n.name, pkg.dependencies);
       add(pkg.dependencies, n.dev, n.optional, false);
-      if (!this.o.omitOptional) add(withWasiBinding(pkg.optionalDependencies), n.dev, true, false);
+      if (!this.o.omitOptional) add(withWasiBinding(withSharpWasm(n, pkg.optionalDependencies)), n.dev, true, false);
       if (includeDev && !this.o.omitDev) add(pkg.devDependencies, true, false, false);
       if (!this.o.omitPeer && !n.isRoot) {
         const meta = pkg.peerDependenciesMeta ?? {};
@@ -293,7 +326,7 @@ export class Installer {
     let pnpmWs: string[] = [];
     try {
       const y = dec.decode(this.o.vfs.readFile(path.join(this.o.root, 'pnpm-workspace.yaml')));
-      pnpmWs = [...y.matchAll(/^\s*-\s*['"]?([^'"\n]+)['"]?\s*$/gm)].map((m) => m[1]);
+      pnpmWs = pnpmWorkspacePackages(y);
     } catch {}
     for (const pat of [...patterns, ...pnpmWs]) {
       if (pat.startsWith('!')) continue;
@@ -503,7 +536,9 @@ export class Installer {
     }
     range = range.trim();
     const p = await this.o.registry.packument(realName);
-    const version = this.pickVersion(p, realName, range);
+    let version = this.pickVersion(p, realName, range);
+    const up = version && UPGRADES.find((u) => u.name === realName && semver.satisfies(version!, u.range));
+    if (up) version = this.pickVersion(p, realName, up.to);
     if (!version) throw Object.assign(new Error(`No matching version found for ${realName}@${range}.`), { code: 'ETARGET' });
     let pkg = p.versions[version];
     let source: Source = { kind: 'registry', tarball: pkg.dist.tarball, integrity: pkg.dist.integrity, shasum: pkg.dist.shasum, realName: realName !== name ? realName : undefined };
@@ -547,6 +582,11 @@ export class Installer {
     const prev = this.readHiddenLock();
     const want = new Map<string, Node>();
     for (const n of this.nodes) if (!n.isWorkspace) want.set(this.rel(n.dir), n);
+    // workspace packages are linked into the root node_modules, like npm does
+    for (const ws of this.workspaces.values()) {
+      const link = path.join(this.root.nodeModules, ws.name);
+      want.set(this.rel(link), ws);
+    }
     // prune packages that are no longer in the tree
     for (const loc of Object.keys(prev)) {
       if (!loc.startsWith('node_modules/') && !loc.includes('/node_modules/')) continue;
@@ -570,16 +610,21 @@ export class Installer {
         continue;
       }
       if (n.source.kind === 'link') {
-        mkdirp(path.dirname(n.dir));
-        vfs.rmrf(n.dir);
-        vfs.symlink(path.relative(path.dirname(n.dir), n.source.linkTarget!), n.dir);
+        const at = n.isWorkspace ? path.join(this.o.root, loc) : n.dir;
+        mkdirp(path.dirname(at));
+        if (vfs.tryLookup(at, false)) vfs.rmrf(at);
+        vfs.symlink(path.relative(path.dirname(at), n.source.linkTarget!), at);
         added++;
         continue;
       }
+      // clear the old copy now, before any extraction, and keep its node_modules: that holds the
+      // packages nested in it, which may be up to date or extracted before it
+      const existing = vfs.tryLookup(n.dir, false);
+      if (existing && !isDir(existing)) vfs.rmrf(n.dir); // a symlink (an earlier link) or a file
+      else if (existing) for (const name of vfs.readdir(n.dir)) if (name !== 'node_modules') vfs.rmrf(path.join(n.dir, name));
       jobs.push(
         (async () => {
           const entries = await this.o.registry.tarball(n.source.tarball!, n.source.integrity, n.source.shasum);
-          if (vfs.exists(n.dir)) vfs.rmrf(n.dir);
           mkdirp(n.dir);
           for (const e of entries) {
             const rel = e.path.replace(/^[^/]*\/?/, '');

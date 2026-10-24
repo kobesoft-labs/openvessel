@@ -123,6 +123,26 @@ function parseEnv(content: string): Record<string, string> {
   return out;
 }
 
+/**
+ * Promises whose state the runtime knows because a binding settled them itself (V8 can read any
+ * promise's state; the browser can't). util.inspect shows these as fulfilled/rejected.
+ */
+const settledPromises = new WeakMap<Promise<unknown>, [number, unknown]>();
+
+/** A promise already fulfilled with value, whose state util.inspect can show. */
+export function fulfilledPromise<T>(value: T): Promise<T> {
+  const p = Promise.resolve(value);
+  settledPromises.set(p, [1 /* kFulfilled */, value]);
+  return p;
+}
+
+/** A promise already rejected with reason, whose state util.inspect can show. */
+export function rejectedPromise(reason: unknown): Promise<never> {
+  const p = Promise.reject(reason);
+  settledPromises.set(p, [2 /* kRejected */, reason]);
+  return p;
+}
+
 const sleepCell = new Int32Array(new SharedArrayBuffer(4));
 const handleTypes = { tty: 1, pipe: 4, socket: 4, file: 3, null: 3, dir: 3 } as Record<string, number>;
 
@@ -187,7 +207,7 @@ export function createUtil() {
         Object.defineProperty(Object.getOwnPropertyDescriptor(target, key)!.get!, 'name', { value: `get ${key}` });
       }
     },
-    getPromiseDetails: (_p: Promise<unknown>) => [0 /* kPending */],
+    getPromiseDetails: (p: Promise<unknown>) => settledPromises.get(p) ?? [0 /* kPending */],
     getProxyDetails: (_p: unknown, _full?: boolean) => undefined,
     getCallerLocation: () => undefined,
     previewEntries: (_v: unknown, isIterator?: boolean) => (isIterator ? [[], false] : []),

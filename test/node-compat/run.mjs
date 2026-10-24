@@ -226,15 +226,34 @@ function classify(file, r) {
   return { kind: 'crash', detail: first.replace(/\/node\/test\/[^\s)]+/g, '<test>').slice(0, 160), where };
 }
 
+/**
+ * Tests that can't pass in a browser, with the reason (limits/<module>.json: { "test-x.js": "why" }).
+ * They don't count toward the target; one that passes anyway is reported so it can be removed.
+ */
+function loadLimits() {
+  const dir = join(here, 'limits');
+  const out = {};
+  if (!existsSync(dir)) return out;
+  for (const f of readdirSync(dir)) if (f.endsWith('.json')) Object.assign(out, JSON.parse(readFileSync(join(dir, f), 'utf8')));
+  return out;
+}
+
 function report() {
   const base = loadJson(baselineFile, {});
   const res = loadJson(join(resultsDir, 'ov.json'), {});
+  const limits = loadLimits();
   const byMod = {};
   const causes = { crash: {}, value: {}, timeout: {}, shape: {} };
+  const passingLimits = [];
   for (const [file, r] of Object.entries(res)) {
     if (base[file] && !base[file].pass) continue;
-    const m = (byMod[r.mod] ??= { pass: 0, total: 0, crash: 0, value: 0, timeout: 0, shape: 0 });
+    const m = (byMod[r.mod] ??= { pass: 0, total: 0, limit: 0, crash: 0, value: 0, timeout: 0, shape: 0 });
     m.total++;
+    if (limits[file]) {
+      m.limit++;
+      if (r.pass) passingLimits.push(file);
+      continue;
+    }
     if (r.pass) {
       m.pass++;
       continue;
@@ -244,14 +263,18 @@ function report() {
     const key = c.detail.replace(/'[^']*'|"[^"]*"|\b\d+\b/g, '…');
     (causes[c.kind][key] ??= []).push(file + (c.where ? ` (${c.where.split(':')[1]})` : ''));
   }
-  const lines = ['| module | pass | total | crash | value | timeout | shape |', '|---|---:|---:|---:|---:|---:|---:|'];
-  const sum = { pass: 0, total: 0, crash: 0, value: 0, timeout: 0, shape: 0 };
+  const lines = ['| module | pass | target | % | limits | total | crash | value | timeout | shape |', '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|'];
+  const sum = { pass: 0, total: 0, limit: 0, crash: 0, value: 0, timeout: 0, shape: 0 };
+  const pct = (p, t) => (t ? ((100 * p) / t).toFixed(1) : '100.0');
   for (const [m, v] of Object.entries(byMod).sort((a, b) => b[1].total - a[1].total)) {
-    lines.push(`| ${m} | ${v.pass} | ${v.total} | ${v.crash} | ${v.value} | ${v.timeout} | ${v.shape} |`);
+    const target = v.total - v.limit;
+    lines.push(`| ${m} | ${v.pass} | ${target} | ${pct(v.pass, target)} | ${v.limit} | ${v.total} | ${v.crash} | ${v.value} | ${v.timeout} | ${v.shape} |`);
     for (const k of Object.keys(sum)) sum[k] += v[k];
   }
-  lines.push(`| **all** | **${sum.pass}** | **${sum.total}** | ${sum.crash} | ${sum.value} | ${sum.timeout} | ${sum.shape} |`, '');
-  lines.push('crash: unexpected exception · value: a result differs · timeout: hung (30s) · shape: only the error code/message or argument validation differs', '');
+  const target = sum.total - sum.limit;
+  lines.push(`| **all** | **${sum.pass}** | **${target}** | **${pct(sum.pass, target)}** | ${sum.limit} | ${sum.total} | ${sum.crash} | ${sum.value} | ${sum.timeout} | ${sum.shape} |`, '');
+  lines.push('target: tests that pass on real Node, minus the documented limits (limits/*.json) · crash: unexpected exception · value: a result differs · timeout: hung (30s) · shape: only the error code/message or argument validation differs', '');
+  if (passingLimits.length) lines.push(`**Listed as limits but passing** (remove from limits/): ${passingLimits.join(', ')}`, '');
   for (const kind of ['crash', 'value', 'timeout', 'shape']) {
     lines.push(`## ${kind}`, '');
     for (const [k, files] of Object.entries(causes[kind]).sort((a, b) => b[1].length - a[1].length)) {
