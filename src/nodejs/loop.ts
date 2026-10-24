@@ -161,10 +161,65 @@ export function onTickScheduled() {
   });
 }
 
+// Rejections the browser reported as unhandled, not yet handed to Node's promise reject callback.
+// The browser decides at the end of the task, but Node looks only once processTicksAndRejections
+// has run out of ticks and microtasks: a tick (or a microtask a tick starts) may still attach a
+// handler, so they wait until no tick is pending, plus one more task for the browser's
+// rejectionhandled event to land. A callback from the loop gets them first (see scope()).
+type RejectionSink = (promise: Promise<unknown>, reason: unknown) => void;
+const heldRejections = new Map<Promise<unknown>, unknown>();
+let rejectionSink: RejectionSink | null = null;
+let heldQueued = false;
+let heldQuiet = false;
+
+export function holdRejection(promise: Promise<unknown>, reason: unknown, sink: RejectionSink) {
+  rejectionSink = sink;
+  heldRejections.set(promise, reason);
+  queueHeldCheck();
+}
+
+/** A handler was attached: true if Node never saw the rejection (nothing to report). */
+export function dropHeldRejection(promise: Promise<unknown>): boolean {
+  return heldRejections.delete(promise);
+}
+
+function queueHeldCheck() {
+  if (heldQueued) return;
+  heldQueued = true;
+  macrotask(checkHeldRejections);
+}
+
+function checkHeldRejections() {
+  heldQueued = false;
+  if (!heldRejections.size || S.exiting) return;
+  if (tickTaskQueued || !heldQuiet) {
+    heldQuiet = !tickTaskQueued;
+    return queueHeldCheck();
+  }
+  heldQuiet = false;
+  if (scopeDepth > 0) return queueHeldCheck();
+  releaseRejections();
+  runTicks();
+  afterCallback();
+}
+
+function releaseRejections() {
+  const held = [...heldRejections];
+  heldRejections.clear();
+  for (const [promise, reason] of held) rejectionSink?.(promise, reason);
+}
+
 /** Calls a JS entry point the way libuv → C++ → JS would, then drains ticks. */
 export function scope<T>(fn: (...a: any[]) => T, thisArg?: unknown, ...args: any[]): T | undefined {
-  // ticks left by promise jobs come before the next callback from the loop
-  if (scopeDepth === 0 && tickTaskQueued && !retrying) runTicks();
+  // ticks left by promise jobs, then the rejections they left unhandled, come before the next
+  // callback from the loop
+  if (scopeDepth === 0 && !retrying) {
+    if (tickTaskQueued) runTicks();
+    if (heldRejections.size) {
+      releaseRejections();
+      runTicks();
+    }
+  }
   scopeDepth++;
   let r: T | undefined;
   try {
@@ -345,6 +400,10 @@ export function currentExitCode(): number {
 
 function onLoopEmpty() {
   if (!started || S.exiting) return;
+  if (heldRejections.size) {
+    scope(() => {});
+    return scheduleAliveCheck();
+  }
   // EmitProcessBeforeExit
   if (!exitInfo()[0]) {
     scope(() => S.process.emit('beforeExit', currentExitCode()));

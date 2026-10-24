@@ -287,10 +287,10 @@ export function createTaskQueue() {
     },
   });
   S.onUnhandledRejection = (promise, reason) => {
-    rejectHandler?.(0 /* kPromiseRejectWithNoHandler */, promise, reason);
-    loop.onTickScheduled();
+    loop.holdRejection(promise, reason, (p, r) => rejectHandler?.(0 /* kPromiseRejectWithNoHandler */, p, r));
   };
   S.onRejectionHandled = (promise) => {
+    if (loop.dropHeldRejection(promise)) return;
     rejectHandler?.(1 /* kPromiseHandlerAddedAfterReject */, promise);
     loop.onTickScheduled();
   };
