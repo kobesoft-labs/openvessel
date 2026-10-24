@@ -11,6 +11,7 @@
 // `this` of sloppy functions called plainly (the worker's global), timeouts, microtaskMode.
 
 import { parse as parseEsm } from 'es-module-lexer/js';
+import { NativeProxy } from '../proxies.ts';
 import { S, lib } from '../state.ts';
 import { importFromScript } from './module_wrap.ts';
 import { fromShape } from './shape.ts';
@@ -39,12 +40,11 @@ Object.defineProperty(globalThis, '__ov$scriptImport', {
 const privateStores = new Map<symbol, WeakMap<object, unknown>>();
 
 /**
- * V8's private symbols are invisible to reflection; ours are ordinary symbols. For the ones the
- * bindings attach to user-visible objects (contexts, scripts, functions, module wraps) the value
- * lives in a WeakMap behind an accessor on Object.prototype, so Reflect.ownKeys(sandbox) etc.
- * don't show it.
+ * V8's private symbols are invisible to reflection; ours are ordinary symbols. The value lives in
+ * a WeakMap behind an accessor on Object.prototype, so Reflect.ownKeys(sandbox) etc. don't show
+ * it (whether a binding or lib — `obj[transfer_mode_private_symbol] = …` — sets it).
  */
-function hidePrivateSymbol(sym: symbol): WeakMap<object, unknown> {
+export function hidePrivateSymbol(sym: symbol): WeakMap<object, unknown> {
   let store = privateStores.get(sym);
   if (store) return store;
   const s = (store = new WeakMap());
@@ -126,6 +126,18 @@ interface Context {
   /** var/function names declared by scripts: like V8's, they can't be deleted */
   declared: Set<string>;
   overrides: Map<string, unknown>;
+  /** a running script's function declarations, before they are copied onto the sandbox */
+  pending: { names: string[]; read: () => unknown[] | null } | null;
+}
+
+/** A function declaration of the running script, read through the context's global (`this.f`). */
+function pendingFn(ctx: Context, k: PropertyKey): { value: unknown } | null {
+  const p = ctx.pending;
+  if (!p || typeof k !== 'string') return null;
+  const i = p.names.indexOf(k);
+  if (i < 0) return null;
+  const vals = p.read();
+  return vals ? { value: vals[i] } : null;
 }
 
 const contexts = new WeakMap<object, Context>();
@@ -161,7 +173,7 @@ function codegenOverrides(strings: boolean, wasm: boolean) {
     o.set('eval', function evalDisallowed() {
       throw new EvalError(msg);
     });
-    o.set('Function', new Proxy(Function, {
+    o.set('Function', new NativeProxy(Function, {
       apply() {
         throw new EvalError(msg);
       },
@@ -201,6 +213,8 @@ function globalHandler(ctx: Context): ProxyHandler<object> {
   return {
     get(t, k, r) {
       if (isPrivate(k)) return Reflect.get(t, k, r);
+      const fn = pendingFn(ctx, k);
+      if (fn) return fn.value;
       if (hasIn(sb(), k)) return outward(ctx, Reflect.get(sb(), k));
       if (typeof k === 'string' && isBuiltin(k)) return builtinValue(ctx, k);
       return Reflect.get(t, k, r);
@@ -263,8 +277,8 @@ function globalHandler(ctx: Context): ProxyHandler<object> {
 
 function makeContextRecord(sandbox: object, strings: boolean, wasm: boolean): Context {
   const target = {};
-  const ctx: Context = { sandbox, global: null, target, declared: new Set(), overrides: codegenOverrides(strings, wasm) };
-  ctx.global = new Proxy(target, globalHandler(ctx));
+  const ctx: Context = { sandbox, global: null, target, declared: new Set(), overrides: codegenOverrides(strings, wasm), pending: null };
+  ctx.global = new NativeProxy(target, globalHandler(ctx));
   contexts.set(sandbox, ctx);
   contexts.set(ctx.global, ctx);
   liveContexts.push(new WeakRef(ctx.global));
@@ -290,7 +304,7 @@ interface ScopeState {
  */
 function makeScope(ctx: Context, assigned: Set<string> | null, state: ScopeState, strict = false): object {
   const known = (k: string) => hasIn(ctx.sandbox, k) || isBuiltin(k);
-  return new Proxy(Object.create(null), {
+  return new NativeProxy(Object.create(null), {
     has(_t, k) {
       if (typeof k !== 'string' || k.startsWith('__ov$')) return false;
       if (state.internal && k === 'eval') return false;
@@ -337,6 +351,8 @@ interface Analysis {
   fns: string[];
   /** names assigned anywhere (null: couldn't parse; treat every name as assigned) */
   assigned: Set<string> | null;
+  /** `this` inside sloppy functions: called plainly, V8 gives them the context's global */
+  sloppyThis: { start: number; end: number }[];
 }
 
 function patternNames(p: any, out: Set<string>) {
@@ -389,10 +405,47 @@ function analyzeScript(code: string): Analysis {
       else if (node.type === 'UpdateExpression' && node.argument.type === 'Identifier') assigned.add(node.argument.name);
       else if ((node.type === 'ForInStatement' || node.type === 'ForOfStatement') && node.left.type !== 'VariableDeclaration') patternNames(node.left, assigned);
     });
-    return { strict, vars: [...vars], fns, assigned };
+    const sloppyThis: { start: number; end: number }[] = [];
+    if (!strict && code.includes('this')) {
+      walk.ancestor(ast, {
+        ThisExpression(node: any, ancestors: any[]) {
+          // the innermost non-arrow function decides what `this` is; top-level `this` is already the context's global
+          let fn: any = null;
+          for (let i = ancestors.length - 2; i >= 0 && !fn; i--) {
+            const a = ancestors[i];
+            if (a.type === 'FunctionDeclaration' || a.type === 'FunctionExpression') fn = a;
+            else if (a.type === 'ClassBody') return;
+          }
+          if (!fn) return;
+          // strict code (a 'use strict' function, or one inside it) gets undefined, as in V8
+          for (const a of ancestors) {
+            if ((a.type === 'FunctionDeclaration' || a.type === 'FunctionExpression' || a.type === 'ArrowFunctionExpression') && a.body?.type === 'BlockStatement') {
+              for (const st of a.body.body) {
+                if (typeof st.directive !== 'string') break;
+                if (st.directive === 'use strict') return;
+              }
+            }
+          }
+          sloppyThis.push({ start: node.start, end: node.end });
+        },
+      });
+    }
+    return { strict, vars: [...vars], fns, assigned, sloppyThis };
   } catch {
-    return { strict: false, vars: [], fns: [], assigned: null };
+    return { strict: false, vars: [], fns: [], assigned: null, sloppyThis: [] };
   }
+}
+
+/** Code for a context: `this` of sloppy functions mapped from the worker's global to the context's. */
+function withContextThis(code: string, a: Analysis): string {
+  if (!a.sloppyThis.length) return code;
+  let out = '';
+  let last = 0;
+  for (const r of a.sloppyThis) {
+    out += code.slice(last, r.start) + '__ov$this(this)';
+    last = r.end;
+  }
+  return out + code.slice(last);
 }
 
 const runners = new Map<string, Function>();
@@ -402,10 +455,11 @@ function runner(fns: string[]): Function {
   const key = fns.join(',');
   let r = runners.get(key);
   if (!r) {
+    // the reader sees the declarations once the eval has hoisted them
     const body = fns.length
-      ? `try { return eval(__ov$go(__ov$c)); } finally { __ov$fn(function () { try { return [${key}]; } catch (__ov$e) { return null; } }); }`
+      ? `const __ov$read = function () { try { return [${key}]; } catch (__ov$e) { return null; } }; __ov$fn(__ov$read, true); try { return eval(__ov$go(__ov$c)); } finally { __ov$fn(__ov$read, false); }`
       : `return eval(__ov$go(__ov$c));`;
-    r = indirectEval(`(function (__ov$s, __ov$c, __ov$go, __ov$fn) { with (__ov$s) { ${body} } })`) as Function;
+    r = indirectEval(`(function (__ov$s, __ov$c, __ov$go, __ov$fn, __ov$this) { with (__ov$s) { ${body} } })`) as Function;
     if (runners.size > 512) runners.clear();
     runners.set(key, r);
   }
@@ -425,12 +479,19 @@ function runInContextRecord(ctx: Context, code: string, a: Analysis) {
     state.internal = false;
     return c;
   };
-  const copyFns = (get: () => unknown[] | null) => {
-    const vals = get();
+  const prevPending = ctx.pending;
+  const copyFns = (read: () => unknown[] | null, starting: boolean) => {
+    if (starting) {
+      ctx.pending = { names: fns, read };
+      return;
+    }
+    ctx.pending = prevPending;
+    const vals = read();
     state.hiddenFns = null;
     if (vals) fns.forEach((n, i) => Reflect.set(ctx.sandbox, n, vals[i]));
   };
-  return runner(fns).call(ctx.global, scope, code, go, copyFns);
+  const mapThis = (t: unknown) => (t === realGlobal ? ctx.global : t);
+  return runner(fns).call(ctx.global, scope, code, go, copyFns, mapThis);
 }
 
 /**
@@ -511,6 +572,49 @@ function compileWrapper(code: string, filename: string, params: string[], symbol
   const head = `(function (${names.join(', ')}) { ${names.map((n) => `with (${n}) `).join('')}return ${fn}`;
   lineOneOffset.set(filename, head.length);
   return indirectEval(`${head}${body}\n} })\n//# sourceURL=${filename}`)(...scopes);
+}
+
+/**
+ * vm.compileFunction code is compiled as V8 shows it, `function (a, b) {\n<body>\n}` (that is
+ * its toString), under a sourceURL of its own; stack traces map it back to the filename and to
+ * positions in the body (plus lineOffset/columnOffset).
+ */
+export const compiledPositions = new Map<string, { file: string; line: number; column: number }>();
+const positionKeys = new Map<string, string>();
+
+function compileVmFunction(code: string, filename: string, params: string[], symbol: unknown, scopes: object[], lineOffset: number, columnOffset: number): Function {
+  const key = `${lineOffset}:${columnOffset}:${filename}`;
+  let url = positionKeys.get(key);
+  if (!url) {
+    url = `ov-vm-function:${positionKeys.size + 1}`;
+    positionKeys.set(key, url);
+    // body line 1 is line 2 of the compiled source
+    compiledPositions.set(url, { file: filename, line: lineOffset - 1, column: columnOffset });
+  }
+  const fn = `function (${params.join(', ')}) {\n${routeDynamicImport(code, symbol, filename)}\n}`;
+  if (!scopes.length) return indirectEval(`(${fn})\n//# sourceURL=${url}`);
+  // compiled inside the context's scope and the extension objects (innermost last)
+  const names = scopes.map((_, i) => `__ov$x${i}`);
+  return indirectEval(`(function (${names.join(', ')}) { ${names.map((n) => `with (${n}) `).join('')}return ${fn} })\n//# sourceURL=${url}`)(...scopes);
+}
+
+/**
+ * A body that would close the function early: newer V8 (the browser's) says "Single function
+ * literal required"; V8 under Node parses the body by itself and names the token that ends it.
+ */
+function checkFunctionBody(params: string[], code: string) {
+  try {
+    new Function(...params, code);
+  } catch (e) {
+    if (!(e instanceof SyntaxError) || !/Single function literal required/.test(e.message)) throw e;
+    let message = e.message;
+    try {
+      lib('internal/deps/acorn/acorn/dist/acorn').parse(code, { ecmaVersion: 'latest', sourceType: 'script', allowReturnOutsideFunction: true });
+    } catch (pe: any) {
+      if (typeof pe?.pos === 'number' && code[pe.pos]) message = `Unexpected token '${code[pe.pos]}'`;
+    }
+    throw new SyntaxError(message);
+  }
 }
 
 const CJS_PARAMS = ['exports', 'require', 'module', '__filename', '__dirname'];
@@ -626,7 +730,8 @@ export function createContextify() {
           return indirectEval(code);
         }
         const ctx = contexts.get(contextified as object) ?? makeContextRecord(contextified as object, true, true);
-        return runInContextRecord(ctx, code, this.#analyze());
+        const a = this.#analyze();
+        return runInContextRecord(ctx, `${withContextThis(this.#code, a)}\n//# sourceURL=${this.#filename}`, a);
       } catch (e) {
         if (displayErrors) decorateErrorStack(e, this.#filename, this.#source, this.#lineOffset, this.#columnOffset);
         throw e;
@@ -652,14 +757,14 @@ export function createContextify() {
         throw e;
       }
     },
-    compileFunction(code: string, filename: string, _lineOffset: number, _columnOffset: number, cachedData: ArrayBufferView | undefined, produce: boolean, parsingContext: unknown, contextExtensions: unknown[], params: string[] | undefined, hostDefinedOptionId: unknown) {
+    compileFunction(code: string, filename: string, lineOffset: number, columnOffset: number, cachedData: ArrayBufferView | undefined, produce: boolean, parsingContext: unknown, contextExtensions: unknown[], params: string[] | undefined, hostDefinedOptionId: unknown) {
       const scopes: object[] = [];
       const ctx = parsingContext ? contexts.get(parsingContext as object) : undefined;
       if (ctx) scopes.push(makeScope(ctx, null, { internal: false, hiddenFns: null }));
       for (const ext of contextExtensions ?? []) if (ext && typeof ext === 'object') scopes.push(ext);
       // V8 parses the body on its own: code like `});(function () {` mustn't close the wrapper
-      new Function(...(params ?? []), code);
-      const fn = compileWrapper(code, filename, params ?? [], hostDefinedOptionId, scopes);
+      checkFunctionBody(params ?? [], code);
+      const fn = compileVmFunction(code, filename, params ?? [], hostDefinedOptionId, scopes, lineOffset | 0, columnOffset | 0);
       setPrivate(fn, hostSymbol(), hostDefinedOptionId);
       return { function: fn, ...cacheResult(code, cachedData, produce), ...sourceMapInfo(code) };
     },

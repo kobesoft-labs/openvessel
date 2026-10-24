@@ -1,0 +1,4 @@
+{
+  "test-crypto-no-algorithm.js": "Expects the process to abort when --openssl-config enables only OpenSSL's base provider; the browser runtime has no OpenSSL and no OpenSSL configuration to load.",
+  "test-crypto-subtle-cross-realm.js": "Needs an ArrayBuffer made in a vm context to have that context's own ArrayBuffer.prototype; a browser worker can't create another V8 realm."
+}

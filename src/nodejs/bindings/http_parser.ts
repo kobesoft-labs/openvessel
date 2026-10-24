@@ -53,6 +53,19 @@ function trimOWS(s: string): string {
 
 let nextAsyncId = 1;
 
+let asyncHooksModule: any;
+function asyncHooks(): any {
+  if (asyncHooksModule === undefined) {
+    if (!State.requireBuiltin) return null; // before the bootstrap
+    try {
+      asyncHooksModule = State.requireBuiltin('internal/async_hooks');
+    } catch {
+      asyncHooksModule = null;
+    }
+  }
+  return asyncHooksModule;
+}
+
 class ParserImpl implements Settings {
   readonly owner: any;
   llhttp = new LLHTTP(TYPE_REQUEST, this);
@@ -75,7 +88,10 @@ class ParserImpl implements Settings {
   connections: ConnectionsListImpl | null = null;
   closed = false;
   asyncId = 0;
+  triggerId = 0;
   providerType = 0;
+  /** the resource given to initialize(): callbacks run in its async context (AsyncLocalStorage) */
+  resource: object | null = null;
 
   constructor(owner: any) {
     this.owner = owner;
@@ -85,6 +101,9 @@ class ParserImpl implements Settings {
   private call(index: number, args: unknown[]): { ok: boolean; value?: unknown; called: boolean } {
     const cb = this.owner[index];
     if (typeof cb !== 'function') return { ok: true, called: false };
+    // InternalCallbackScope around the callback: the parser's async context is current
+    const hooks = this.resource ? asyncHooks() : null;
+    if (hooks) hooks.emitBefore(this.asyncId, this.triggerId, this.resource);
     try {
       const value = cb.apply(this.owner, args);
       // A JS call that completes clears an exception left pending by an earlier callback (V8
@@ -96,6 +115,8 @@ class ParserImpl implements Settings {
       this.hasException = true;
       this.exception = e;
       return { ok: false, called: true };
+    } finally {
+      if (hooks && hooks.executionAsyncId() === this.asyncId) hooks.emitAfter(this.asyncId);
     }
   }
 
@@ -424,7 +445,11 @@ class HTTPParser extends AsyncWrap {
   }
 
   free() {
-    // C++ emits the async_hooks destroy event here; nothing to release in JS.
+    const impl = implOf(this);
+    if (impl?.resource) {
+      asyncHooks()?.emitDestroy(impl.asyncId);
+      impl.resource = null;
+    }
   }
 
   remove() {
@@ -470,7 +495,16 @@ class HTTPParser extends AsyncWrap {
     }
 
     impl.providerType = type === TYPE_REQUEST ? 1 : 2;
-    impl.asyncId = nextAsyncId++;
+    // AsyncWrap::AsyncReset(resource): a new async id and the init hook
+    const hooks = asyncHooks();
+    if (hooks) {
+      impl.asyncId = hooks.newAsyncId();
+      impl.triggerId = hooks.getDefaultTriggerAsyncId();
+      impl.resource = resource;
+      hooks.emitInit(impl.asyncId, type === TYPE_REQUEST ? 'HTTPINCOMINGMESSAGE' : 'HTTPCLIENTREQUEST', impl.triggerId, resource);
+    } else {
+      impl.asyncId = nextAsyncId++;
+    }
     impl.init(type, max, lenient);
 
     if (list) {

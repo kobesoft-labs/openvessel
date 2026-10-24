@@ -2,6 +2,7 @@
 // SHARE_ENV: then the threads that share it keep the variables in shared memory (a KVStore the
 // threads hold together), and every access first picks up what another thread changed.
 
+import { NativeProxy } from './proxies.ts';
 import { S } from './state.ts';
 
 const enc = new TextEncoder();
@@ -133,7 +134,8 @@ export function createEnvProxy(initial: Record<string, string>, sharedSab?: Shar
     if (!shared) return fn(store);
     replaceAll(store, shared.update(fn));
   };
-  return new Proxy(store, {
+  // V8 interceptors in Node, not a JS Proxy: util.types.isProxy(process.env) is false
+  return new NativeProxy(store, {
     get(t, k, r) {
       sync();
       return Reflect.get(t, k, r);

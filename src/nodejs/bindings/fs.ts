@@ -68,16 +68,11 @@ export function pathString(p: unknown): string {
 }
 
 export function fillStats(arr: Float64Array | BigInt64Array, offset: number, st: StatData) {
-  // seconds rounded down and a non-negative nanosecond part, also before 1970
-  const ns = (ms: number) => {
-    const s = Math.floor(ms / 1000);
-    return [s, Math.round((ms - s * 1000) * 1e6)];
-  };
-  const [as, an] = ns(st.atimeMs);
-  const [ms, mn] = ns(st.mtimeMs);
-  const [cs, cn] = ns(st.ctimeMs);
-  const [bs, bn] = ns(st.birthtimeMs);
-  const v = [st.dev, st.mode, st.nlink, st.uid, st.gid, st.rdev, st.blksize, st.ino, st.size, st.blocks, as, an, ms, mn, cs, cn, bs, bn];
+  // seconds rounded down and a non-negative nanosecond part, also before 1970 (no array
+  // destructuring: user code may have deleted Array.prototype[Symbol.iterator])
+  const s = (ms: number) => Math.floor(ms / 1000);
+  const ns = (ms: number) => Math.round((ms - s(ms) * 1000) * 1e6);
+  const v = [st.dev, st.mode, st.nlink, st.uid, st.gid, st.rdev, st.blksize, st.ino, st.size, st.blocks, s(st.atimeMs), ns(st.atimeMs), s(st.mtimeMs), ns(st.mtimeMs), s(st.ctimeMs), ns(st.ctimeMs), s(st.birthtimeMs), ns(st.birthtimeMs)];
   if (arr instanceof BigInt64Array) for (let i = 0; i < 18; i++) arr[offset + i] = BigInt(Math.trunc(v[i]));
   else for (let i = 0; i < 18; i++) arr[offset + i] = v[i];
   return arr;

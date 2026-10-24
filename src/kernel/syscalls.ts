@@ -44,6 +44,8 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
     return out;
   };
   const reservedTids = new Set<number>();
+  // TLS inside the runtime is pass-through; the two ends exchange their certificates here instead
+  const tlsEnds = new WeakMap<OpenFile, { certs: string[]; notify: (certs: string[]) => void }>(); // DER, base64
   let nextTid = 100000;
   const BASE_FDS = 30;
   const FDS_PER_THREAD = 8;
@@ -526,10 +528,25 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       case 'exit': {
         const status = { code: (a.code ?? 0) & 0xff, signal: null };
         const peers = socketPeersReading(proc);
-        if (!peers.length) {
+        // what it wrote to pipes another process reads (stderr of a failing child) is taken out
+        // first: libuv reads a child's output before it reports the child's exit
+        const unread: Pipe[] = [];
+        for (const f of proc.fds.values()) {
+          const pipe = f.kind === 'pipe' ? (f.opts.writer as { pipe?: Pipe } | undefined)?.pipe : undefined;
+          if (pipe && pipe.buffered > 0 && pipe.readers > 0 && !unread.includes(pipe)) unread.push(pipe);
+        }
+        if (!peers.length && !unread.length) {
           kernel.exitProcess(proc, status);
           return null;
         }
+        const drained = unread.map(
+          (pipe) =>
+            new Promise<void>((resolve) => {
+              const t0 = Date.now();
+              const poll = () => (pipe.buffered === 0 || pipe.readers === 0 || Date.now() - t0 > 250 ? resolve() : setTimeout(poll, 2));
+              poll();
+            }),
+        );
         // the exiting thread never runs again; the process ends once its peers have caught up
         const waits = peers.map(
           (st) =>
@@ -543,7 +560,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
               }, 250);
             }),
         );
-        void Promise.all(waits).then(() => kernel.exitProcess(proc, status));
+        void Promise.all([...waits, ...drained]).then(() => kernel.exitProcess(proc, status));
         return null;
       }
       case 'udpBind': {
@@ -783,6 +800,22 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         }
         return null;
       }
+      case 'tlsHello': {
+        // returns the peer's certificates when it said hello first; else (wait) they come as a
+        // 'tls-peer' message. Nothing to wait for when the other end isn't a process's socket.
+        const f = proc.fds.get(a.fd);
+        const peer = f?.peer;
+        if (!f || !peer || peer.bridged) return { wait: false, certs: null };
+        const certs: string[] = a.certs ?? [];
+        const theirs = tlsEnds.get(peer);
+        if (theirs) {
+          tlsEnds.delete(peer);
+          theirs.notify(certs);
+          return { wait: false, certs: theirs.certs };
+        }
+        tlsEnds.set(f, { certs, notify: (c) => kernel.postTo(proc, thread, { t: 'tls-peer', fd: a.fd, certs: c }) });
+        return { wait: true, certs: null };
+      }
       case 'listenShare': {
         // listen() on a listening socket received from another process
         const rec = kernel.ports.get(Number(a.port));
@@ -951,6 +984,8 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         return;
       }
       case 'readStop': {
+        // drop the reader's reference now, not when its pending read returns: when the process
+        // closes the fd next, the other end of the socketpair must see EOF
         const st = readers.get(`${proc.pid}:${msg.fd}`);
         if (st) {
           st.active = false;

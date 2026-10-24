@@ -12,7 +12,7 @@ export interface ParsedCommandLine {
   /** process.argv before patching: [argv0, script?, ...args] */
   argv: string[];
   values: Record<string, unknown>;
-  /** Set when the command line is invalid: printed as `node: <error>` with exit code 9. */
+  /** Set when the command line is invalid: each line printed as `node: <error>`, exit code 9. */
   error?: string;
 }
 
@@ -69,6 +69,7 @@ function apply(values: Record<string, unknown>, arg: string, next: string | unde
       case T.kBoolean:
         values[name] = !negated;
         if (('--no-' + name.slice(2)) in values) values['--no-' + name.slice(2)] = negated;
+        if (!negated) for (const t of IMPLICATIONS.get(name) ?? []) values[t] = true;
         break;
       default: {
         let v = isLast ? value : undefined;
@@ -147,7 +148,27 @@ export function parseCommandLine(argv: string[], nodeOptions = ''): ParsedComman
     i += r;
   }
   rest.push(...argv.slice(i));
+  const errors = checkOptions(values);
+  if (errors.length) return { execArgv, argv: rest, values, error: errors.join('\n') };
   return { execArgv, argv: rest, values };
+}
+
+/**
+ * node_options.cc Implies(): options that switch others on when given (not part of the dumped
+ * option table). A later option on the command line still overrides them.
+ */
+const IMPLICATIONS = new Map<string, string[]>([['--experimental-transform-types', ['--experimental-strip-types', '--enable-source-maps']]]);
+
+const isPowerOf2 = (n: number) => n > 0 && (n & (n - 1)) === 0;
+
+/** PerProcessOptions::CheckOptions (the checks that apply in a browser). */
+function checkOptions(values: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  const heap = Number(values['--secure-heap'] ?? 0);
+  const heapMin = Number(values['--secure-heap-min'] ?? 2);
+  if (heap && !isPowerOf2(heap)) errors.push('--secure-heap must be a power of 2');
+  if (!isPowerOf2(heapMin)) errors.push('--secure-heap-min must be a power of 2');
+  return errors;
 }
 
 /** Options of PerProcessOptionsParser (node_options.cc): a worker thread can't take these. */

@@ -223,20 +223,24 @@ function fireTimers() {
   timer.id = null;
   if (!processTimers || S.exiting) return;
   const t = now();
+  const run = () => {
+    const next = processTimers!(t);
+    // like RunTimers, the returned expiry wins over a timer scheduled from inside processTimers
+    // (before the scope's ticks run, which may schedule an earlier one)
+    if (next !== 0) {
+      timer.refed = next > 0;
+      scheduleTimer(Math.max(1, Math.abs(next) - now()));
+    }
+    return next;
+  };
   // Environment::RunTimers calls processTimers again after an uncaught exception: the rest of
   // the due timers still run
-  let next: number;
   do {
     scopeThrew = false;
-    next = scope(processTimers, S.process, t) ?? 0;
+    scope(run, S.process);
     retrying = true;
   } while (scopeThrew && !S.exiting);
   retrying = false;
-  if (next !== 0 && timer.id === null) {
-    const abs = Math.abs(next);
-    timer.refed = next > 0;
-    scheduleTimer(Math.max(1, abs - now()));
-  }
   scheduleAliveCheck();
 }
 
@@ -265,21 +269,32 @@ function scheduleImmediates(force = false) {
   if (immediateQueued || !immediateInfo || !processImmediate) return;
   if (!force && immediateInfo[kCount] === 0 && immediateInfo[kHasOutstanding] === 0) return;
   immediateQueued = true;
-  macrotask(() => {
-    immediateQueued = false;
-    if (S.exiting || !immediateInfo) return;
-    if (immediateInfo[kCount] === 0 && immediateInfo[kHasOutstanding] === 0) return;
-    // only unref'd immediates and nothing else alive: the loop ends without running them
-    if (started && immediateInfo[kRefCount] === 0 && !alive()) return scheduleAliveCheck();
-    // Environment::CheckImmediate: after an uncaught exception, the rest of the queue
-    // (kHasOutstanding) runs in the same check phase
-    do {
-      scopeThrew = false;
-      scope(processImmediate!, S.process);
-      retrying = true;
-    } while (scopeThrew && immediateInfo[kHasOutstanding] && !S.exiting);
-    retrying = false;
-  });
+  // two hops: the browser queues its unhandledrejection task when the current task ends, behind
+  // a message posted during it; Node reports those rejections before the next check phase
+  macrotask(() => macrotask(runImmediates));
+}
+
+function runImmediates() {
+  immediateQueued = false;
+  if (S.exiting || !immediateInfo) return;
+  if (immediateInfo[kCount] === 0 && immediateInfo[kHasOutstanding] === 0) return;
+  // only unref'd immediates and nothing else alive: the loop ends without running them
+  if (started && immediateInfo[kRefCount] === 0 && !alive()) return scheduleAliveCheck();
+  // a loop iteration runs expired timers before the check phase: the browser may hold the
+  // timer's task behind this one
+  if (timer.id !== null && timer.due <= now()) {
+    nativeClearTimeout(timer.id);
+    fireTimers();
+    if (S.exiting || !immediateInfo || (immediateInfo[kCount] === 0 && immediateInfo[kHasOutstanding] === 0)) return;
+  }
+  // Environment::CheckImmediate: after an uncaught exception, the rest of the queue
+  // (kHasOutstanding) runs in the same check phase
+  do {
+    scopeThrew = false;
+    scope(processImmediate!, S.process);
+    retrying = true;
+  } while (scopeThrew && immediateInfo[kHasOutstanding] && !S.exiting);
+  retrying = false;
 }
 
 // -----------------------------------------------------------------------------

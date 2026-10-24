@@ -144,7 +144,10 @@ export function getLinkedBinding(name: string): never {
   throw e;
 }
 
-/** node_constants.cc gives every constants group (os, signals, errno, fs…) a null prototype. */
+/**
+ * node_constants.cc gives every constants group (os, signals, errno, fs…) a null prototype, and
+ * NODE_DEFINE_CONSTANT makes every constant read-only and undeletable (zlib.constants.Z_OK = 1 throws).
+ */
 function createConstants() {
   const b = fromShape('constants');
   const nullProto = (o: Record<string, unknown>) => {
@@ -152,6 +155,14 @@ function createConstants() {
     for (const v of Object.values(o)) if (v && typeof v === 'object' && !ArrayBuffer.isView(v)) nullProto(v as Record<string, unknown>);
   };
   for (const v of Object.values(b)) if (v && typeof v === 'object') nullProto(v as Record<string, unknown>);
+  const lock = (o: Record<string, unknown>) => {
+    for (const k of Object.keys(o)) {
+      const v = o[k];
+      if (v !== null && typeof v === 'object') lock(v as Record<string, unknown>);
+      else Object.defineProperty(o, k, { writable: false, configurable: false });
+    }
+  };
+  lock(b);
   return b;
 }
 

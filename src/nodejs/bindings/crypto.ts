@@ -14,6 +14,7 @@ import { DiffieHellman, DiffieHellmanGroup } from './crypto/dh.ts';
 import { AESCipherJob, ECDHBitsJob, ECKeyExportJob, RSACipherJob, RSAKeyExportJob } from './crypto/webcrypto.ts';
 import { err, isAnyBufferSource, view } from './crypto/util.ts';
 import { certExportChallenge, certExportPublicKey, certVerifySpkac } from './crypto/spkac.ts';
+import { parseX509 } from './crypto/x509.ts';
 
 export { setBufferPrototype as setCryptoBufferPrototype } from './crypto/util.ts';
 
@@ -80,6 +81,8 @@ export function createCrypto() {
     ECKeyExportJob,
     RSAKeyExportJob,
     RSACipherJob,
+    // X509Certificate
+    parseX509,
     // SPKAC (crypto.Certificate)
     certVerifySpkac,
     certExportPublicKey,

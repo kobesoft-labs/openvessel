@@ -1,13 +1,35 @@
-// internalBinding('url') — node_url.cc (ada::url_aggregator) on top of the platform's WHATWG URL.
-//
-// The platform URL parser is spec-equivalent to ada; what ada adds is the component offsets into the
-// serialized href (url_components), which we recompute from the parsed record. The native URL class
-// is captured at module load, before Node's bootstrap installs its own URL (which calls back here).
+// internalBinding('url') — node_url.cc (ada::url_aggregator). Parsing is the URL Standard's
+// (whatwg-url.ts, as ada does it; the browser's own URL class differs from the standard in places);
+// what ada adds is the component offsets into the serialized href (url_components), recomputed
+// from the parsed record.
 
 import { fromShape } from './shape.ts';
+import { guardFunctions } from '../intrinsics.ts';
 import { punycodeToUnicode } from './encoding.ts';
+import { type URLRecord, cloneRecord, get, origin, parse as parseURL, serialize, set } from './whatwg-url.ts';
 
-const NativeURL: typeof URL = globalThis.URL;
+/** The parts of a URL componentsOf reads. */
+interface URLView {
+  href: string;
+  protocol: string;
+  username: string;
+  password: string;
+  hostname: string;
+  port: string;
+  pathname: string;
+}
+
+function view(r: URLRecord): URLView {
+  return {
+    href: serialize(r),
+    protocol: get.protocol(r),
+    username: get.username(r),
+    password: get.password(r),
+    hostname: get.hostname(r),
+    port: get.port(r),
+    pathname: get.pathname(r),
+  };
+}
 
 /** ada uses uint32_t(-1) for omitted components. */
 const OMITTED = 4294967295;
@@ -38,16 +60,12 @@ function invalidURL(input?: string, base?: string): TypeError {
   return e;
 }
 
-function tryParse(input: string, base?: string): URL | null {
-  try {
-    return base === undefined ? new NativeURL(input) : new NativeURL(input, base);
-  } catch {
-    return null;
-  }
+function tryParse(input: string, base?: string): URLRecord | null {
+  return parseURL(String(input), base === undefined ? undefined : String(base));
 }
 
 /** ada::url_components for a parsed URL: offsets into its href. */
-export function componentsOf(u: URL): number[] {
+export function componentsOf(u: URLView): number[] {
   const href = u.href;
   const protocolEnd = u.protocol.length;
   let usernameEnd: number;
@@ -88,13 +106,8 @@ export function componentsOf(u: URL): number[] {
 
 /** Sets `hostname` on a special URL the way ada's set_hostname does; null on failure. */
 function setHostname(input: string): string | null {
-  const a = new NativeURL('ws://x');
-  a.hostname = input;
-  if (a.hostname !== 'x') return a.hostname;
-  // Unchanged: either the input really is "x" (or maps to it), or the setter failed.
-  const b = new NativeURL('ws://y');
-  b.hostname = input;
-  return b.hostname === 'x' ? 'x' : null;
+  const r = tryParse('ws://x')!;
+  return set.hostname(r, String(input)) ? get.hostname(r) : null;
 }
 
 // RFC 1738 "unsafe" characters percent-encoded by pathToFileURL (node_url.cc lookup_table).
@@ -136,12 +149,14 @@ export function createUrl() {
   const b = fromShape('url');
   const urlComponents: Uint32Array = b.urlComponents instanceof Uint32Array ? b.urlComponents : new Uint32Array(9);
 
-  function publish(u: URL): string {
-    urlComponents.set(componentsOf(u));
-    return u.href;
+  function publish(r: URLRecord): string {
+    const v = view(r);
+    urlComponents.set(componentsOf(v));
+    return v.href;
   }
 
-  return Object.assign(b, {
+  // (a program may have deleted array iteration; see intrinsics.ts)
+  return guardFunctions(Object.assign(b, {
     urlComponents,
 
     parse(input: string, base?: string, raiseException?: boolean) {
@@ -165,10 +180,11 @@ export function createUrl() {
     },
 
     update(href: string, action: number, value: string) {
-      let u = tryParse(href);
-      if (u === null) throw new Error(`url.update: unparsable href ${href}`);
-      // The platform setters silently ignore invalid values where ada returns false; either way the
-      // URL is unchanged, so returning the unchanged href is equivalent for internal/url.js.
+      const parsed = tryParse(href);
+      if (parsed === null) throw new Error(`url.update: unparsable href ${href}`);
+      let u = cloneRecord(parsed);
+      value = String(value);
+      // a rejected value can still have changed part of the URL (a host before an invalid port)
       switch (action >>> 0) {
         case Action.kHref: {
           const n = tryParse(value);
@@ -177,31 +193,31 @@ export function createUrl() {
           break;
         }
         case Action.kProtocol:
-          u.protocol = value;
+          set.protocol(u, value);
           break;
         case Action.kHost:
-          u.host = value;
+          set.host(u, value);
           break;
         case Action.kHostname:
-          u.hostname = value;
+          set.hostname(u, value);
           break;
         case Action.kPort:
-          u.port = value;
+          set.port(u, value);
           break;
         case Action.kUsername:
-          u.username = value;
+          set.username(u, value);
           break;
         case Action.kPassword:
-          u.password = value;
+          set.password(u, value);
           break;
         case Action.kPathname:
-          u.pathname = value;
+          set.pathname(u, value);
           break;
         case Action.kSearch:
-          u.search = value;
+          set.search(u, value);
           break;
         case Action.kHash:
-          u.hash = value;
+          set.hash(u, value);
           break;
         default:
           throw new Error('Unsupported URL update action');
@@ -210,19 +226,21 @@ export function createUrl() {
     },
 
     format(href: string, hash: boolean, unicode: boolean, search: boolean, auth: boolean) {
-      const u = tryParse(href);
-      if (u === null) throw new Error(`url.format: unparsable href ${href}`);
-      if (hash !== true) u.hash = '';
-      if (search !== true) u.search = '';
+      const parsed = tryParse(href);
+      if (parsed === null) throw new Error(`url.format: unparsable href ${href}`);
+      const u = cloneRecord(parsed);
+      if (hash !== true) u.fragment = null;
+      if (search !== true) u.query = null;
       if (auth !== true) {
         u.username = '';
         u.password = '';
       }
-      const out = u.href;
-      if (unicode === true && u.hostname !== '') {
-        const c = componentsOf(u);
+      const v = view(u);
+      const out = v.href;
+      if (unicode === true && v.hostname !== '') {
+        const c = componentsOf(v);
         const start = out[c[2]] === '@' ? c[2] + 1 : c[2];
-        return out.slice(0, start) + toUnicode(u.hostname) + out.slice(c[3]);
+        return out.slice(0, start) + toUnicode(v.hostname) + out.slice(c[3]);
       }
       return out;
     },
@@ -230,7 +248,7 @@ export function createUrl() {
     getOrigin(input: string) {
       const u = tryParse(input);
       if (u === null) throw invalidURL();
-      return u.origin;
+      return origin(u);
     },
 
     domainToASCII(input: string) {
@@ -245,12 +263,13 @@ export function createUrl() {
     },
 
     pathToFileURL(input: string, windows: boolean, hostname?: string) {
-      const u = tryParse(encodePathChars(input, windows === true));
-      if (u === null) throw invalidURL(input);
-      if (windows === true && hostname !== undefined) u.hostname = hostname;
+      const parsed = tryParse(encodePathChars(input, windows === true));
+      if (parsed === null) throw invalidURL(input);
+      const u = cloneRecord(parsed);
+      if (windows === true && hostname !== undefined && !set.hostname(u, hostname)) throw invalidURL(input);
       return publish(u);
     },
-  });
+  }));
 }
 
 /** ada::idna::to_unicode on an already-ASCII host. */

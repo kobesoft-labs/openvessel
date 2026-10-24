@@ -1,8 +1,9 @@
 // Loads the brotli / zstd WebAssembly modules built by wasm/build.mjs. They are embedded as
 // raw-deflated base64 so the bundle stays smaller; decoding and compiling happen once, on first
-// use, synchronously (new WebAssembly.Module). Each compression stream gets its own Instance; a
-// closed stream gives it back for the next one (a browser only allows so many live wasm memories,
-// and a loop of short streams would otherwise run out before GC frees them).
+// use, synchronously (new WebAssembly.Module). All streams of a process share one Instance: every
+// call is synchronous, each stream keeps its own state and buffers in the shared heap. A browser
+// only allows so many live wasm memories (each reserves gigabytes of address space), so an
+// instance per stream ran out with many concurrent streams or several processes at once.
 
 import { inflateRaw } from 'pako';
 
@@ -31,24 +32,18 @@ function decode(b64: string, size: number): Uint8Array<ArrayBuffer> {
 
 const imports = { env: { log2: Math.log2, log: Math.log } };
 
-const kPoolSize = 8;
-
 export function wasmLoader(load: () => { WASM_SIZE: number; WASM_DEFLATED_B64: string }) {
-  let mod: WebAssembly.Module | null = null;
-  const idle: WasmExports[] = [];
+  let instance: WasmExports | null = null;
   const acquire = (): WasmExports => {
-    const w = idle.pop();
-    if (w) return w;
-    if (!mod) {
+    if (!instance) {
       const { WASM_SIZE, WASM_DEFLATED_B64 } = load();
-      mod = new WebAssembly.Module(decode(WASM_DEFLATED_B64, WASM_SIZE));
+      const mod = new WebAssembly.Module(decode(WASM_DEFLATED_B64, WASM_SIZE));
+      instance = new WebAssembly.Instance(mod, imports).exports as unknown as WasmExports;
     }
-    return new WebAssembly.Instance(mod, imports).exports as unknown as WasmExports;
+    return instance;
   };
-  /** Takes back an instance whose stream freed everything it allocated. */
-  const release = (w: WasmExports) => {
-    if (idle.length < kPoolSize && !idle.includes(w)) idle.push(w);
-  };
+  /** Streams share the one instance (each keeps its state and buffers in the shared heap). */
+  const release = (_w: WasmExports) => {};
   return Object.assign(acquire, { release });
 }
 

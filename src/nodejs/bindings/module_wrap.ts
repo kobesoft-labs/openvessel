@@ -9,6 +9,8 @@
 
 import { parse as parseEsm } from 'es-module-lexer/js';
 import { sys } from '../../node/sys.ts';
+import { NativeProxy } from '../proxies.ts';
+import { guardMethods, withArrayIteration } from '../intrinsics.ts';
 import * as loop from '../loop.ts';
 import { S, lib } from '../state.ts';
 import { fromShape } from './shape.ts';
@@ -87,7 +89,7 @@ function attributeClause(src: string, attrStart: number): [number, number] {
 
 function attributesOf(list: [string, string][] | null): Record<string, string> {
   const o: Record<string, string> = { __proto__: null } as any;
-  for (const [k, v] of list ?? []) o[k] = v;
+  if (list) for (let i = 0; i < list.length; i++) o[list[i][0]] = list[i][1];
   return o;
 }
 
@@ -160,7 +162,7 @@ export class ModuleWrap {
           throw e;
         }
       }
-      this.#analyze(sourceOrNames);
+      withArrayIteration(() => this.#analyze(sourceOrNames));
     } else {
       this.#exportNames = [...sourceOrNames];
       this.#evaluationSteps = lineOffsetOrSteps as () => void;
@@ -448,9 +450,11 @@ export class ModuleWrap {
         pendingEvaluations.delete(this);
         this.#realNs = ns;
         if (!this.#isVm) this.#namespace = ns;
-        this.#walk((m) => {
-          if (m.#status < kEvaluated) m.#status = kEvaluated;
-        });
+        withArrayIteration(() =>
+          this.#walk((m) => {
+            if (m.#status < kEvaluated) m.#status = kEvaluated;
+          }),
+        );
         return undefined;
       },
       (e) => {
@@ -630,7 +634,7 @@ export class ModuleWrap {
     Object.preventExtensions(target);
     const has = new Set(names);
     const read = (k: string) => this.#readExport(k, new Set());
-    return new Proxy(target, {
+    return new NativeProxy(target, {
       // so sucrase's interop helpers (vm modules run as CommonJS) use it as it is
       get: (t, k) => (typeof k === 'string' && has.has(k) ? read(k) : k === '__esModule' ? true : Reflect.get(t, k)),
       getOwnPropertyDescriptor: (t, k) => {
@@ -659,7 +663,37 @@ export class ModuleWrap {
       }
     }
     if (ex && this.#status === kEvaluated) return undefined;
+    // a `var` binding exists (as undefined) from instantiation on
+    if (this.#varExports().has(k)) return undefined;
     throw new ReferenceError(`${k} is not defined`);
+  }
+
+  #varExportNames: Set<string> | null = null;
+  /** Export names bound to top-level `var` declarations. */
+  #varExports(): Set<string> {
+    if (this.#varExportNames) return this.#varExportNames;
+    const out = (this.#varExportNames = new Set<string>());
+    if (!this.#source || !/\bvar\b/.test(this.#source)) return out;
+    const bound = (p: any, acc: string[] = []): string[] => {
+      if (p?.type === 'Identifier') acc.push(p.name);
+      else if (p?.type === 'ObjectPattern') for (const q of p.properties) bound(q.type === 'RestElement' ? q.argument : q.value, acc);
+      else if (p?.type === 'ArrayPattern') for (const q of p.elements) bound(q, acc);
+      else if (p?.type === 'RestElement') bound(p.argument, acc);
+      else if (p?.type === 'AssignmentPattern') bound(p.left, acc);
+      return acc;
+    };
+    const varNames = (st: any) => (st?.type === 'VariableDeclaration' && st.kind === 'var' ? st.declarations.flatMap((d: any) => bound(d.id)) : []);
+    try {
+      const acorn = lib('internal/deps/acorn/acorn/dist/acorn');
+      const ast = acorn.parse(this.#source, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true });
+      const vars = new Set<string>(ast.body.flatMap((st: any) => varNames(st.type === 'ExportNamedDeclaration' ? st.declaration : st)));
+      for (const st of ast.body) {
+        if (st.type !== 'ExportNamedDeclaration') continue;
+        for (const n of varNames(st.declaration)) out.add(n);
+        if (!st.declaration && !st.source) for (const sp of st.specifiers) if (vars.has(sp.local.name)) out.add(sp.exported.name ?? sp.exported.value);
+      }
+    } catch {}
+    return out;
   }
 
   #facadeNs(): object {
@@ -761,6 +795,8 @@ export class ModuleWrap {
     return dynamicImportCallback(this.#hostDefinedOption, String(specifier), attributes, this.url);
   }
 }
+// (a program may have deleted array iteration; see intrinsics.ts)
+guardMethods(ModuleWrap);
 
 /** import() in code evaluated away from its module (another thread): resolved from the cwd. */
 function importFromCwd(specifier: unknown, options?: { with?: Record<string, string> }) {

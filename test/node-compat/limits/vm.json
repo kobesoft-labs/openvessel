@@ -1,0 +1,13 @@
+{
+  "test-vm-timeout.js": "A timeout has to stop synchronous code (while (true) {}) while it runs; a browser worker can't interrupt its own running JavaScript (no V8 TerminateExecution).",
+  "test-vm-sigint.js": "breakOnSigint has to stop synchronous code (while (true) {}) while it runs; a browser worker can't interrupt its own running JavaScript.",
+  "test-vm-sigint-existing-handler.js": "breakOnSigint has to stop synchronous code (while (true) {}) while it runs; a browser worker can't interrupt its own running JavaScript.",
+  "test-vm-module-basic.js": "evaluate({ timeout }) has to stop a module running while (true) {}; a browser worker can't interrupt its own running JavaScript.",
+  "test-vm-timeout-escape-promise.js": "Needs a context with its own microtask queue (microtaskMode: 'afterEvaluate') and a timeout over it; V8 microtask queues and execution termination aren't available to browser JavaScript.",
+  "test-vm-timeout-escape-promise-2.js": "Needs a context with its own microtask queue (microtaskMode: 'afterEvaluate') and a timeout over it; V8 microtask queues and execution termination aren't available to browser JavaScript.",
+  "test-vm-timeout-escape-promise-module.js": "Needs a context with its own microtask queue (microtaskMode: 'afterEvaluate') and a timeout over it; V8 microtask queues and execution termination aren't available to browser JavaScript.",
+  "test-vm-script-after-evaluate.js": "Needs a context with its own microtask queue (microtaskMode: 'afterEvaluate'); a browser has one microtask queue per agent and no API for another.",
+  "test-vm-module-after-evaluate.js": "Needs a context with its own microtask queue (microtaskMode: 'afterEvaluate'); a browser has one microtask queue per agent and no API for another.",
+  "test-vm-harmony-symbols.js": "Needs a context with its own builtins (its Symbol differs from the main one); a browser worker can't create another V8 realm, so contexts share the worker's builtins.",
+  "test-vm-global-property-prototype.js": "Code in the context changes the context's own Object.prototype; without a separate V8 realm the context shares the worker's Object.prototype."
+}
