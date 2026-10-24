@@ -40,7 +40,9 @@ const configs = [
   // the ported Node.js (src/nodejs); nodelib.js is generated next to it
   { ...common, plugins: [...common.plugins, nodelibExternal], entryPoints: { 'node-process': 'src/nodejs/boot.ts' }, outdir: join(dist, 'runtime'), format: 'esm', alias: {} },
   { ...common, entryPoints: { 'ts-strip': 'src/nodejs/ts-strip.ts' }, outdir: join(dist, 'runtime'), format: 'iife', alias: {} },
-  { ...common, entryPoints: { sw: 'src/preview/sw.ts', relay: 'src/preview/relay.ts', inject: 'src/preview/inject.ts' }, outdir: join(dist, 'preview/__ov'), format: 'iife' },
+  { ...common, entryPoints: { relay: 'src/preview/relay.ts', inject: 'src/preview/inject.ts' }, outdir: join(dist, 'preview/__ov'), format: 'iife' },
+  // at the preview's root, so it can control the whole preview without a Service-Worker-Allowed header
+  { ...common, entryPoints: { '__ov-sw': 'src/preview/sw.ts' }, outdir: join(dist, 'preview'), format: 'iife' },
   { ...common, entryPoints: { index: 'src/host/index.ts' }, outdir: join(dist, 'host'), format: 'esm' },
   { ...common, entryPoints: { app: 'playground/app.ts' }, outdir: join(dist, 'playground'), format: 'esm', loader: { '.css': 'css' } },
 ];
@@ -66,7 +68,11 @@ if (watch) {
   console.log('watching…');
 } else {
   await Promise.all(configs.map((c) => build(c)));
-  if (existsSync(join(root, 'vendor/node/natives.json'))) genNodeLib(join(dist, 'runtime/nodelib.js'));
+  if (existsSync(join(root, 'vendor/node/natives.json'))) {
+    genNodeLib(join(dist, 'runtime/nodelib.js'));
+    // nodelib.js is Node.js's lib/ and deps/: its license (with the bundled deps' notices) ships with it
+    cpSync(join(root, 'vendor/node/LICENSE'), join(dist, 'runtime/NODE-LICENSE.txt'));
+  }
   else console.warn('vendor/node missing: run node scripts/gen-node-data.mjs to build the ported Node runtime');
   await buildCompat(join(dist, 'runtime/compat'));
   console.log('built dist/');

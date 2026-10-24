@@ -57,7 +57,7 @@ function apply(values: Record<string, unknown>, arg: string, next: string | unde
     }
     if (!info) {
       // V8 flags are passed through to V8 in Node; here they are accepted and ignored
-      if (/^--(max-old-space-size|max-semi-space-size|stack-size|expose-gc|harmony|js-|allow-natives-syntax|max-http-header-size)/.test(name) || name.startsWith('--v8-') || name.startsWith('--no-')) return consumed;
+      if (/^--(max-old-space-size|max-semi-space-size|stack-size|expose-gc|harmony|js-|allow-natives-syntax|max-http-header-size|enable-sharedarraybuffer-per-context)/.test(name) || name.startsWith('--v8-') || name.startsWith('--no-')) return consumed;
       return `bad option: ${arg}`;
     }
     if (fromEnv && info.envVarSettings === proc.envSettings.kDisallowedInEnvvar) return `${name} is not allowed in NODE_OPTIONS`;
@@ -148,4 +148,24 @@ export function parseCommandLine(argv: string[], nodeOptions = ''): ParsedComman
   }
   rest.push(...argv.slice(i));
   return { execArgv, argv: rest, values };
+}
+
+/** Options of PerProcessOptionsParser (node_options.cc): a worker thread can't take these. */
+const PER_PROCESS = new Set(
+  '--completion-bash --debug-arraybuffer-allocations --disable-proto --enable-fips --experimental-sea-config --force-fips --help --icu-data-dir --node-memory-debug --node-snapshot --openssl-config --openssl-legacy-provider --openssl-shared-config --report-compact --report-dir --report-directory --report-filename --report-on-fatalerror --run --secure-heap --secure-heap-min --security-revert --security-reverts --snapshot-blob --title --tls-cipher-list --trace-event-categories --trace-event-file-pattern --trace-events-enabled --trace-sigint --use-bundled-ca --use-largepages --use-openssl-ca --use-system-ca --v8-options --v8-pool-size --zero-fill-buffers -h -v'.split(' '),
+);
+
+/** Worker::New's checks of a thread's execArgv (or of the NODE_OPTIONS in its env): the errors, or null. */
+export function workerOptionErrors(args: string[] | string, fromEnv: boolean): string[] | null {
+  const list = typeof args === 'string' ? splitNodeOptions(args) : args;
+  const values = defaultOptionValues();
+  for (let i = 0; i < list.length; i++) {
+    const a = list[i];
+    if (!a.startsWith('-') || a === '-' || a === '--') continue;
+    if (PER_PROCESS.has(a.split('=')[0])) return [a];
+    const r = apply(values, a, takesValue(a) ? list[i + 1] : undefined, fromEnv);
+    if (typeof r === 'string') return [r.startsWith('bad option: ') ? a : r];
+    i += r;
+  }
+  return null;
 }

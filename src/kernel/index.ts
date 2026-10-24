@@ -2,6 +2,7 @@
 // (module loading + network decisions) and preview relays (HTTP/WebSocket only).
 
 import { type NetworkPolicy, decide, hostOf, normalizePolicy } from '../shared/policy.ts';
+import { RUNTIME_BASE } from './base.ts';
 import { installCoreutils } from './coreutils.ts';
 import { EsmService } from './esm.ts';
 import { O_WRONLY, type OpenFile, createPipe } from './io.ts';
@@ -64,7 +65,7 @@ kernel.vfs.writeFile('/usr/bin/node', '#!/ov/builtin node\n', 0o755);
 kernel.vfs.chmod('/usr/bin/node', 0o755);
 kernel.vfs.symlink('/usr/bin/node', '/usr/bin/nodejs');
 installNpm(kernel);
-setNpmFetch(proxiedFetch(self.location.origin));
+setNpmFetch(proxiedFetch(RUNTIME_BASE));
 installCurl(kernel);
 kernel.vfs.writeFile('/home/user/.shrc', "alias ll='ls -l'\nalias la='ls -la'\n");
 

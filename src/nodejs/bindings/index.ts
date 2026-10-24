@@ -32,6 +32,7 @@ import { createCrypto } from './crypto.ts';
 import { createBlob } from './blob.ts';
 import { createWorkerBinding } from './worker.ts';
 import { createCaresWrap, createTcpWrap } from './net.ts';
+import { createUdpWrap } from './udp.ts';
 import { createZlib } from './zlib.ts';
 import { createHttpParser } from './http_parser.ts';
 import { createProcessWrap, createSignalWrap, createSpawnSync } from './process_wrap.ts';
@@ -47,7 +48,7 @@ import { createV8 } from './v8.ts';
 import { createHeapUtils } from './heap_utils.ts';
 import { createWasiBinding } from './wasi.ts';
 import { createTlsWrap } from './tls_wrap.ts';
-import { createInspector } from './inspector.ts';
+import { createInspector, createProfiler } from './inspector.ts';
 
 export type BindingFactory = () => any;
 
@@ -92,9 +93,11 @@ export const factories: Record<string, BindingFactory> = {
   tcp_wrap: createTcpWrap,
   tls_wrap: createTlsWrap,
   inspector: createInspector,
+  profiler: createProfiler,
   timers: createTimers,
   trace_events: createTraceEvents,
   tty_wrap: createTtyWrap,
+  udp_wrap: createUdpWrap,
   types: createTypes,
   url: createUrl,
   util: createUtil,

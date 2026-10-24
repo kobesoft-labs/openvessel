@@ -1,27 +1,75 @@
 # OpenVessel
 
-A browser-only, Node.js-like environment for installing, building and previewing [Astro](https://astro.build) sites.
-Everything runs inside the user's browser tab: a POSIX-ish shell, `node`, `npm`/`pnpm`/`yarn`/`bun`, `astro build` and `astro dev` with HMR.
-No real port is ever opened, and outgoing network traffic goes through a single policy gate.
+[日本語](README.ja.md) · **[Live demo](https://kobesoft-labs.github.io/openvessel-demo/)** — edit an Astro site with Node.js running in the tab
 
-OpenVessel is a clean-room implementation. It was written without looking at the source of other in-browser runtimes.
+## What is OpenVessel?
+
+OpenVessel is a Node.js environment that runs entirely inside a web browser tab.
+It gives a web page a real `node`, a POSIX-style shell, `npm`/`pnpm`/`yarn`/`bun`, a file system and processes —
+enough to install a real JavaScript project from the npm registry, build it and serve it with live reload,
+without a server doing the work and without opening a single real network port.
+
+It was built for [Astro](https://astro.build) sites (Astro 7, 6 and 5): `npm install`, `astro build`,
+`astro dev` with hot module replacement, and a preview of the running dev server in an iframe.
+Because it runs Node.js's own code, most other Node tools work too.
+
+![OpenVessel: a Node.js virtual machine inside a browser tab](docs/images/overview.svg)
+
+Think of it as a small virtual machine for Node.js that lives in the tab: its own operating system
+(a kernel with a file system, processes and a shell), its own programs (Node.js, npm, Astro), and
+controlled ways in and out. [How it works](docs/how-it-works.md) explains each piece.
+
+Typical uses:
+
+- an online editor or CMS that builds and previews a site in the visitor's browser,
+- tutorials and playgrounds where every reader gets their own sandboxed Node.js,
+- previews of pull requests or templates without provisioning servers.
+
+OpenVessel is a clean-room implementation: it was written without looking at the source of other
+in-browser runtimes. It is open source under the [Apache License 2.0](LICENSE).
+
+## How it is different
+
+- **Node.js itself, not a look-alike.** Node.js v22's own `lib/` (the JavaScript half of Node) runs
+  unmodified. What OpenVessel re-implements is the part Node writes in C++ — `internalBinding()` —
+  in TypeScript, on top of a small kernel. Error messages, stack traces, argument validation and
+  event-loop ordering come out the way Node produces them, and following a new Node release is a
+  matter of re-reading its source (see [docs/NODE-VERSION.md](docs/NODE-VERSION.md)).
+- **Native modules become WebAssembly.** Packages that ship native binaries are installed as their
+  WebAssembly builds (esbuild, rollup, rolldown, lightningcss, sharp, napi-rs `wasm32-wasi`
+  bindings…). Where a package has no WebAssembly build, OpenVessel provides a compat package —
+  usually the same project compiled to `wasm32-wasi` (Pagefind, for example).
+- **Nothing is reachable from outside.** Servers listen on virtual ports inside the kernel; the
+  preview iframe talks to them through a service worker. Outgoing traffic goes through one policy
+  gate that the embedding page controls.
+- **Isolated by origin.** The page, the runtime and the preview are three different origins, so code
+  in a previewed site can't reach the runtime or the host page ([docs/SECURITY.md](docs/SECURITY.md)).
 
 ## Status
 
-- Targets **Astro 7, 6 and 5** (Vite 8 / 7 / 6). Astro 7's rolldown runs as the napi-rs `wasm32-wasi` build.
-- Tested against a corpus of 150 real sites (official examples and popular community themes for each major); see `corpus/`.
-- Built on **Node.js v22.20.0**: Node's own `lib/` runs unmodified; the C++ bindings are re-implemented in TypeScript. The pinned version and how to follow new releases: [docs/NODE-VERSION.md](docs/NODE-VERSION.md).
-- Chromium-based browsers. Requires cross-origin isolation (`SharedArrayBuffer`).
+| | |
+|---|---|
+| Node.js | v22.23.4 (`src/node/version.ts`) |
+| Node's own test suite | see [docs/compatibility.md](docs/compatibility.md) for the current numbers |
+| Astro sites | 129 of a corpus of 147 real sites build (Astro 5, 6 and 7); see [docs/compatibility.md](docs/compatibility.md) |
+| Browsers | Chromium-based browsers; cross-origin isolation (`SharedArrayBuffer`) is required |
+
+What can't work in a browser, and why, is listed in [docs/compatibility.md](docs/compatibility.md).
 
 ## Quick start
 
 ```bash
 npm install
-npm run build        # → dist/
+npm run build        # → dist/  (builds the runtime, Node's lib bundle and the compat packages)
 npm run serve        # host :5170 (playground), runtime :5171, preview :5172
 ```
 
-Open http://localhost:5170, drop an Astro project into the terminal's working directory, then run `npm install && npm run dev`.
+Open http://localhost:5170, put an Astro project in the terminal's working directory and run
+`npm install && npm run dev`.
+
+Building the Node lib bundle needs `vendor/node/` (created once with `node scripts/gen-node-data.mjs`,
+which uses Docker to read the official Linux build of Node.js). Rebuilding the Pagefind compat
+package needs Rust with the `wasm32-wasip1` target; the result is cached in `vendor/compat/`.
 
 ## Embedding
 
@@ -44,37 +92,49 @@ vessel.on('server-ready', async ({ port }) => {
 await vessel.spawn('npm', ['run', 'dev'], { cwd: '/home/user/app' });
 ```
 
-The host page must be served with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (or `credentialless`).
-`scripts/serve.mjs` shows the exact headers each origin needs.
+The host page must be served with `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp` (or `credentialless`). `scripts/serve.mjs` shows the
+headers each of the three origins needs.
 
 ## How it works
 
+```
+ host page (your origin)          runtime origin (hidden iframe)                 preview origin
+ ───────────────────────          ──────────────────────────────────            ──────────────
+ OpenVessel API  ──postMessage──▶ kernel (Web Worker)                            iframe + service worker
+                                   VFS · processes · pipes · TTY · sh · npm      ▲  HTTP / WebSocket
+                                   virtual ports · network gate                  │
+                                     │ sync syscalls (SharedArrayBuffer+Atomics) │
+                                   node processes (one Web Worker each) ─────────┘
+                                   Node.js lib/ + TypeScript internalBinding()
+```
+
 | Piece | Where |
 |---|---|
-| Kernel (one Web Worker): in-memory VFS, processes, pipes, TTY, `sh`, coreutils, `curl`, npm | `src/kernel/` |
-| Processes (one Web Worker per `node`): Node built-ins, CJS loader, native ESM served by a Service Worker, synchronous syscalls over `SharedArrayBuffer` + `Atomics.wait` | `src/node/` |
-| Runtime origin: hidden iframe + Service Worker (ESM delivery, network gate) | `src/runtime/` |
-| Preview origin: Service Worker that bridges HTTP/WebSocket to virtual ports | `src/preview/` |
+| Kernel: in-memory file system, processes, pipes, TTY, sockets, `sh`, coreutils, npm client, virtual ports, outbound HTTP | `src/kernel/` |
+| Node.js: bootstrap, event loop, the `internalBinding()` modules | `src/nodejs/` |
+| Runtime origin: service worker (ES module delivery, network gate) | `src/runtime/` |
+| Preview origin: service worker bridging HTTP/WebSocket to virtual ports | `src/preview/` |
 | Host API | `src/host/` |
+| Compat packages for native-only npm packages | `compat/`, `scripts/build-compat.mjs` |
 
-Native dependencies are swapped for WebAssembly builds when one exists (`esbuild-wasm`, `@rollup/wasm-node`, `lightningcss-wasm`, napi-rs `*-wasm32-wasi`, `@img/sharp-wasm32`), otherwise for a JavaScript equivalent (`sass-embedded` → `sass`).
-Dependencies' install scripts are never run (the project's own `postinstall`/`prepare` run as in npm).
-
-See [docs/DESIGN.md](docs/DESIGN.md) (Japanese) for the full design and [docs/SECURITY.md](docs/SECURITY.md) for the threat model.
+More: [How it works](docs/how-it-works.md) · [Compatibility](docs/compatibility.md) · design notes [docs/DESIGN.md](docs/DESIGN.md), [docs/NODE-PORT.md](docs/NODE-PORT.md) (Japanese).
 
 ## Development
 
 ```bash
-npm test                                              # unit tests (node:test)
-node test/e2e/harness.mjs 'echo hi; node -v'          # one command in headless Chrome
+npm test                                                   # unit tests (bindings are checked against real Node)
+node test/e2e/harness.mjs 'echo hi; node -v'               # one command in headless Chrome
 node test/e2e/project.mjs <dir> 'npm install && npm run build'
-node test/e2e/dev.mjs                                 # astro dev + preview + HMR
-node corpus/run.mjs [filter]                          # run the site corpus → corpus/results/
+node test/node-compat/run.mjs --port [module…]             # Node's own tests in OpenVessel
+node test/node-compat/run.mjs --port --report              # pass / target per module
+node corpus/run.mjs --port [filter]                        # build the Astro site corpus
 ```
 
-The e2e tests drive the system Chrome through `playwright-core`.
-Set `HEADED=1` to watch, `OV_CONSOLE=1` for browser console output, `OV_TRACE=1` for kernel traces.
+The end-to-end tests drive the system Chrome through `playwright-core`. Set `HEADED=1` to watch,
+`OV_CONSOLE=1` for browser console output, `OV_PORT_BASE=<port>` to run several suites side by side.
 
 ## License
 
-MIT
+Apache License 2.0 — see [LICENSE](LICENSE). Third-party components and their licenses are listed in
+[NOTICE](NOTICE).

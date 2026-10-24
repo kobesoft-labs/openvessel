@@ -4,25 +4,92 @@ import { KernelError, kerr } from '../shared/errno.ts';
 import * as path from '../shared/path.ts';
 import { CJS_CONDITIONS, ESM_CONDITIONS } from '../shared/resolve.ts';
 import type { EsmService } from './esm.ts';
-import { O_ACCMODE, O_RDONLY, O_WRONLY, OpenFile, createPipe, createSocketPair } from './io.ts';
-import type { Kernel } from './kernel.ts';
+import { O_ACCMODE, O_RDONLY, O_WRONLY, OpenFile, type Pipe, type PipeAttachment, createPipe, createSocketPair } from './io.ts';
+import { type Kernel, fdPathOf, leaveListener } from './kernel.ts';
 import type { NetRouter } from './net.ts';
 import { type NodeThread, type Proc, exitCodeOf, signalName } from './proc.ts';
+import { RUNTIME_BASE } from './base.ts';
 import { connectOutbound, markOutboundTls } from './outbound.ts';
-import { S_IFCHR, S_IFIFO, S_IFREG, S_IFSOCK, isDir } from './vfs.ts';
+import { S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFREG, S_IFSOCK, isDir } from './vfs.ts';
 
 const enc = new TextEncoder();
 
 export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter) {
   const vfs = kernel.vfs;
   const watchers = new Map<string, () => void>(); // `${pid}:${id}` → stop
-  const readers = new Map<string, { active: boolean; release?: () => void; file?: OpenFile; rid?: number }>(); // `${pid}:${fd}`
+  interface ReaderState {
+    active: boolean;
+    stop?: () => void;
+    /** pipes/sockets: the pipe read, and who reads it */
+    pipe?: Pipe;
+    proc?: Proc;
+    thread?: NodeThread;
+  }
+  const readers = new Map<string, ReaderState>(); // `${pid}:${fd}`
+  // 'ping' sent to a thread → resolves on its 'pong' (it has handled everything posted before)
+  const pings = new Map<number, () => void>();
+  let nextPing = 1;
+  /**
+   * Node threads of other processes reading from sockets this process writes to. A process that
+   * exits keeps its sockets open until they have handled what it sent (process teardown takes
+   * longer than a peer's reaction to the last message, e.g. an IPC ack answered at once).
+   */
+  const socketPeersReading = (p: Proc) => {
+    const out: ReaderState[] = [];
+    for (const f of p.fds.values()) {
+      const pipe = f.kind === 'socket' ? (f.opts.writer as { pipe?: Pipe } | undefined)?.pipe : undefined;
+      if (!pipe) continue;
+      for (const st of readers.values()) if (st.active && st.pipe === pipe && st.proc && st.proc !== p && st.thread && !out.includes(st)) out.push(st);
+    }
+    return out;
+  };
   const reservedTids = new Set<number>();
   let nextTid = 100000;
+  const BASE_FDS = 30;
+  const FDS_PER_THREAD = 8;
+  /** Node's threadId: per process, 1, 2, … (the main thread is 0) */
+  const nodeThreadIds = new WeakMap<Proc, number>();
+  /** threads waiting to hear that a thread is gone (MessagePorts whose other end lives there) */
+  const threadWatchers = new Map<string, NodeThread[]>();
+  const threadGone = (proc: Proc, tid: number) => {
+    const key = `${proc.pid}:${tid}`;
+    const ws = threadWatchers.get(key);
+    threadWatchers.delete(key);
+    for (const w of ws ?? []) if (proc.threads.get(w.tid) === w) w.worker.postMessage({ t: 'thread-gone', tid });
+  };
 
   const abs = (proc: Proc, p: string) => {
     if (typeof p !== 'string' || p === '') throw kerr('ENOENT');
     return p.startsWith('/') ? path.normalize(p) : path.resolve(proc.cwd, p);
+  };
+
+  /**
+   * EACCES unless a process (uid/gid 1000, not root) may add or remove entries in the directory
+   * that holds `p`: write and search permission on it.
+   */
+  const checkDirWritable = (p: string) => {
+    const d = vfs.lookup(path.dirname(p));
+    const shift = d.uid === 1000 ? 6 : d.gid === 1000 ? 3 : 0;
+    if (((d.mode >> shift) & 3) !== 3) throw kerr('EACCES');
+  };
+
+  /** The open file behind fd N of /proc/self/fd/N (ENOENT if it isn't open). */
+  const fdFile = (proc: Proc, fd: number) => {
+    const f = proc.fds.get(fd);
+    if (!f) throw kerr('ENOENT');
+    return f;
+  };
+
+  /**
+   * /proc/self (a link to /proc/<pid>), /proc/<pid> and /proc/<pid>/fd of the calling process, which
+   * the VFS doesn't hold; null for other paths.
+   */
+  const procDirStat = (proc: Proc, p: string, l: boolean) => {
+    const m = /^\/proc\/(self|\d+)(\/fd)?$/.exec(p);
+    if (!m || (m[1] !== 'self' && Number(m[1]) !== proc.pid)) return null;
+    const st = vfs.lstat('/proc');
+    if (m[1] === 'self' && !m[2] && l) return { ...st, ino: 0, mode: S_IFLNK | 0o777, nlink: 1, size: String(proc.pid).length };
+    return { ...st, ino: 0, mode: S_IFDIR | (m[2] ? 0o500 : 0o555), nlink: 2 };
   };
 
   const fstatOf = (f: OpenFile) => {
@@ -38,7 +105,13 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
     const parentFds: (number | null)[] = [];
     const toClose: OpenFile[] = [];
     specs.forEach((s, i) => {
-      if (s === 'pipe' || s === 'overlapped') {
+      if ((s === 'pipe' || s === 'overlapped') && i > 2) {
+        // extra stdio pipes are duplex (libuv makes every stdio pipe with socketpair)
+        const [mine, theirs] = createSocketPair();
+        child.push(theirs);
+        parentFds.push(proc.allocFd(mine, 3));
+        toClose.push(theirs);
+      } else if (s === 'pipe' || s === 'overlapped') {
         const { r, w } = createPipe();
         if (i === 0) {
           child.push(r);
@@ -80,7 +153,39 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       const n = vfs.tryLookup(cwd);
       if (!n || !isDir(n)) throw new KernelError('ENOENT', `spawn: cwd ${cwd} does not exist`);
     }
-    return kernel.spawn({ argv: a.argv, env, cwd, stdio, ppid: proc.pid });
+    return kernel.spawn({ argv: a.argv, argv0: a.argv0, env, cwd, stdio, ppid: proc.pid });
+  };
+
+  // UDP on virtual ports: who receives on each port; datagrams wait while nobody is receiving
+  interface UdpMember {
+    proc: Proc;
+    thread: NodeThread;
+    receiving: boolean;
+  }
+  const udpPorts = new Map<number, { members: UdpMember[]; next: number; queue: { data: Uint8Array; from: { address: string; port: number } }[] }>();
+  const udpLeave = (port: number, p: Proc) => {
+    const rec = udpPorts.get(port);
+    if (!rec) return;
+    rec.members = rec.members.filter((m) => m.proc !== p);
+    if (!rec.members.length) udpPorts.delete(port);
+  };
+  const udpJoin = (port: number, p: Proc, thread: NodeThread) => {
+    let rec = udpPorts.get(port);
+    if (!rec) udpPorts.set(port, (rec = { members: [], next: 0, queue: [] }));
+    if (rec.members.some((m) => m.proc === p)) return;
+    rec.members.push({ proc: p, thread, receiving: false });
+    p.onExit.add(() => udpLeave(port, p));
+  };
+  const udpDeliver = (port: number) => {
+    const rec = udpPorts.get(port);
+    if (!rec) return;
+    while (rec.queue.length) {
+      const live = rec.members.filter((m) => m.receiving && m.proc.state === 'running');
+      if (!live.length) return;
+      const m = live[(rec.next = (rec.next + 1) % live.length)];
+      const d = rec.queue.shift()!;
+      kernel.postTo(m.proc, m.thread, { t: 'udp-msg', port, data: d.data, from: d.from });
+    }
   };
 
   const registeredPids = new Set<number>();
@@ -89,6 +194,13 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       // ---------------- files ----------------
       case 'stat': {
         const p = abs(proc, a.p);
+        // /proc/self/fd/N is a link to the open file (/dev/stdin and the like link to it)
+        const own = fdPathOf(p, proc.pid);
+        if (a.l && own !== null) return { ...fstatOf(fdFile(proc, own)), mode: S_IFLNK | 0o700, size: 64 };
+        const fd = a.l ? null : kernel.procFdOf(p, proc.pid);
+        if (fd !== null) return fstatOf(fdFile(proc, fd));
+        const dir = procDirStat(proc, p, !!a.l);
+        if (dir) return dir;
         return a.l ? vfs.lstat(p) : vfs.stat(p);
       }
       case 'fstat':
@@ -101,14 +213,15 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         return null;
       }
       case 'open': {
-        const f = kernel.openFile(proc, abs(proc, a.p), a.flags ?? 0, a.mode ?? 0o666);
+        const p = abs(proc, a.p);
+        if ((a.flags ?? 0) & 0o100 && !vfs.tryLookup(p)) checkDirWritable(p);
+        const f = kernel.openFile(proc, p, a.flags ?? 0, a.mode ?? 0o666);
         return proc.allocFd(f, 3);
       }
       case 'close':
         if ((globalThis as any).__ovTrace && proc.fds.get(a.fd)?.kind === 'pipe') console.warn(`[trace] pid ${proc.pid} (${proc.argv.slice(0, 3).join(' ')}) close pipe fd ${a.fd}`, new Error().stack?.split('\n').slice(0, 1).join(''));
-        // a read loop still waiting on this fd holds a reference: drop it, so closing the last fd
-        // really closes the file (the peer of a socket sees EOF)
-        readers.get(`${proc.pid}:${a.fd}`)?.release?.();
+        // a reader started on this fd lets go of the file too (the other end must see EOF)
+        readers.get(`${proc.pid}:${a.fd}`)?.stop?.();
         proc.closeFd(a.fd);
         return null;
       case 'read': {
@@ -129,6 +242,26 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       case 'write': {
         const f = proc.getFd(a.fd);
         const data = bin ?? new Uint8Array(0);
+        if (a.sendHandle) {
+          // a handle sent over a socket (uv_write2): it travels with the first byte of this write
+          const pipe = (f.opts.writer as { pipe?: Pipe } | undefined)?.pipe;
+          if (!pipe || f.kind !== 'socket' || !data.length) throw kerr('EINVAL');
+          const { fd: sendFd, ...meta } = a.sendHandle as { fd?: number } & Record<string, unknown>;
+          const item: PipeAttachment = { meta };
+          if (typeof sendFd === 'number') item.file = proc.getFd(sendFd).ref();
+          try {
+            return pipe.write(data, item);
+          } catch (e) {
+            item.file?.unref();
+            throw e;
+          }
+        }
+        // O_NONBLOCK on a pipe or socket: only what fits in its buffer (0 = EAGAIN)
+        const pipe = a.nonblock ? (f.opts.writer as { pipe?: Pipe } | undefined)?.pipe : undefined;
+        if (pipe && f.writable && pipe.readers > 0) {
+          const n = Math.min(data.length, pipe.space);
+          return n > 0 ? f.write(data.subarray(0, n)) : 0;
+        }
         return f.write(data, a.pos ?? null);
       }
       case 'lseek': {
@@ -142,6 +275,22 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       }
       case 'readFile': {
         const p = abs(proc, a.p);
+        const fd = kernel.procFdOf(p, proc.pid);
+        if (fd !== null) {
+          const f = fdFile(proc, fd);
+          if (f.kind === 'file' && f.opts.node) return vfs.contents(f.opts.node).slice();
+          return (async () => {
+            const parts: Uint8Array[] = [];
+            for (let d; (d = await f.read(65536)).length; ) parts.push(d);
+            const out = new Uint8Array(parts.reduce((n, x) => n + x.length, 0));
+            let off = 0;
+            for (const x of parts) {
+              out.set(x, off);
+              off += x.length;
+            }
+            return out;
+          })();
+        }
         const n = vfs.lookup(p);
         if (isDir(n)) throw kerr('EISDIR');
         if (n.device) return n.device.read(65536) ?? new Uint8Array(0);
@@ -168,6 +317,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
           return null;
         }
         vfs.lookupParent(p); // ENOENT if parent is missing
+        if (!existing) checkDirWritable(p);
         vfs.writeFile(p, data, (a.mode ?? 0o666) & ~proc.umask);
         return null;
       }
@@ -181,6 +331,10 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       }
       case 'mkdir': {
         const p = abs(proc, a.p);
+        // the directory that gets the first new entry must be writable
+        let first = p;
+        if (a.recursive) while (first !== '/' && !vfs.tryLookup(path.dirname(first))) first = path.dirname(first);
+        if (!vfs.tryLookup(first)) checkDirWritable(first);
         const r = vfs.mkdir(p, a.mode ?? 0o777, !!a.recursive);
         return a.recursive ? (r ?? null) : null;
       }
@@ -189,14 +343,18 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
           const suffix = Array.from({ length: 6 }, () => 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[Math.floor(Math.random() * 62)]).join('');
           const p = abs(proc, a.prefix + suffix);
           if (vfs.exists(p)) continue;
+          checkDirWritable(p);
           vfs.mkdir(p, 0o700);
           return p;
         }
         throw kerr('EEXIST');
       }
-      case 'rmdir':
-        vfs.rmdir(abs(proc, a.p));
+      case 'rmdir': {
+        const p = abs(proc, a.p);
+        if (vfs.tryLookup(p, false)) checkDirWritable(p);
+        vfs.rmdir(p);
         return null;
+      }
       case 'rm': {
         const p = abs(proc, a.p);
         const n = vfs.tryLookup(p, false);
@@ -214,20 +372,46 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         const p = abs(proc, a.p);
         const n = vfs.lookup(p, false);
         if (isDir(n)) throw kerr('EISDIR');
+        checkDirWritable(p);
         vfs.unlink(p);
         return null;
       }
-      case 'rename':
-        vfs.rename(abs(proc, a.from), abs(proc, a.to));
+      case 'rename': {
+        const from = abs(proc, a.from);
+        const to = abs(proc, a.to);
+        if (vfs.tryLookup(from, false)) {
+          checkDirWritable(from);
+          if (vfs.tryLookup(path.dirname(to))) checkDirWritable(to);
+        }
+        vfs.rename(from, to);
         return null;
-      case 'link':
-        vfs.link(abs(proc, a.from), abs(proc, a.to));
+      }
+      case 'link': {
+        const to = abs(proc, a.to);
+        if (vfs.tryLookup(path.dirname(to)) && !vfs.tryLookup(to, false)) checkDirWritable(to);
+        vfs.link(abs(proc, a.from), to);
         return null;
-      case 'symlink':
-        vfs.symlink(a.target, abs(proc, a.p));
+      }
+      case 'symlink': {
+        const p = abs(proc, a.p);
+        if (vfs.tryLookup(path.dirname(p)) && !vfs.tryLookup(p, false)) checkDirWritable(p);
+        vfs.symlink(a.target, p);
         return null;
-      case 'readlink':
-        return vfs.readlink(abs(proc, a.p));
+      }
+      case 'readlink': {
+        const p = abs(proc, a.p);
+        if (p === '/proc/self') return String(proc.pid);
+        const own = fdPathOf(p, proc.pid);
+        if (own !== null) {
+          // what Linux shows: the file's path, or pipe:[id] / socket:[id]
+          const f = fdFile(proc, own);
+          if (f.opts.path) return f.opts.path;
+          if (f.kind === 'tty') return '/dev/tty';
+          const id = (f.opts.reader as { pipe?: { id: number } } | undefined)?.pipe?.id ?? (f.opts.writer as { pipe?: { id: number } } | undefined)?.pipe?.id ?? 0;
+          return `${f.kind === 'socket' ? 'socket' : 'pipe'}:[${id}]`;
+        }
+        return vfs.readlink(p);
+      }
       case 'realpath':
         return vfs.realpath(abs(proc, a.p));
       case 'chmod':
@@ -339,16 +523,93 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         proc.cwd = real;
         return real;
       }
-      case 'exit':
-        kernel.exitProcess(proc, { code: (a.code ?? 0) & 0xff, signal: null });
+      case 'exit': {
+        const status = { code: (a.code ?? 0) & 0xff, signal: null };
+        const peers = socketPeersReading(proc);
+        if (!peers.length) {
+          kernel.exitProcess(proc, status);
+          return null;
+        }
+        // the exiting thread never runs again; the process ends once its peers have caught up
+        const waits = peers.map(
+          (st) =>
+            new Promise<void>((resolve) => {
+              const id = nextPing++;
+              pings.set(id, resolve);
+              kernel.postTo(st.proc!, st.thread!, { t: 'ping', id });
+              setTimeout(() => {
+                pings.delete(id);
+                resolve();
+              }, 250);
+            }),
+        );
+        void Promise.all(waits).then(() => kernel.exitProcess(proc, status));
         return null;
+      }
+      case 'udpBind': {
+        let port = Number(a.port) || 0;
+        if (port === 0) {
+          do port = 49152 + Math.floor(Math.random() * 16000);
+          while (udpPorts.has(port));
+        } else if (udpPorts.has(port) && !a.reuse) throw kerr('EADDRINUSE');
+        udpJoin(port, proc, thread);
+        return port;
+      }
+      case 'udpJoin': {
+        if (!udpPorts.has(Number(a.port))) throw kerr('EINVAL');
+        udpJoin(Number(a.port), proc, thread);
+        return null;
+      }
+      case 'udpRecv': {
+        const m = udpPorts.get(Number(a.port))?.members.find((x) => x.proc === proc);
+        if (m) {
+          m.receiving = !!a.on;
+          m.thread = thread;
+          if (m.receiving) udpDeliver(Number(a.port));
+        }
+        return null;
+      }
+      case 'udpClose':
+        udpLeave(Number(a.port), proc);
+        return null;
+      case 'udpSend': {
+        const rec = udpPorts.get(Number(a.port));
+        // nobody bound there: the datagram is lost, as on a real network
+        if (rec && rec.queue.length < 1024) {
+          rec.queue.push({ data: (bin ?? new Uint8Array(0)).slice(), from: { address: a.fromAddress && a.fromAddress !== '0.0.0.0' ? a.fromAddress : '127.0.0.1', port: Number(a.from) || 0 } });
+          udpDeliver(Number(a.port));
+        }
+        return null;
+      }
+      case 'execve': {
+        // check that it can run before the old image is torn down
+        kernel.planExec([...a.argv], a.env ?? proc.env, proc.cwd, true);
+        for (const fd of [...proc.fds.keys()]) {
+          if (fd <= 2) continue;
+          readers.get(`${proc.pid}:${fd}`)?.stop?.();
+          try {
+            proc.closeFd(fd);
+          } catch {}
+        }
+        for (const [key, stop] of watchers) {
+          if (!key.startsWith(`${proc.pid}:`)) continue;
+          stop();
+          watchers.delete(key);
+        }
+        kernel.execImage(proc, [...a.argv], a.env ?? proc.env, a.argv0);
+        // the calling thread is gone: no reply
+        return new Promise(() => {});
+      }
       case 'kill': {
+        if (typeof a.sig === 'number' && (a.sig < 0 || a.sig > 64 || !Number.isInteger(a.sig))) throw kerr('EINVAL');
         const target = a.pid === 0 ? proc.pid : a.pid;
         if (target < 0) {
           kernel.killGroup(-target, signalName(a.sig));
           return null;
         }
         const t = kernel.get(target);
+        // an exited process has been reaped as far as the caller can tell (libuv reaps on SIGCHLD)
+        if (t.state !== 'running') throw kerr('ESRCH');
         if (a.sig === 0) return null;
         kernel.kill(t.pid, a.sig);
         return null;
@@ -364,8 +625,12 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         try {
           c = spawnChild(proc, a, child);
         } catch (e) {
-          for (const fd of parentFds) if (fd !== null) proc.closeFd(fd);
           for (const f of toClose) f.unref();
+          // like libuv when exec fails: the parent's ends stay open (the child's are closed), so
+          // stdio streams read EOF instead of failing
+          const code = (e as KernelError)?.code;
+          if (a.keepStdioOnError && (code === 'ENOENT' || code === 'EACCES')) return { pid: 0, fds: parentFds, error: code };
+          for (const fd of parentFds) if (fd !== null) proc.closeFd(fd);
           throw e;
         }
         for (const f of toClose) f.unref();
@@ -470,11 +735,27 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       case 'threadReserve': {
         const tid = nextTid++;
         reservedTids.add(tid);
-        return tid;
+        if (!a.nodeId) return tid;
+        const threadId = (nodeThreadIds.get(proc) ?? 0) + 1;
+        nodeThreadIds.set(proc, threadId);
+        return { tid, threadId };
+      }
+      case 'watchThread': {
+        // tell the caller when thread a.tid of this process is gone (now, if it already is)
+        if (!proc.threads.has(a.tid)) {
+          thread.worker.postMessage({ t: 'thread-gone', tid: a.tid });
+          return null;
+        }
+        const key = `${proc.pid}:${a.tid}`;
+        const ws = threadWatchers.get(key) ?? [];
+        if (!ws.includes(thread)) ws.push(thread);
+        threadWatchers.set(key, ws);
+        return null;
       }
       case 'threadExit': {
         const t = proc.threads.get(thread.tid);
         proc.threads.delete(thread.tid);
+        threadGone(proc, thread.tid);
         setTimeout(() => t?.worker.terminate(), 0);
         if (t?.parentTid !== undefined) proc.threads.get(t.parentTid)?.worker.postMessage({ t: 'thread-exit', tid: thread.tid, code: a.code ?? 0 });
         return null;
@@ -496,10 +777,17 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       }
       case 'unlisten': {
         const rec = kernel.ports.get(a.port);
-        if (rec && rec.pid === proc.pid) {
+        if (rec && (rec.pid === proc.pid || rec.acceptors?.some((x) => x.pid === proc.pid)) && !leaveListener(rec, proc.pid)) {
           kernel.ports.delete(a.port);
           kernel.hooks.onUnlisten?.(a.port, proc.pid);
         }
+        return null;
+      }
+      case 'listenShare': {
+        // listen() on a listening socket received from another process
+        const rec = kernel.ports.get(Number(a.port));
+        if (!rec) throw kerr('EINVAL');
+        if (rec.pid !== proc.pid && !rec.acceptors?.some((x) => x.pid === proc.pid)) (rec.acceptors ??= []).push({ pid: proc.pid, tid: thread.tid });
         return null;
       }
       case 'tcpConnect': {
@@ -507,11 +795,13 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         if (!rec || rec.host !== 'raw') throw kerr('ECONNREFUSED');
         const end = net.tcp.connect(rec, { address: '127.0.0.1', port: 0 });
         if (!end) throw kerr('ECONNREFUSED');
-        return proc.allocFd(end, 3);
+        const by = net.tcp.lastAcceptor;
+        // and whether the caller's own thread is the one accepting it
+        return { fd: proc.allocFd(end, 3), self: by?.pid === proc.pid && by?.tid === thread.tid };
       }
       case 'tcpConnectOut': {
         // not a virtual port: HTTP over the policy-checked proxy (see outbound.ts)
-        const end = connectOutbound(self.location.origin, { host: String(a.host), port: Number(a.port), tls: !!a.tls }, `${proc.pid} ${proc.argv.slice(0, 3).join(' ')}`.slice(0, 200));
+        const end = connectOutbound(RUNTIME_BASE, { host: String(a.host), port: Number(a.port), tls: !!a.tls }, `${proc.pid} ${proc.argv.slice(0, 3).join(' ')}`.slice(0, 200));
         return proc.allocFd(end, 3);
       }
       case 'tcpSetTls': {
@@ -564,60 +854,109 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
   kernel.asyncMessage = (proc: Proc, thread: NodeThread, msg: any) => {
     if (net.fromProcess(msg)) return;
     switch (msg?.t) {
+      case 'pong': {
+        const done = pings.get(msg.id);
+        pings.delete(msg.id);
+        done?.();
+        return;
+      }
       case 'readStart': {
         const key = `${proc.pid}:${msg.fd}`;
-        const f = proc.fds.get(msg.fd);
         const existing = readers.get(key);
-        // a loop still waiting on this file (stopped, not yet ended) just carries on
-        if (f && existing && existing.file === f) {
-          existing.active = true;
-          existing.rid = msg.rid;
-          return;
-        }
-        // rid: the reader's tag, echoed so data for a closed reader never reaches a reused fd
-        const state: { active: boolean; release?: () => void; file?: OpenFile; rid?: number } = { active: true, file: f, rid: msg.rid };
+        if (existing?.active) return;
+        const state: ReaderState = { active: true, proc, thread };
         readers.set(key, state);
+        const f = proc.fds.get(msg.fd);
         if (!f) {
-          kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, rid: msg.rid, data: null });
+          kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, data: null });
           return;
         }
         f.ref();
-        // drop our reference when the process exits, even while a read is still pending, so
-        // the other end of a pipe/socketpair sees EOF
+        // drop our reference when the process exits or closes the fd, even while a read is still
+        // pending, so the other end of a pipe/socketpair sees EOF
         let released = false;
         const release = () => {
           if (released) return;
           released = true;
           state.active = false;
+          proc.onExit.delete(release);
+          notifier?.delete(pump);
           f.unref();
+          if (readers.get(key) === state) readers.delete(key);
         };
-        state.release = release;
         proc.onExit.add(release);
+        state.stop = release;
+        // pipes and sockets are read only when data is there (no read left pending), so a
+        // readStop() never swallows data that arrives afterwards
+        const readPipe = (f.opts.reader as { pipe?: Pipe } | undefined)?.pipe;
+        state.pipe = readPipe;
+        const notifier = readPipe?.onReadable;
+        let pumping = false;
+        function pump() {
+          if (pumping) return;
+          pumping = true;
+          try {
+            while (state.active && proc.state === 'running') {
+              let r: { data: Uint8Array; item?: PipeAttachment } | null | undefined;
+              try {
+                r = readPipe!.tryReadAttached(65536);
+              } catch {
+                r = null;
+              }
+              if (r === undefined) return;
+              if (r === null || r.data.length === 0) {
+                kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, data: null });
+                release();
+                return;
+              }
+              // a received file gets a descriptor in this process
+              const handle = r.item ? { ...r.item.meta, ...(r.item.file ? { fd: proc.allocFd(r.item.file, 3) } : {}) } : undefined;
+              kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, data: r.data, handle });
+            }
+          } finally {
+            pumping = false;
+          }
+        }
+        if (notifier) {
+          notifier.add(pump);
+          pump();
+          return;
+        }
         (async () => {
           try {
             while (state.active && proc.state === 'running') {
               const d = await f.read(65536);
               if (proc.state !== 'running') break;
               if (d.length === 0) {
-                kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, rid: state.rid, data: null });
+                kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, data: null });
                 state.active = false;
                 break;
               }
-              kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, rid: state.rid, data: d });
+              kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, data: d });
             }
           } catch (e) {
-            kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, rid: state.rid, data: null });
+            kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, data: null });
           } finally {
-            proc.onExit.delete(release);
             release();
-            if (readers.get(key) === state) readers.delete(key);
           }
         })();
         return;
       }
+      case 'writeWait': {
+        // 'fd-writable' once a pipe/socket buffer has drained (or its reader is gone)
+        const notify = () => kernel.postTo(proc, thread, { t: 'fd-writable', fd: msg.fd });
+        const pipe = (proc.fds.get(msg.fd)?.opts.writer as { pipe?: Pipe } | undefined)?.pipe;
+        if (pipe) pipe.onDrain(notify);
+        else notify();
+        return;
+      }
       case 'readStop': {
         const st = readers.get(`${proc.pid}:${msg.fd}`);
-        if (st) st.active = false;
+        if (st) {
+          st.active = false;
+          // pipes: nothing is pending, let go now; others stop after the read in flight
+          if (st.stop && (proc.fds.get(msg.fd)?.opts.reader as { pipe?: unknown } | undefined)?.pipe) st.stop();
+        }
         return;
       }
       case 'readOnce': {
@@ -638,6 +977,12 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       case 'threadSpawn': {
         const tid = msg.tid;
         reservedTids.delete(tid);
+        // a Node thread holds descriptors of its own (its loop's, its ports'): with a small
+        // RLIMIT_NOFILE (ulimit -n) only so many fit, and the next one fails to initialize
+        if (proc.threads.size * FDS_PER_THREAD + BASE_FDS > proc.nofile) {
+          thread.worker.postMessage({ t: 'thread-exit', tid, code: 1, initFailed: 'EMFILE' });
+          return;
+        }
         const t = kernel.startThread(
           proc,
           {
@@ -653,6 +998,11 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
             envData: msg.envData,
             port: msg.port,
             name: msg.name,
+            threadId: msg.threadId,
+            resourceLimits: msg.resourceLimits,
+            envRings: msg.envRings,
+            trackUnmanagedFds: msg.trackUnmanagedFds,
+            sharedEnv: msg.sharedEnv,
           },
           [msg.port, ...(msg.transfer ?? [])],
           thread.tid,
@@ -666,6 +1016,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         if (t) {
           t.worker.terminate();
           proc.threads.delete(msg.tid);
+          threadGone(proc, msg.tid);
           thread.worker.postMessage({ t: 'thread-exit', tid: msg.tid, code: 1, terminated: true });
         }
         return;

@@ -146,9 +146,34 @@ export function rejectedPromise(reason: unknown): Promise<never> {
 const sleepCell = new Int32Array(new SharedArrayBuffer(4));
 const handleTypes = { tty: 1, pipe: 4, socket: 4, file: 3, null: 3, dir: 3 } as Record<string, number>;
 
+/**
+ * V8's private symbols are per object: not inherited, invisible to reflection and to
+ * util.inspect/deepStrictEqual. Ordinary symbols are none of that, which shows for the marks lib
+ * puts on objects for postMessage (markAsUntransferable(Foo.prototype) must not mark `new Foo()`,
+ * and a marked ArrayBuffer must still deep-equal its clone). For those, an accessor on
+ * Object.prototype keeps the value in a WeakMap keyed by the receiver.
+ */
+function emulatePrivateSymbols(syms: (symbol | undefined)[]) {
+  for (const sym of syms) {
+    if (typeof sym !== 'symbol' || Object.prototype.hasOwnProperty.call(Object.prototype, sym)) continue;
+    const values = new WeakMap<object, unknown>();
+    Object.defineProperty(Object.prototype, sym, {
+      get(this: object) {
+        return values.get(this);
+      },
+      set(this: object, v: unknown) {
+        if ((typeof this === 'object' && this !== null) || typeof this === 'function') values.set(this, v);
+      },
+      enumerable: false,
+      configurable: false,
+    });
+  }
+}
+
 export function createUtil() {
   const b = fromShape('util');
   S.privateSymbols = b.privateSymbols;
+  emulatePrivateSymbols([b.privateSymbols.transfer_mode_private_symbol, b.privateSymbols.untransferable_object_private_symbol]);
   Object.assign(b, types, {
     isInsideNodeModules: (_frameLimit?: number, def?: boolean) => {
       const st = String(new Error().stack ?? '');

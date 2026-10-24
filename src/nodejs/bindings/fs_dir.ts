@@ -48,6 +48,7 @@ function run<T>(req: Req, syscall: string, path: unknown, fn: () => T): T | Prom
     done();
     if (typeof req.oncomplete === 'function') {
       if (err) loop.scope(req.oncomplete, req, err);
+      else if (result === undefined) loop.scope(req.oncomplete, req, null);
       else loop.scope(req.oncomplete, req, null, result);
     }
   });

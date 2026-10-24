@@ -3,9 +3,9 @@
 import { KernelError, kerr } from '../shared/errno.ts';
 import * as path from '../shared/path.ts';
 import { createChannelBuffer, SyncServer } from '../shared/syncchan.ts';
-import { O_RDONLY, O_RDWR, O_WRONLY, OpenFile, Tty, createPipe } from './io.ts';
+import { O_RDONLY, O_RDWR, O_WRONLY, OpenFile, Tty, createPipe, openFifo } from './io.ts';
 import { type ExitStatus, type NodeThread, Proc, exitCodeOf, signalName, signalNumber } from './proc.ts';
-import { S_IFMT, S_IFREG, VFS, isDir } from './vfs.ts';
+import { S_IFIFO, S_IFMT, S_IFREG, VFS, isDir, isLink } from './vfs.ts';
 
 export type Program = (ctx: ProgramContext) => Promise<number>;
 
@@ -20,6 +20,8 @@ export interface SpawnOptions {
   tty?: Tty;
   /** Resolve argv[0] through PATH (default true). */
   searchPath?: boolean;
+  /** argv[0] the program sees when it is run directly (execve's argv[0]; defaults to argv[0]). */
+  argv0?: string;
 }
 
 export interface KernelHooks {
@@ -37,6 +39,21 @@ export interface ListenRecord {
   pid: number;
   tid: number;
   host: string;
+  /** other processes accepting on the same listening socket (a server handle sent over IPC) */
+  acceptors?: { pid: number; tid: number }[];
+  /** round-robin position among the owner and the acceptors */
+  next?: number;
+}
+
+/** Removes a process from a listener; returns false when nobody listens any more. */
+export function leaveListener(rec: ListenRecord, pid: number): boolean {
+  if (rec.acceptors) rec.acceptors = rec.acceptors.filter((a) => a.pid !== pid);
+  if (rec.pid !== pid) return true;
+  const heir = rec.acceptors?.shift();
+  if (!heir) return false;
+  rec.pid = heir.pid;
+  rec.tid = heir.tid;
+  return true;
 }
 
 const enc = new TextEncoder();
@@ -72,8 +89,8 @@ export class Kernel {
       v.mkdir(d, 0o755, true);
     }
     v.chmod('/tmp', 0o1777);
-    v.writeFile('/etc/passwd', 'root:x:0:0:root:/root:/bin/sh\nuser:x:1000:1000:user:/home/user:/bin/sh\n');
-    v.writeFile('/etc/group', 'root:x:0:\nuser:x:1000:\n');
+    v.writeFile('/etc/passwd', 'root:x:0:0:root:/root:/bin/sh\nuser:x:1000:1000:user:/home/user:/bin/sh\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n');
+    v.writeFile('/etc/group', 'root:x:0:\nuser:x:1000:\nnogroup:x:65534:\n');
     v.writeFile('/etc/hostname', `${this.hostname}\n`);
     v.writeFile('/etc/hosts', '127.0.0.1 localhost\n::1 localhost\n');
     v.writeFile('/etc/os-release', 'NAME="OpenVessel"\nID=openvessel\nPRETTY_NAME="OpenVessel"\n');
@@ -180,11 +197,14 @@ export class Kernel {
     const argv = [...opts.argv];
     if (argv.length === 0) throw kerr('EINVAL');
     const plan = this.planExec(argv, env, cwd, opts.searchPath !== false);
+    // node run directly keeps the caller's argv[0] (process.argv0); through a shebang it is the interpreter
+    if (plan.kind === 'node' && plan.direct) plan.argv[0] = opts.argv0 ?? argv[0];
 
     const pid = this.nextPid++;
     const pgid = opts.pgid === 0 ? pid : (opts.pgid ?? parent?.pgid ?? pid);
     const proc = new Proc({ pid, ppid: opts.ppid ?? 0, pgid, argv: plan.argv, env, cwd });
     proc.tty = opts.tty ?? parent?.tty;
+    if (parent) proc.nofile = parent.nofile;
     const stdio = opts.stdio ?? [];
     for (let i = 0; i < stdio.length; i++) {
       const f = stdio[i];
@@ -195,7 +215,7 @@ export class Kernel {
     proc.onExit.add((status) => {
       this.hooks.onProcessExit?.(pid, status);
       for (const [port, rec] of this.ports) {
-        if (rec.pid === pid) {
+        if (!leaveListener(rec, pid)) {
           this.ports.delete(port);
           this.hooks.onUnlisten?.(port, pid);
         }
@@ -227,7 +247,7 @@ export class Kernel {
   }
 
   /** Determines how to run argv: builtin program or node, following shebangs. */
-  planExec(argv: string[], env: Record<string, string>, cwd: string, searchPath = true): { kind: 'builtin'; name: string; argv: string[] } | { kind: 'node'; argv: string[] } {
+  planExec(argv: string[], env: Record<string, string>, cwd: string, searchPath = true): { kind: 'builtin'; name: string; argv: string[] } | { kind: 'node'; argv: string[]; direct?: boolean } {
     let depth = 0;
     for (;;) {
       if (depth++ > 8) throw kerr('ELOOP');
@@ -248,7 +268,7 @@ export class Kernel {
         let iargs = parts.slice(1);
         if (interp === BUILTIN_SHEBANG) {
           const name = iargs[0];
-          if (name === 'node') return { kind: 'node', argv: ['node', ...argv.slice(1)] };
+          if (name === 'node') return { kind: 'node', argv: ['node', ...argv.slice(1)], direct: depth === 1 };
           if (!this.programs.has(name)) throw new KernelError('ENOENT', `${name}: builtin missing`);
           return { kind: 'builtin', name, argv };
         }
@@ -269,6 +289,42 @@ export class Kernel {
       if (/\.(c|m)?js$/.test(file)) return { kind: 'node', argv: ['node', file, ...argv.slice(1)] };
       // ENOEXEC: run as a shell script, like POSIX shells do
       return { kind: 'builtin', name: 'sh', argv: ['sh', file, ...argv.slice(1)] };
+    }
+  }
+
+  /**
+   * execve(2): a new program in an existing process (same pid, cwd and stdio). The caller has
+   * closed the descriptors that don't survive; the old program's threads are stopped here.
+   * Throws (ENOENT, EACCES…) before anything changes when the program can't be run.
+   */
+  execImage(proc: Proc, argv: string[], env: Record<string, string>, argv0?: string) {
+    const plan = this.planExec(argv, env, proc.cwd, true);
+    if (plan.kind === 'node' && plan.direct) plan.argv[0] = argv0 ?? argv[0];
+    for (const t of proc.threads.values()) {
+      try {
+        t.worker.terminate();
+      } catch {}
+    }
+    proc.threads.clear();
+    proc.handledSignals.clear();
+    // its listening sockets go with the old image (Node marks every fd but stdio FD_CLOEXEC)
+    for (const [port, rec] of this.ports) {
+      if ((rec.pid === proc.pid || rec.acceptors?.some((a) => a.pid === proc.pid)) && !leaveListener(rec, proc.pid)) {
+        this.ports.delete(port);
+        this.hooks.onUnlisten?.(port, proc.pid);
+      }
+    }
+    for (const [ino, rec] of this.unixSockets) if (rec.pid === proc.pid) this.unixSockets.delete(ino);
+    proc.argv = plan.argv;
+    proc.env = env;
+    if (plan.kind === 'builtin') {
+      proc.kind = 'builtin';
+      proc.title = plan.name;
+      this.runBuiltin(proc, this.programs.get(plan.name)!);
+    } else {
+      proc.kind = 'node';
+      proc.title = 'node';
+      this.startNode(proc);
     }
   }
 
@@ -423,13 +479,32 @@ export class Kernel {
   // ---------------------------------------------------------------------------
   // file helpers used by programs and syscalls
 
+  /**
+   * The fd of process `pid` that `abs` names when it is /proc/self/fd/N, /proc/<pid>/fd/N or
+   * /dev/fd/N, or a symlink to one (/dev/stdin, /dev/stdout, /dev/stderr); null otherwise.
+   */
+  procFdOf(abs: string, pid: number): number | null {
+    if (!abs.startsWith('/dev/') && !abs.startsWith('/proc/')) return null;
+    for (let i = 0; i < 40; i++) {
+      const fd = fdPathOf(abs, pid);
+      if (fd !== null) return fd;
+      const n = this.vfs.tryLookup(abs, false);
+      if (!n || !isLink(n)) return null;
+      abs = path.resolve(path.dirname(abs), n.target!);
+    }
+    return null;
+  }
+
   openFile(proc: { cwd: string; umask?: number }, p: string, flags: number, mode = 0o666): OpenFile {
     const abs = this.resolvePath(proc.cwd, p);
-    if (abs.startsWith('/proc/self/fd/') || abs.startsWith('/dev/fd/')) {
-      const fd = Number(abs.split('/').pop());
+    const procFd = this.procFdOf(abs, (proc as Proc).pid);
+    if (procFd !== null) {
       const owner = proc as Proc;
-      if (owner.fds?.has(fd)) return owner.fds.get(fd)!.ref();
-      throw kerr('ENOENT');
+      const f = owner.fds?.get(procFd);
+      if (!f) throw kerr('ENOENT');
+      // a file is opened anew (its own offset, as Linux reopens it); pipes, sockets and ttys are shared
+      if (f.kind === 'file' && f.opts.node && f.opts.vfs) return new OpenFile('file', flags, { vfs: f.opts.vfs, node: f.opts.node, path: f.opts.path });
+      return f.ref();
     }
     if (abs === '/dev/tty') {
       const tty = (proc as Proc).tty;
@@ -453,9 +528,17 @@ export class Kernel {
       if (isDir(node) && (flags & 3) !== O_RDONLY) throw kerr('EISDIR');
       if (flags & O_TRUNC && (flags & 3) !== O_RDONLY && !node.device) this.vfs.truncateNode(node, 0, abs);
     }
+    if ((node.mode & S_IFMT) === S_IFIFO) return openFifo(node, flags);
     if (node.device) return new OpenFile('file', flags, { vfs: this.vfs, node, path: abs });
     return new OpenFile(isDir(node) ? 'dir' : 'file', flags, { vfs: this.vfs, node, path: abs });
   }
+}
+
+/** N for /proc/self/fd/N, /proc/<pid>/fd/N (of this pid) and /dev/fd/N; null for other paths. */
+export function fdPathOf(abs: string, pid: number): number | null {
+  const m = /^\/(?:proc\/(self|\d+)|dev)\/fd\/(\d+)$/.exec(abs);
+  if (!m || (m[1] !== undefined && m[1] !== 'self' && Number(m[1]) !== pid)) return null;
+  return Number(m[2]);
 }
 
 export class ExitSignal {

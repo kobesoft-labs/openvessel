@@ -4,6 +4,18 @@ import { fromShape } from './shape.ts';
 import { setCryptoBufferPrototype } from './crypto.ts';
 
 const utf8Enc = new TextEncoder();
+
+/** TextEncoder.encodeInto, also into shared memory (the browser rejects views on a SharedArrayBuffer). */
+export function utf8EncodeInto(str: string, dest: Uint8Array): { read: number; written: number } {
+  if (Object.prototype.toString.call(dest.buffer) === '[object SharedArrayBuffer]') {
+    const tmp = new Uint8Array(dest.length);
+    const r = utf8Enc.encodeInto(str, tmp);
+    dest.set(tmp.subarray(0, r.written!));
+    return { read: r.read!, written: r.written! };
+  }
+  const r = utf8Enc.encodeInto(str, dest);
+  return { read: r.read!, written: r.written! };
+}
 // ignoreBOM: Node keeps a leading U+FEFF (the WHATWG decoder would strip it)
 const utf8Dec = new TextDecoder('utf-8', { ignoreBOM: true });
 const utf8Strict = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
@@ -139,12 +151,16 @@ function stringTooLong(): never {
   throw e;
 }
 
+/** TextDecoder rejects views on a SharedArrayBuffer (wasm threads' memory); copy those. */
+// (a copy by value: Buffer.prototype.slice is subarray, so it would stay on the shared memory)
+const unshared = (b: Uint8Array) => (Object.prototype.toString.call(b.buffer) === '[object SharedArrayBuffer]' ? new Uint8Array(b) : b);
+
 export function decode(b: Uint8Array, enc: Enc, s = 0, e = b.length): string {
   if (encodedLength(enc, e - s) > kStringMaxLength) stringTooLong();
   switch (enc) {
     case Enc.UTF8:
     case Enc.BUFFER:
-      return utf8Dec.decode(b.subarray(s, e));
+      return utf8Dec.decode(unshared(b.subarray(s, e)));
     case Enc.LATIN1:
       return latin1(b, s, e);
     case Enc.ASCII:
@@ -323,7 +339,7 @@ export function createBuffer() {
     const [off, len] = writeArgs(buf, offset, length);
     if (enc === Enc.UTF8) {
       if (len === 0) return 0;
-      return utf8Enc.encodeInto(str, buf.subarray(off, off + len)).written!;
+      return utf8EncodeInto(str, buf.subarray(off, off + len)).written;
     }
     return writeInto(buf, encode(str, enc), off, len);
   };
@@ -436,7 +452,7 @@ export function createBuffer() {
     isUtf8(v: ArrayBufferView | ArrayBuffer) {
       notDetached(v);
       try {
-        utf8Strict.decode(bytesOf(v));
+        utf8Strict.decode(unshared(bytesOf(v)));
         return true;
       } catch {
         return false;

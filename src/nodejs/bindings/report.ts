@@ -16,7 +16,7 @@ function header(trigger: string) {
     dumpEventTime: now.toISOString().replace(/\.\d{3}Z$/, 'Z'),
     dumpEventTimeStamp: String(now.getTime()),
     processId: S.init.pid,
-    threadId: S.isMainThread ? 0 : S.init.tid,
+    threadId: S.isMainThread ? 0 : (S.init.threadId ?? S.init.tid),
     cwd: S.cwd,
     commandLine: [...S.init.argv],
     nodejsVersion: `v${nodeData.versions.node}`,

@@ -1,0 +1,6 @@
+{
+  "test-fs-lchmod.js": "Runs only on macOS (lchmod exists only there); OpenVessel is a Linux system, so the test skips itself.",
+  "test-fs-readdir-buffer.js": "Runs only on macOS; OpenVessel is a Linux system, so the test skips itself.",
+  "test-fs-write-buffer-large.js": "Needs a single 2 GiB Buffer; Chrome refuses ArrayBuffers of 2 GiB and more (Array buffer allocation failed), so the test skips itself.",
+  "test-fs-write-sigxfsz.js": "Needs a real RLIMIT_FSIZE (ulimit -f) enforced by an OS kernel and its SIGXFSZ signal."
+}

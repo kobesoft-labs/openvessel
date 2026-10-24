@@ -21,6 +21,15 @@ export interface InitMsg {
   envData?: [unknown, unknown][];
   port?: MessagePort;
   name?: string;
+  /** Node's threadId (per process) */
+  threadId?: number;
+  /** rings of the env port for receiveMessageOnPort/drain: [send, recv] from the thread's side */
+  envRings?: [SharedArrayBuffer, SharedArrayBuffer];
+  trackUnmanagedFds?: boolean;
+  /** SHARE_ENV: process.env in shared memory (env.ts) */
+  sharedEnv?: SharedArrayBuffer;
+  /** maxYoungGenerationSizeMb, maxOldGenerationSizeMb, codeRangeSizeMb, stackSizeMb */
+  resourceLimits?: number[];
 }
 
 /** Filled in during bootstrap; bindings read it lazily. */
@@ -41,7 +50,8 @@ export const S = {
   hasEval: false,
   argv: [] as string[],
   /** The origin serving the runtime (for ESM URLs). */
-  runtimeOrigin: '',
+  /** URL of the runtime's directory (no trailing slash): node-process.js, ts-strip.js and /__ov/… are under it */
+  runtimeBase: '',
   cwd: '/',
   exiting: false,
   /** Set by the task_queue binding; called from the Worker's rejection events. */
@@ -60,6 +70,10 @@ export const S = {
   sourceLine: null as null | ((file: string, line: number) => string | undefined),
   /** Handlers for messages the kernel posts to this worker, by message type. */
   kernelHandlers: new Map<string, (msg: any) => void>(),
+  /** A module whose top-level await is still pending (module_wrap), for exit code 13. */
+  unsettledTopLevelAwait: null as null | (() => { url: string; line: number; source: string } | null),
+  /** Run before a worker thread exits (Environment cleanup hooks). */
+  atThreadExit: [] as (() => void)[],
 };
 
 /** Lazily requires a Node builtin (only valid after realm bootstrap). */

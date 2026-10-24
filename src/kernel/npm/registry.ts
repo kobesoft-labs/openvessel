@@ -1,6 +1,7 @@
 // npm registry access from the kernel (through the runtime's network proxy).
 
 import { gunzip, untar, type TarEntry } from './tar.ts';
+import { RUNTIME_BASE } from '../base.ts';
 
 export interface PackageVersion {
   name: string;
@@ -135,7 +136,7 @@ export class Registry {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         // OpenVessel's own compat packages come from this origin, not through the network policy
-        const own = typeof location !== 'undefined' && url.startsWith(`${location.origin}/compat/`);
+        const own = !!RUNTIME_BASE && url.startsWith(`${RUNTIME_BASE}/compat/`);
         const res = own ? await fetch(url) : await this.fetchFn(url);
         if (!res.ok) throw Object.assign(new Error(`${res.status} ${res.statusText} - GET ${url}`), { code: 'E' + res.status });
         const b = new Uint8Array(await res.arrayBuffer());

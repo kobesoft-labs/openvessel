@@ -11,6 +11,7 @@ import { parse as parseEsm } from 'es-module-lexer/js';
 import { sys } from '../../node/sys.ts';
 import * as loop from '../loop.ts';
 import { S, lib } from '../state.ts';
+import { NativePerformanceObserver, nativePerformance } from '../web.ts';
 import { fromShape } from './shape.ts';
 import { sucrase } from '../typescript.ts';
 import { cachedDataMatches, contextScope, makeCachedData, setPrivate } from './contextify.ts';
@@ -71,7 +72,7 @@ let importMetaCallback: ((symbol: unknown, meta: object, wrap: ModuleWrap) => vo
 let dynamicImportCallback: ((symbol: unknown, specifier: string, attributes: Record<string, string>, referrerName: string) => Promise<unknown>) | null = null;
 
 function moduleUrl(id: string) {
-  return `${S.runtimeOrigin}/__ov/mw/${S.init.pid}/${id}.mjs`;
+  return `${S.runtimeBase}/__ov/mw/${S.init.pid}/${id}.mjs`;
 }
 
 /** The `with { … }` / `assert { … }` clause that starts before attrStart, as [start, end). */
@@ -148,6 +149,18 @@ export class ModuleWrap {
         throw e;
       }
       this.#source = sourceOrNames;
+      // V8 compiles the module here. Only the lexer runs below, so code given to eval (node -e
+      // --input-type=module, new Worker(code, { eval: true })) is parsed: lib retries it as
+      // TypeScript when it doesn't compile
+      if (/\[(?:worker )?eval\d*\]$/.test(url)) {
+        const acorn = lib('internal/deps/acorn/acorn/dist/acorn');
+        try {
+          acorn.parse(sourceOrNames, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true });
+        } catch (e: any) {
+          if (e instanceof SyntaxError || e?.name === 'SyntaxError') throw new SyntaxError(v8SyntaxMessage(sourceOrNames) ?? String(e.message).replace(/ \(\d+:\d+\)$/, ''));
+          throw e;
+        }
+      }
       this.#analyze(sourceOrNames);
     } else {
       this.#exportNames = [...sourceOrNames];
@@ -275,6 +288,13 @@ export class ModuleWrap {
       out += `const $ov${i} = $ov[${JSON.stringify(n)}];\nexport { $ov${i} as ${n === 'default' || ID_RE.test(n) ? n : JSON.stringify(n)} };\n`;
     });
     return out;
+  }
+
+  /** @internal calls fn(url, source) for the source modules of this graph */
+  forEachSource(fn: (url: string, src: string) => void) {
+    this.#walk((m) => {
+      if (m.#source != null) fn(m.url, m.#source);
+    });
   }
 
   servedUrl(): string {
@@ -411,10 +431,17 @@ export class ModuleWrap {
       return Promise.reject(e);
     }
     this.#status = kEvaluating;
+    // loading (the browser fetching the graph) is work the loop waits for; a top-level await that
+    // never settles afterwards is not (Node exits with 13 when nothing else is left)
     const done = loop.startReq('ModuleEvaluation');
+    const urls: string[] = [];
+    this.#walk((m) => urls.push(m.servedUrl()));
+    whenFetched(urls, done);
+    pendingEvaluations.add(this);
     this.#evaluation = import(/* @vite-ignore */ this.servedUrl()).then(
       (ns) => {
         done();
+        pendingEvaluations.delete(this);
         this.#realNs = ns;
         if (!this.#isVm) this.#namespace = ns;
         this.#walk((m) => {
@@ -424,6 +451,7 @@ export class ModuleWrap {
       },
       (e) => {
         done();
+        pendingEvaluations.delete(this);
         this.#status = kErrored;
         this.#error = e;
         throw e;
@@ -737,6 +765,72 @@ function importFromCwd(specifier: unknown, options?: { with?: Record<string, str
   return getOrInitializeCascadedLoader().import(String(specifier), parent, options?.with ?? {});
 }
 
+/**
+ * V8's own message for a syntax error in module code (what Node reports): the source compiled as
+ * an async function body, with import/export declarations blanked out (same length).
+ */
+function v8SyntaxMessage(src: string): string | null {
+  const blank = (m: string) => m.replace(/[^\n]/g, ' ');
+  const body = src
+    .replace(/^\s*import\s[^;]*?(?:from\s*)?['"][^'"]*['"]\s*(?:with\s*\{[^}]*\})?;?/gm, blank)
+    .replace(/^\s*import\s*['"][^'"]*['"];?/gm, blank)
+    .replace(/^\s*export\s*\{[^}]*\}(?:\s*from\s*['"][^'"]*['"])?;?/gm, blank)
+    .replace(/^\s*export\s*\*[^;\n]*;?/gm, blank)
+    .replace(/\bexport\s+default\s+/g, (m) => blank(m))
+    .replace(/\bexport\s+(?=(?:const|let|var|function|class|async)\b)/g, (m) => blank(m));
+  try {
+    new (Object.getPrototypeOf(async function () {}).constructor)(body);
+    return null;
+  } catch (e: any) {
+    return e instanceof SyntaxError ? e.message : null;
+  }
+}
+
+// evaluations still pending: at exit, a top-level await that never settled
+const pendingEvaluations = new Set<ModuleWrap>();
+function unsettledTopLevelAwait(): { url: string; line: number; source: string } | null {
+  for (const root of pendingEvaluations) {
+    let found: { url: string; line: number; source: string } | null = null;
+    (root as any).forEachSource((url: string, src: string) => {
+      if (found) return;
+      const i = src.search(/(^|[^\w$.])await\b/);
+      if (i >= 0) found = { url, line: src.slice(0, i + 1).split('\n').length, source: src };
+    });
+    if (found) return found;
+  }
+  return null;
+}
+
+// URLs the browser has fetched (Resource Timing), to tell loading from waiting
+const fetched = new Set<string>();
+const fetchWaiters = new Set<() => void>();
+let fetchObserver: PerformanceObserver | null = null;
+function observeFetches() {
+  if (fetchObserver || !NativePerformanceObserver) return;
+  try {
+    (nativePerformance as any).setResourceTimingBufferSize?.(100000);
+    fetchObserver = new NativePerformanceObserver((list) => {
+      for (const e of list.getEntries()) fetched.add(e.name);
+      for (const w of [...fetchWaiters]) w();
+    });
+    fetchObserver.observe({ type: 'resource', buffered: true });
+  } catch {
+    fetchObserver = null;
+  }
+}
+/** Calls done once every URL has been fetched (or never, without Resource Timing: then evaluation settling does). */
+function whenFetched(urls: string[], done: () => void) {
+  if (!fetchObserver) return;
+  const check = () => {
+    if (urls.every((u) => fetched.has(u))) {
+      fetchWaiters.delete(check);
+      done();
+    }
+  };
+  fetchWaiters.add(check);
+  check();
+}
+
 /** The module URL (file://…) for a URL the runtime served the module at, if it is one. */
 export function moduleUrlForServed(url: string): string | undefined {
   const m = /\/__ov\/mw\/\d+\/(\d+)\.mjs$/.exec(url);
@@ -751,6 +845,8 @@ export function importFromScript(referrerSymbol: unknown, referrerName: string, 
 }
 
 export function createModuleWrap() {
+  observeFetches();
+  S.unsettledTopLevelAwait = unsettledTopLevelAwait;
   const b = fromShape('module_wrap');
   const g = globalThis as any;
   Object.defineProperties(g, {

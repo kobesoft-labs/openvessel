@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 430" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">Node.js on a computer and Node.js in OpenVessel, layer by layer</title>
+  <desc id="d">Your code and npm packages and Node's JavaScript library are the same in both. Node's C++ bindings are re-implemented in TypeScript, libuv's event loop is emulated, the operating system is the OpenVessel kernel in a Web Worker, and the machine is the browser.</desc>
+  <defs>
+    <filter id="s" x="-5%" y="-10%" width="110%" height="130%"><feDropShadow dx="0" dy="1.5" stdDeviation="2" flood-color="#0f172a" flood-opacity=".10"/></filter>
+  </defs>
+  <rect width="960" height="430" rx="18" fill="#f8fafc"/>
+  <text x="40" y="44" font-size="15" font-weight="800" fill="#0f172a">Node.js on a computer</text>
+  <text x="560" y="44" font-size="15" font-weight="800" fill="#312e81">Node.js in OpenVessel</text>
+
+  <g font-size="13">
+    <!-- row 1: same -->
+    <rect x="40" y="62" width="360" height="52" rx="10" fill="#fff" stroke="#e2e8f0" filter="url(#s)"/>
+    <text x="58" y="86" font-weight="700" fill="#0f172a">Your code · npm packages</text>
+    <text x="58" y="104" font-size="11.5" fill="#64748b">astro, vite, react, …</text>
+    <rect x="560" y="62" width="360" height="52" rx="10" fill="#fff" stroke="#e2e8f0" filter="url(#s)"/>
+    <text x="578" y="86" font-weight="700" fill="#0f172a">Your code · npm packages</text>
+    <text x="578" y="104" font-size="11.5" fill="#64748b">native addons → their WebAssembly builds</text>
+
+    <!-- row 2: same -->
+    <rect x="40" y="124" width="360" height="52" rx="10" fill="#dcfce7" stroke="#86efac"/>
+    <text x="58" y="148" font-weight="700" fill="#14532d">Node.js lib/ (JavaScript)</text>
+    <text x="58" y="166" font-size="11.5" fill="#166534">fs, http, stream, child_process, …</text>
+    <rect x="560" y="124" width="360" height="52" rx="10" fill="#dcfce7" stroke="#86efac"/>
+    <text x="578" y="148" font-weight="700" fill="#14532d">Node.js lib/ (JavaScript)</text>
+    <text x="578" y="166" font-size="11.5" fill="#166534">the very same files, unmodified</text>
+
+    <!-- row 3 -->
+    <rect x="40" y="186" width="360" height="52" rx="10" fill="#fff" stroke="#e2e8f0"/>
+    <text x="58" y="210" font-weight="700" fill="#0f172a">internalBinding() — C++</text>
+    <text x="58" y="228" font-size="11.5" fill="#64748b">src/node_file.cc, tcp_wrap.cc, …</text>
+    <rect x="560" y="186" width="360" height="52" rx="10" fill="#e0e7ff" stroke="#a5b4fc"/>
+    <text x="578" y="210" font-weight="700" fill="#312e81">internalBinding() — TypeScript</text>
+    <text x="578" y="228" font-size="11.5" fill="#4338ca">src/nodejs/bindings/ — checked against real Node</text>
+
+    <!-- row 4 -->
+    <rect x="40" y="248" width="360" height="52" rx="10" fill="#fff" stroke="#e2e8f0"/>
+    <text x="58" y="272" font-weight="700" fill="#0f172a">libuv · V8</text>
+    <text x="58" y="290" font-size="11.5" fill="#64748b">event loop, threads, sockets</text>
+    <rect x="560" y="248" width="360" height="52" rx="10" fill="#e0e7ff" stroke="#a5b4fc"/>
+    <text x="578" y="272" font-weight="700" fill="#312e81">event-loop emulation · the browser's V8</text>
+    <text x="578" y="290" font-size="11.5" fill="#4338ca">src/nodejs/loop.ts · a Web Worker per process</text>
+
+    <!-- row 5 -->
+    <rect x="40" y="310" width="360" height="52" rx="10" fill="#fff" stroke="#e2e8f0"/>
+    <text x="58" y="334" font-weight="700" fill="#0f172a">Operating system</text>
+    <text x="58" y="352" font-size="11.5" fill="#64748b">files, processes, network, shell</text>
+    <rect x="560" y="310" width="360" height="52" rx="10" fill="#e0e7ff" stroke="#a5b4fc"/>
+    <text x="578" y="334" font-weight="700" fill="#312e81">OpenVessel kernel</text>
+    <text x="578" y="352" font-size="11.5" fill="#4338ca">src/kernel/ — in-memory FS, processes, sh, npm, virtual ports</text>
+
+    <!-- row 6 -->
+    <rect x="40" y="372" width="360" height="40" rx="10" fill="#e2e8f0"/>
+    <text x="58" y="397" font-weight="700" fill="#334155">A computer</text>
+    <rect x="560" y="372" width="360" height="40" rx="10" fill="#c7d2fe"/>
+    <text x="578" y="397" font-weight="700" fill="#1e1b4b">A browser tab</text>
+  </g>
+
+  <!-- middle labels -->
+  <g font-size="12" font-weight="700" text-anchor="middle">
+    <text x="480" y="93" fill="#16a34a">same</text>
+    <text x="480" y="155" fill="#16a34a">same</text>
+    <text x="480" y="217" fill="#4f46e5">rewritten</text>
+    <text x="480" y="279" fill="#4f46e5">emulated</text>
+    <text x="480" y="341" fill="#4f46e5">replaced</text>
+  </g>
+  <g stroke="#94a3b8" stroke-width="1.4">
+    <path d="M410 88 H450 M510 88 H550"/><path d="M410 150 H450 M510 150 H550"/>
+    <path d="M410 212 H440 M520 212 H550"/><path d="M410 274 H440 M520 274 H550"/><path d="M410 336 H440 M520 336 H550"/>
+  </g>
+</svg>

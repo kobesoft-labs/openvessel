@@ -66,19 +66,30 @@ function installExitHandler() {
   });
 }
 
+/** setuid(2)/setgid(2) in the child (libuv's UV_PROCESS_SETUID): an unprivileged user keeps its own ids. */
+function credentialError(options: { uid?: number; gid?: number }): number {
+  const c = S.internalBinding('credentials');
+  if (typeof options.gid === 'number' && options.gid !== c.getgid() && options.gid !== c.getegid()) return errno('EPERM');
+  if (typeof options.uid === 'number' && options.uid !== c.getuid() && options.uid !== c.geteuid()) return errno('EPERM');
+  return 0;
+}
+
 class ProcessWrap extends HandleWrap {
-  pid = 0;
+  /** set once spawned (like the C++ wrap, which only defines it on success) */
+  pid: number | undefined = undefined;
   onexit: ((exitCode: number, signalCode: string | null) => void) | null = null;
 
   constructor() {
     super('ProcessWrap');
   }
 
-  spawn(options: { file: string; args?: string[]; cwd?: string; envPairs?: string[]; stdio?: StdioOption[]; detached?: boolean }) {
+  spawn(options: { file: string; args?: string[]; cwd?: string; envPairs?: string[]; stdio?: StdioOption[]; detached?: boolean; uid?: number; gid?: number }) {
     installExitHandler();
-    const args = options.args ?? [options.file];
+    const credErr = credentialError(options);
+    if (credErr) return credErr;
+    const args = (options.args ?? [options.file]).map(String); // the C++ side reads each with ToString
     const stdio = options.stdio ?? [];
-    let res: { pid: number; fds: (number | null)[] };
+    let res: { pid: number; fds: (number | null)[]; error?: string };
     try {
       res = sys('spawn', {
         argv: [options.file, ...args.slice(1)],
@@ -86,17 +97,19 @@ class ProcessWrap extends HandleWrap {
         env: envObject(options.envPairs),
         cwd: options.cwd || undefined,
         stdio: kernelSpecs(stdio),
+        keepStdioOnError: true,
       });
     } catch (e) {
       return e instanceof SysError ? errno(e.code) : errno('EIO');
     }
-    this.pid = res.pid;
-    children.set(res.pid, this);
-    this.setActive(true);
     stdio.forEach((s, i) => {
       const fd = res.fds[i];
       if ((s.type === 'pipe' || s.type === 'overlapped') && s.handle && typeof fd === 'number') s.handle._setFd(fd);
     });
+    if (res.error) return errno(res.error);
+    this.pid = res.pid;
+    children.set(res.pid, this);
+    this.setActive(true);
     return 0;
   }
 
@@ -124,8 +137,10 @@ export function createProcessWrap() {
 export function createSpawnSync() {
   const b = fromShape('spawn_sync');
   return Object.assign(b, {
-    spawn(options: { file: string; args?: string[]; cwd?: string; envPairs?: string[]; stdio?: StdioOption[]; timeout?: number; killSignal?: number | string; maxBuffer?: number }) {
-      const args = options.args ?? [options.file];
+    spawn(options: { file: string; args?: string[]; cwd?: string; envPairs?: string[]; stdio?: StdioOption[]; timeout?: number; killSignal?: number | string; maxBuffer?: number; uid?: number; gid?: number }) {
+      const credErr = credentialError(options);
+      if (credErr) return { error: credErr, status: null, signal: null, output: null, pid: 0 };
+      const args = (options.args ?? [options.file]).map(String); // the C++ side reads each with ToString
       const stdio = options.stdio ?? [];
       const input = stdio[0]?.input;
       try {
@@ -146,9 +161,11 @@ export function createSpawnSync() {
         let err = r.bin.slice(r.outLen);
         const result: Record<string, unknown> = { pid: r.pid, status: r.status, signal: r.signal };
         const max = options.maxBuffer;
-        if (typeof max === 'number' && Number.isFinite(max) && (out.length > max || err.length > max)) {
-          out = out.slice(0, max);
-          err = err.slice(0, max);
+        if (typeof max === 'number' && Number.isFinite(max) && out.length + err.length > max) {
+          // libuv reads 64 KiB at a time and keeps the read that crossed the limit
+          const keep = (Math.floor(max / 65536) + 1) * 65536;
+          out = out.slice(0, keep);
+          err = err.slice(0, Math.max(0, keep - out.length));
           result.error = errno('ENOBUFS');
           result.status = null;
           result.signal = typeof options.killSignal === 'string' ? options.killSignal : 'SIGTERM';
