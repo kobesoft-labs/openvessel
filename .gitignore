@@ -6,3 +6,6 @@ test/node-compat/.node/
 test/node-compat/results/logs/
 vendor/
 test/node-compat/results/
+
+# compat packages carry their own dist/ files
+!compat/**/dist/
