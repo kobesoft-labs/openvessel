@@ -528,10 +528,25 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       case 'exit': {
         const status = { code: (a.code ?? 0) & 0xff, signal: null };
         const peers = socketPeersReading(proc);
-        if (!peers.length) {
+        // what it wrote to pipes another process reads (stderr of a failing child) is taken out
+        // first: libuv reads a child's output before it reports the child's exit
+        const unread: Pipe[] = [];
+        for (const f of proc.fds.values()) {
+          const pipe = f.kind === 'pipe' ? (f.opts.writer as { pipe?: Pipe } | undefined)?.pipe : undefined;
+          if (pipe && pipe.buffered > 0 && pipe.readers > 0 && !unread.includes(pipe)) unread.push(pipe);
+        }
+        if (!peers.length && !unread.length) {
           kernel.exitProcess(proc, status);
           return null;
         }
+        const drained = unread.map(
+          (pipe) =>
+            new Promise<void>((resolve) => {
+              const t0 = Date.now();
+              const poll = () => (pipe.buffered === 0 || pipe.readers === 0 || Date.now() - t0 > 250 ? resolve() : setTimeout(poll, 2));
+              poll();
+            }),
+        );
         // the exiting thread never runs again; the process ends once its peers have caught up
         const waits = peers.map(
           (st) =>
@@ -545,7 +560,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
               }, 250);
             }),
         );
-        void Promise.all(waits).then(() => kernel.exitProcess(proc, status));
+        void Promise.all([...waits, ...drained]).then(() => kernel.exitProcess(proc, status));
         return null;
       }
       case 'udpBind': {
