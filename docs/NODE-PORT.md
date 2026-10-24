@@ -53,4 +53,4 @@ OS の層（カーネル・残す）               ← src/kernel/
 5. worker_threads・zlib・crypto・fetch
 6. Node の試験（test/node-compat）とコーパス（corpus/）で旧実装（1259 本中 494 本・Astro 5/6 の 100 本中 79 本前後）を超えたら、旧 `src/node/` を消す
 
-各段で `test/node-compat` の数字を記録する（`docs/HANDOFF.md`）。
+各段で `test/node-compat` の数字を記録する（`docs/compatibility.ja.md`）。
