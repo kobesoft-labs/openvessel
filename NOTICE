@@ -1,0 +1,32 @@
+OpenVessel
+Copyright 2026 KOBESOFT
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It includes or is built from the following third-party software, under their own licenses:
+
+Bundled into the runtime (dist/)
+- Node.js lib/ and deps/ (v22.23.4) — MIT and the licenses of Node.js's bundled
+  dependencies; shipped as dist/runtime/nodelib.js with dist/runtime/NODE-LICENSE.txt.
+  https://github.com/nodejs/node
+- Brotli (compiled to WebAssembly) — MIT. https://github.com/google/brotli
+- Zstandard (compiled to WebAssembly) — BSD-3-Clause. https://github.com/facebook/zstd
+- @noble/ciphers, @noble/curves, @noble/hashes — MIT. https://paulmillr.com/noble/
+- sucrase — MIT. https://github.com/alangpierce/sucrase
+- pako — MIT and Zlib. https://github.com/nodeca/pako
+- fflate — MIT. https://github.com/101arrowz/fflate
+- buffer, readable-stream — MIT.
+- cjs-module-lexer, es-module-lexer — MIT. https://github.com/nodejs/cjs-module-lexer,
+  https://github.com/guybedford/es-module-lexer
+- xterm.js (@xterm/xterm, @xterm/addon-fit) — MIT. https://github.com/xtermjs/xterm.js
+
+Compat packages (dist/runtime/compat/, built by scripts/build-compat.mjs)
+- Pagefind 1.5.2, compiled to wasm32-wasip1 from the published crate with
+  compat/pagefind/wasi.patch — MIT. https://github.com/Pagefind/pagefind
+- cn-font-split 7.4.3 and its wasm32-wasip1 library release 7.6.8 — Apache-2.0.
+  https://github.com/KonghaYao/cn-font-split
+- @resvg/resvg-js type definitions (index.d.ts, 2.6.2) — MPL-2.0. The compat package uses
+  @resvg/resvg-wasm (MPL-2.0) at install time. https://github.com/yisibl/resvg-js
+
+Packages installed into a project at run time (from the npm registry) keep their own licenses
+and are not part of this product.

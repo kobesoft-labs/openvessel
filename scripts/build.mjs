@@ -66,7 +66,11 @@ if (watch) {
   console.log('watching…');
 } else {
   await Promise.all(configs.map((c) => build(c)));
-  if (existsSync(join(root, 'vendor/node/natives.json'))) genNodeLib(join(dist, 'runtime/nodelib.js'));
+  if (existsSync(join(root, 'vendor/node/natives.json'))) {
+    genNodeLib(join(dist, 'runtime/nodelib.js'));
+    // nodelib.js is Node.js's lib/ and deps/: its license (with the bundled deps' notices) ships with it
+    cpSync(join(root, 'vendor/node/LICENSE'), join(dist, 'runtime/NODE-LICENSE.txt'));
+  }
   else console.warn('vendor/node missing: run node scripts/gen-node-data.mjs to build the ported Node runtime');
   await buildCompat(join(dist, 'runtime/compat'));
   console.log('built dist/');
