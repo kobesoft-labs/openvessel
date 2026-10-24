@@ -253,8 +253,9 @@ function installStackTraceHook() {
     const frames = trace.filter((cs) => {
       const f = cs?.getFileName?.();
       if (typeof f === 'string' && f.endsWith(runtimeFile)) return false;
-      // the boundary of an indirect eval that compiled a module or script
-      if (!f && !cs?.getScriptNameOrSourceURL?.() && cs?.getFunctionName?.() === 'eval') return false;
+      // the boundary of an indirect eval that compiled a module or script (code evaluated by the
+      // runtime itself; a user's new Function() or eval() frame stays)
+      if (!f && !cs?.getScriptNameOrSourceURL?.() && cs?.getFunctionName?.() === 'eval' && String(cs?.getEvalOrigin?.() ?? '').includes(runtimeFile)) return false;
       return true;
     }).map(asCompiledFrame);
     if (inCallback || !S.prepareStackTrace) return nodePrepare(error, frames);
