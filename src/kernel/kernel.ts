@@ -20,6 +20,8 @@ export interface SpawnOptions {
   tty?: Tty;
   /** Resolve argv[0] through PATH (default true). */
   searchPath?: boolean;
+  /** argv[0] the program sees when it is run directly (execve's argv[0]; defaults to argv[0]). */
+  argv0?: string;
 }
 
 export interface KernelHooks {
@@ -37,6 +39,21 @@ export interface ListenRecord {
   pid: number;
   tid: number;
   host: string;
+  /** other processes accepting on the same listening socket (a server handle sent over IPC) */
+  acceptors?: { pid: number; tid: number }[];
+  /** round-robin position among the owner and the acceptors */
+  next?: number;
+}
+
+/** Removes a process from a listener; returns false when nobody listens any more. */
+export function leaveListener(rec: ListenRecord, pid: number): boolean {
+  if (rec.acceptors) rec.acceptors = rec.acceptors.filter((a) => a.pid !== pid);
+  if (rec.pid !== pid) return true;
+  const heir = rec.acceptors?.shift();
+  if (!heir) return false;
+  rec.pid = heir.pid;
+  rec.tid = heir.tid;
+  return true;
 }
 
 const enc = new TextEncoder();
@@ -72,8 +89,8 @@ export class Kernel {
       v.mkdir(d, 0o755, true);
     }
     v.chmod('/tmp', 0o1777);
-    v.writeFile('/etc/passwd', 'root:x:0:0:root:/root:/bin/sh\nuser:x:1000:1000:user:/home/user:/bin/sh\n');
-    v.writeFile('/etc/group', 'root:x:0:\nuser:x:1000:\n');
+    v.writeFile('/etc/passwd', 'root:x:0:0:root:/root:/bin/sh\nuser:x:1000:1000:user:/home/user:/bin/sh\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n');
+    v.writeFile('/etc/group', 'root:x:0:\nuser:x:1000:\nnogroup:x:65534:\n');
     v.writeFile('/etc/hostname', `${this.hostname}\n`);
     v.writeFile('/etc/hosts', '127.0.0.1 localhost\n::1 localhost\n');
     v.writeFile('/etc/os-release', 'NAME="OpenVessel"\nID=openvessel\nPRETTY_NAME="OpenVessel"\n');
@@ -180,6 +197,8 @@ export class Kernel {
     const argv = [...opts.argv];
     if (argv.length === 0) throw kerr('EINVAL');
     const plan = this.planExec(argv, env, cwd, opts.searchPath !== false);
+    // node run directly keeps the caller's argv[0] (process.argv0); through a shebang it is the interpreter
+    if (plan.kind === 'node' && plan.direct) plan.argv[0] = opts.argv0 ?? argv[0];
 
     const pid = this.nextPid++;
     const pgid = opts.pgid === 0 ? pid : (opts.pgid ?? parent?.pgid ?? pid);
@@ -195,7 +214,7 @@ export class Kernel {
     proc.onExit.add((status) => {
       this.hooks.onProcessExit?.(pid, status);
       for (const [port, rec] of this.ports) {
-        if (rec.pid === pid) {
+        if (!leaveListener(rec, pid)) {
           this.ports.delete(port);
           this.hooks.onUnlisten?.(port, pid);
         }
@@ -227,7 +246,7 @@ export class Kernel {
   }
 
   /** Determines how to run argv: builtin program or node, following shebangs. */
-  planExec(argv: string[], env: Record<string, string>, cwd: string, searchPath = true): { kind: 'builtin'; name: string; argv: string[] } | { kind: 'node'; argv: string[] } {
+  planExec(argv: string[], env: Record<string, string>, cwd: string, searchPath = true): { kind: 'builtin'; name: string; argv: string[] } | { kind: 'node'; argv: string[]; direct?: boolean } {
     let depth = 0;
     for (;;) {
       if (depth++ > 8) throw kerr('ELOOP');
@@ -248,7 +267,7 @@ export class Kernel {
         let iargs = parts.slice(1);
         if (interp === BUILTIN_SHEBANG) {
           const name = iargs[0];
-          if (name === 'node') return { kind: 'node', argv: ['node', ...argv.slice(1)] };
+          if (name === 'node') return { kind: 'node', argv: ['node', ...argv.slice(1)], direct: depth === 1 };
           if (!this.programs.has(name)) throw new KernelError('ENOENT', `${name}: builtin missing`);
           return { kind: 'builtin', name, argv };
         }
@@ -269,6 +288,42 @@ export class Kernel {
       if (/\.(c|m)?js$/.test(file)) return { kind: 'node', argv: ['node', file, ...argv.slice(1)] };
       // ENOEXEC: run as a shell script, like POSIX shells do
       return { kind: 'builtin', name: 'sh', argv: ['sh', file, ...argv.slice(1)] };
+    }
+  }
+
+  /**
+   * execve(2): a new program in an existing process (same pid, cwd and stdio). The caller has
+   * closed the descriptors that don't survive; the old program's threads are stopped here.
+   * Throws (ENOENT, EACCES…) before anything changes when the program can't be run.
+   */
+  execImage(proc: Proc, argv: string[], env: Record<string, string>, argv0?: string) {
+    const plan = this.planExec(argv, env, proc.cwd, true);
+    if (plan.kind === 'node' && plan.direct) plan.argv[0] = argv0 ?? argv[0];
+    for (const t of proc.threads.values()) {
+      try {
+        t.worker.terminate();
+      } catch {}
+    }
+    proc.threads.clear();
+    proc.handledSignals.clear();
+    // its listening sockets go with the old image (Node marks every fd but stdio FD_CLOEXEC)
+    for (const [port, rec] of this.ports) {
+      if ((rec.pid === proc.pid || rec.acceptors?.some((a) => a.pid === proc.pid)) && !leaveListener(rec, proc.pid)) {
+        this.ports.delete(port);
+        this.hooks.onUnlisten?.(port, proc.pid);
+      }
+    }
+    for (const [ino, rec] of this.unixSockets) if (rec.pid === proc.pid) this.unixSockets.delete(ino);
+    proc.argv = plan.argv;
+    proc.env = env;
+    if (plan.kind === 'builtin') {
+      proc.kind = 'builtin';
+      proc.title = plan.name;
+      this.runBuiltin(proc, this.programs.get(plan.name)!);
+    } else {
+      proc.kind = 'node';
+      proc.title = 'node';
+      this.startNode(proc);
     }
   }
 

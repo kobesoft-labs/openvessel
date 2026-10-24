@@ -34,6 +34,8 @@ self.onmessage = (ev: MessageEvent) => {
     }
     return;
   }
+  // the kernel asks whether everything it posted before has been handled
+  if (msg?.t === 'ping') return post({ t: 'pong', id: msg.id });
   const h = S.kernelHandlers.get(msg?.t);
   if (h) h(msg);
 };
@@ -127,26 +129,50 @@ loop.setFatalPrinter((err: unknown) => {
 // -----------------------------------------------------------------------------
 // process object (node_process_object.cc)
 
+/**
+ * process.env (node_env_var.cc): string keys map to the environment; anything else (symbols,
+ * Object.prototype's members) behaves like an ordinary object, so `process.env.hasOwnProperty`
+ * is the inherited function until a variable of that name is set.
+ */
 function createEnvProxy(initial: Record<string, string>) {
-  const store: Record<string, string> = Object.create(null);
+  const store: Record<string, string> = {};
   for (const [k, v] of Object.entries(initial)) store[k] = String(v);
+  const invalidDefine = (msg: string) => {
+    const e = new TypeError(msg) as TypeError & { code: string };
+    e.code = 'ERR_INVALID_OBJECT_DEFINE_PROPERTY';
+    return e;
+  };
+  let warnedNonString = false;
+  const toValue = (v: unknown): string => {
+    if (typeof v === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+    if (!warnedNonString && typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean' && S.optionValues?.['--pending-deprecation']) {
+      warnedNonString = true;
+      try {
+        S.process.emitWarning(
+          'Assigning any value other than a string, number, or boolean to a process.env property is deprecated. Please make sure to convert the value to a string before setting process.env with it.',
+          'DeprecationWarning',
+          'DEP0104',
+        );
+      } catch {}
+    }
+    return String(v);
+  };
   return new Proxy(store, {
     set(t, k, v) {
-      if (typeof k === 'symbol') {
-        const e = new TypeError('Cannot convert a Symbol value to a string');
-        throw e;
-      }
-      t[k] = String(v);
+      if (typeof k === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+      Object.defineProperty(t, k, { value: toValue(v), writable: true, enumerable: true, configurable: true });
       return true;
     },
     defineProperty(t, k, d) {
-      if (typeof k === 'symbol') return false;
-      if ('get' in d || 'set' in d || d.configurable === false || d.writable === false || d.enumerable === false) {
-        const e = new TypeError(`'process.env' only accepts a configurable, writable, and enumerable data descriptor`) as TypeError & { code: string };
-        e.code = 'ERR_INVALID_OBJECT_DEFINE_PROPERTY';
-        throw e;
+      if ('value' in d) {
+        if (!d.configurable || !d.writable || !d.enumerable) throw invalidDefine(`'process.env' only accepts a configurable, writable, and enumerable data descriptor`);
+      } else if ('get' in d || 'set' in d) {
+        throw invalidDefine(`'process.env' does not accept an accessor(getter/setter) descriptor`);
+      } else {
+        throw invalidDefine(`'process.env' only accepts a configurable, writable, and enumerable data descriptor`);
       }
-      t[k] = String(d.value);
+      if (typeof k === 'symbol') return false;
+      Object.defineProperty(t, k, { value: toValue(d.value), writable: true, enumerable: true, configurable: true });
       return true;
     },
     deleteProperty(t, k) {
@@ -365,7 +391,7 @@ function boot(init: InitMsg) {
   } else {
     const cl = parseCommandLine(['node', ...(init.execArgv ?? [])], '');
     S.optionValues = cl.values;
-    S.execArgv = init.execArgv ?? [];
+    S.execArgv = cl.execArgv;
     S.argv = init.argv;
   }
 

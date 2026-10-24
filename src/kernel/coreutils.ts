@@ -227,14 +227,34 @@ const ls: Program = async (ctx) => {
 const cat: Program = async (ctx) => {
   const { flags, args } = getopt(ctx.argv.slice(1));
   let lineNo = 1;
-  return eachInput(ctx, args, 'cat', (d) => {
-    if (flags.has('n')) {
-      const text = dec.decode(d);
-      const lines = text.split('\n');
-      const last = lines.pop();
-      ctx.out(lines.map((l) => `${String(lineNo++).padStart(6)}\t${l}\n`).join('') + (last ? `${String(lineNo++).padStart(6)}\t${last}` : ''));
-    } else ctx.out(d);
-  });
+  let atLineStart = true;
+  const emit = (d: Uint8Array) => {
+    if (!flags.has('n')) return ctx.out(d);
+    const text = dec.decode(d, { stream: true });
+    let out = '';
+    for (const part of text.split(/(?<=\n)/)) {
+      if (!part) continue;
+      if (atLineStart) out += `${String(lineNo++).padStart(6)}\t`;
+      out += part;
+      atLineStart = part.endsWith('\n');
+    }
+    ctx.out(out);
+  };
+  let st = 0;
+  for (const f of args.length ? args : ['-']) {
+    if (f === '-') {
+      // stream stdin: a reader on the other end of a pipe sees each chunk as it arrives
+      for (let d; (d = await ctx.read(0)); ) emit(d);
+      continue;
+    }
+    try {
+      emit(ctx.vfs.readFile(ctx.resolve(f)));
+    } catch (e) {
+      ctx.err(`cat: ${f}: ${errMsg(e)}\n`);
+      st = 1;
+    }
+  }
+  return st;
 };
 
 const mkdir: Program = async (ctx) => {
@@ -464,6 +484,25 @@ const head: Program = async (ctx) => {
   const { opts, args } = getopt(argv, 'nc');
   const n = Number(opts.get('n') ?? 10);
   const multi = args.length > 1;
+  if (!args.length && (opts.has('c') ? Number(opts.get('c')) >= 0 : n >= 0)) {
+    // stdin is streamed: head exits once it has its lines/bytes, without waiting for EOF
+    let left = opts.has('c') ? Number(opts.get('c')) : n;
+    while (left > 0) {
+      const d = await ctx.read(0);
+      if (!d) break;
+      let end = d.length;
+      if (opts.has('c')) end = Math.min(d.length, left);
+      else
+        for (let i = 0; i < d.length; i++)
+          if (d[i] === 10 && --left === 0) {
+            end = i + 1;
+            break;
+          }
+      if (opts.has('c')) left -= end;
+      ctx.out(d.subarray(0, end));
+    }
+    return 0;
+  }
   return eachInput(ctx, args, 'head', (d, f) => {
     if (multi) ctx.out(`==> ${f} <==\n`);
     if (opts.has('c')) {

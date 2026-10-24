@@ -1,7 +1,9 @@
 // stream_wrap, pipe_wrap and tty_wrap: libuv stream handles over kernel file descriptors.
 // HandleWrap (close/ref/unref) → LibuvStreamWrap (readStart/readStop/write*/shutdown) → Pipe, TTY.
-// Reads come from the kernel as 'fd-data' messages after readStart; writes are synchronous syscalls,
-// so every write completes synchronously (kLastWriteWasAsync = 0), like a blocking stdio pipe.
+// Reads come from the kernel as 'fd-data' messages after readStart. Writes are syscalls: stdio
+// (fds 0-2) writes whole buffers synchronously, like Node's stdio pipes on Linux; other pipes and
+// sockets take what fits in the kernel buffer and finish the rest asynchronously once the reader
+// has drained it ('fd-writable'), so writers see backpressure like with libuv.
 
 import { SysError, post, sys } from '../../node/sys.ts';
 import * as loop from '../loop.ts';
@@ -22,11 +24,13 @@ function errno(code: string): number {
 
 // fd → stream receiving its 'fd-data'
 const readers = new Map<number, LibuvStreamWrap>();
+// fd → stream waiting for room to write ('fd-writable')
+const writers = new Map<number, LibuvStreamWrap>();
 let handlerInstalled = false;
 function installHandler() {
   if (handlerInstalled) return;
   handlerInstalled = true;
-  S.kernelHandlers.set('fd-data', (msg: { fd?: number; id?: number; data: Uint8Array | null; err?: string }) => {
+  S.kernelHandlers.set('fd-data', (msg: { fd?: number; id?: number; data: Uint8Array | null; err?: string; handle?: HandleDescriptor }) => {
     if (msg.id !== undefined) {
       const cb = oneShot.get(msg.id);
       oneShot.delete(msg.id);
@@ -34,9 +38,29 @@ function installHandler() {
       return;
     }
     if (msg.fd === undefined) return;
-    readers.get(msg.fd)?._onData(msg.data);
+    readers.get(msg.fd)?._onData(msg.data, msg.handle);
   });
+  S.kernelHandlers.set('fd-writable', (msg: { fd: number }) => writers.get(msg.fd)?._onWritable());
 }
+
+interface QueuedWrite {
+  req: { oncomplete?: (status: number) => void };
+  data: Uint8Array;
+  done: () => void;
+  sendHandle?: HandleDescriptor;
+}
+
+/**
+ * A handle passed over an IPC pipe (uv_write2 / uv_accept of the pending handle): what kind of
+ * wrap it is, its fd in the receiving process (the kernel installs it), and what the wrap needs.
+ */
+export interface HandleDescriptor {
+  type: string;
+  fd?: number;
+  [k: string]: unknown;
+}
+/** Makes the receiving process's wrap for a passed handle, by descriptor type (pipe, tcp, …). */
+export const handleFactories: Record<string, (d: HandleDescriptor) => object> = {};
 
 // single reads that must not block the worker (async fs.read on a pipe, tty or socket)
 const oneShot = new Map<number, (data: Uint8Array | null, err?: string) => void>();
@@ -56,7 +80,7 @@ export class HandleWrap {
   #closed = false;
   onclose: unknown;
   constructor(resourceName: string, active = false) {
-    this.#handle = { active, refed: true, resourceName };
+    this.#handle = { active, refed: true, resourceName, owner: this };
     loop.addHandle(this.#handle);
   }
   protected setActive(v: boolean) {
@@ -117,21 +141,43 @@ export class LibuvStreamWrap extends HandleWrap {
     return undefined;
   }
 
+  /** data the kernel sent before it saw a readStop(), delivered on the next readStart() */
+  #held: { data: Uint8Array | null; handle?: HandleDescriptor }[] = [];
+  /** the kernel is reading this fd for us */
+  #kernelReading = false;
+  #startQueued = false;
+
   readStart(): number {
     if (this._fd < 0) return errno('EBADF');
     installHandler();
     readers.set(this._fd, this);
     this.reading = true;
     this.setActive(true);
-    post({ t: 'readStart', fd: this._fd });
+    // libuv reads in the poll phase, not inside readStart(): a pipe handed to another child right
+    // after (readStop() in the same tick, as child_process does for stdio 'wrap') loses nothing
+    if (!this.#kernelReading && !this.#startQueued) {
+      this.#startQueued = true;
+      loop.macrotask(() => {
+        this.#startQueued = false;
+        if (!this.reading || this._closed || this._fd < 0 || this.#kernelReading) return;
+        // what was held comes first
+        while (this.#held.length && this.reading) {
+          const d = this.#held.shift()!;
+          this._onData(d.data, d.handle);
+          if (d.data === null) return;
+        }
+        if (!this.reading || this.#held.some((h) => h.data === null)) return;
+        this.#kernelReading = true;
+        post({ t: 'readStart', fd: this._fd });
+      });
+    }
     return 0;
   }
 
   readStop(): number {
-    if (this._fd >= 0 && readers.get(this._fd) === this) {
-      post({ t: 'readStop', fd: this._fd });
-      readers.delete(this._fd);
-    }
+    // stays in `readers` so data already on its way is held, not lost
+    if (this.#kernelReading) post({ t: 'readStop', fd: this._fd });
+    this.#kernelReading = false;
     this.reading = false;
     this.setActive(false);
     return 0;
@@ -142,10 +188,23 @@ export class LibuvStreamWrap extends HandleWrap {
   }
 
   /** @internal kernel data (null = EOF) */
-  _onData(data: Uint8Array | null) {
-    if (this._closed || !this.onread) return;
+  _onData(data: Uint8Array | null, handle?: HandleDescriptor) {
+    if (this._closed || !this.onread) {
+      if (typeof handle?.fd === 'number') closeFd(handle.fd);
+      return;
+    }
+    if (!this.reading) {
+      this.#held.push({ data, handle });
+      return;
+    }
+    if (handle) {
+      const make = handleFactories[handle.type];
+      if (make) (this as any).pendingHandle = make(handle);
+      else if (typeof handle.fd === 'number') closeFd(handle.fd);
+    }
     if (data === null) {
       readers.delete(this._fd);
+      this.#kernelReading = false;
       this.reading = false;
       this.setActive(false);
       streamBaseState[kReadBytesOrError] = UV_EOF;
@@ -168,25 +227,122 @@ export class LibuvStreamWrap extends HandleWrap {
     loop.scope(this.onread, this, ab);
   }
 
-  #write(bytes: Uint8Array): number {
+  writeQueueSize = 0;
+  #queue: QueuedWrite[] = [];
+  #blocking = false;
+  #afterQueue: (() => void)[] = [];
+
+  /** What the kernel needs to pass this handle to another process (uv_write2's send_handle). */
+  _sendDescriptor(): HandleDescriptor | null {
+    return this._fd >= 0 ? { type: 'pipe', fd: this._fd } : null;
+  }
+
+  #write(req: unknown, bytes: Uint8Array, handle?: unknown): number {
     streamBaseState[kLastWriteWasAsync] = 0;
     streamBaseState[kBytesWritten] = 0;
     if (this._fd < 0) return errno('EBADF');
-    try {
+    let sendHandle: HandleDescriptor | undefined;
+    if (handle) {
+      const d = typeof (handle as LibuvStreamWrap)._sendDescriptor === 'function' ? (handle as LibuvStreamWrap)._sendDescriptor() : null;
+      if (!d) return errno('EINVAL');
+      sendHandle = d;
+    }
+    if ((this._fd <= 2 || this.#blocking) && !sendHandle) {
+      try {
+        let off = 0;
+        while (off < bytes.length) off += sys<number>('write', { fd: this._fd, pos: null }, bytes.subarray(off));
+      } catch (e) {
+        return e instanceof SysError ? errno(e.code) : errno('EIO');
+      }
+    } else {
       let off = 0;
-      while (off < bytes.length) off += sys<number>('write', { fd: this._fd, pos: null }, bytes.subarray(off));
-    } catch (e) {
-      return e instanceof SysError ? errno(e.code) : errno('EIO');
+      const entry = { sendHandle } as { sendHandle?: HandleDescriptor };
+      if (!this.#queue.length) {
+        try {
+          off = this.#tryWrite(bytes, entry);
+        } catch (e) {
+          return e instanceof SysError ? errno(e.code) : errno('EIO');
+        }
+      }
+      if (off < bytes.length) {
+        // uv_write: the rest is queued and completes later (req.oncomplete)
+        this.#queue.push({ req: req as QueuedWrite['req'], data: bytes.slice(off), done: loop.startReq('WriteWrap', req as object), sendHandle: entry.sendHandle });
+        this.writeQueueSize += bytes.length - off;
+        streamBaseState[kLastWriteWasAsync] = 1;
+        if (this.#queue.length === 1) this.#waitWritable();
+      }
     }
     this.bytesWritten += bytes.length;
     streamBaseState[kBytesWritten] = bytes.length;
     return 0;
   }
 
-  writeBuffer(_req: unknown, buf: ArrayBufferView) {
-    return this.#write(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength));
+  /** Writes what the kernel buffer takes now; returns the byte count. */
+  #tryWrite(bytes: Uint8Array, w: { sendHandle?: HandleDescriptor } = {}): number {
+    let off = 0;
+    while (off < bytes.length) {
+      // a handle goes with the first byte written; the kernel takes such a write whole
+      const n = sys<number>('write', w.sendHandle ? { fd: this._fd, pos: null, sendHandle: w.sendHandle } : { fd: this._fd, pos: null, nonblock: true }, bytes.subarray(off));
+      if (!(n > 0)) break;
+      w.sendHandle = undefined;
+      off += n;
+    }
+    return off;
   }
-  writev(_req: unknown, chunks: unknown[], allBuffers: boolean) {
+
+  #waitWritable() {
+    installHandler();
+    writers.set(this._fd, this);
+    post({ t: 'writeWait', fd: this._fd });
+  }
+
+  /** @internal the kernel buffer has room again */
+  _onWritable() {
+    while (this.#queue.length) {
+      const w = this.#queue[0];
+      let n: number;
+      try {
+        n = this.#tryWrite(w.data, w);
+      } catch (e) {
+        this.#failQueue(e instanceof SysError ? errno(e.code) : errno('EIO'));
+        return;
+      }
+      this.writeQueueSize -= n;
+      if (n < w.data.length) {
+        w.data = w.data.subarray(n);
+        this.#waitWritable();
+        return;
+      }
+      this.#queue.shift();
+      w.done();
+      if (typeof w.req.oncomplete === 'function') loop.scope(w.req.oncomplete, w.req, 0, this, undefined);
+    }
+    if (writers.get(this._fd) === this) writers.delete(this._fd);
+    this.#runAfterQueue();
+  }
+
+  #failQueue(status: number) {
+    const q = this.#queue;
+    this.#queue = [];
+    this.writeQueueSize = 0;
+    if (writers.get(this._fd) === this) writers.delete(this._fd);
+    for (const w of q) {
+      w.done();
+      if (typeof w.req.oncomplete === 'function') loop.scope(w.req.oncomplete, w.req, status, this, undefined);
+    }
+    this.#runAfterQueue();
+  }
+
+  #runAfterQueue() {
+    const fns = this.#afterQueue;
+    this.#afterQueue = [];
+    for (const fn of fns) fn();
+  }
+
+  writeBuffer(req: unknown, buf: ArrayBufferView, handle?: unknown) {
+    return this.#write(req, new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength), handle);
+  }
+  writev(req: unknown, chunks: unknown[], allBuffers: boolean, handle?: unknown) {
     const parts: Uint8Array[] = [];
     if (allBuffers) for (const c of chunks as ArrayBufferView[]) parts.push(new Uint8Array(c.buffer, c.byteOffset, c.byteLength));
     else
@@ -203,22 +359,31 @@ export class LibuvStreamWrap extends HandleWrap {
       all.set(p, n);
       n += p.length;
     }
-    return this.#write(all);
+    return this.#write(req, all, handle);
   }
-  writeUtf8String(_req: unknown, s: string) {
-    return this.#write(encode(s, Enc.UTF8));
+  writeUtf8String(req: unknown, s: string, handle?: unknown) {
+    return this.#write(req, encode(s, Enc.UTF8), handle);
   }
-  writeAsciiString(_req: unknown, s: string) {
-    return this.#write(encode(s, Enc.ASCII));
+  writeAsciiString(req: unknown, s: string, handle?: unknown) {
+    return this.#write(req, encode(s, Enc.ASCII), handle);
   }
-  writeLatin1String(_req: unknown, s: string) {
-    return this.#write(encode(s, Enc.LATIN1));
+  writeLatin1String(req: unknown, s: string, handle?: unknown) {
+    return this.#write(req, encode(s, Enc.LATIN1), handle);
   }
-  writeUcs2String(_req: unknown, s: string) {
-    return this.#write(encode(s, Enc.UCS2));
+  writeUcs2String(req: unknown, s: string, handle?: unknown) {
+    return this.#write(req, encode(s, Enc.UCS2), handle);
   }
 
   shutdown(req: { oncomplete?: (status: number) => void }) {
+    // uv_shutdown waits for the queued writes
+    if (this.#queue.length) {
+      const done = loop.startReq('ShutdownWrap');
+      this.#afterQueue.push(() => {
+        done();
+        this.shutdown(req);
+      });
+      return 0;
+    }
     let status = 0;
     if (this._fd >= 0 && sys<string | null>('fdKind', { fd: this._fd }) === 'socket') {
       try {
@@ -235,12 +400,31 @@ export class LibuvStreamWrap extends HandleWrap {
     return 0;
   }
 
-  setBlocking() {
+  setBlocking(v: boolean) {
+    this.#blocking = !!v;
     return 0;
   }
 
   protected override _onClose() {
     if (this.reading) this.readStop();
+    if (readers.get(this._fd) === this) readers.delete(this._fd);
+    for (const h of this.#held) if (typeof h.handle?.fd === 'number') closeFd(h.handle.fd);
+    this.#held = [];
+    if (this.#queue.length) {
+      // uv_close cancels the queued writes
+      const q = this.#queue;
+      this.#queue = [];
+      this.writeQueueSize = 0;
+      if (writers.get(this._fd) === this) writers.delete(this._fd);
+      const canceled = errno('ECANCELED');
+      loop.macrotask(() => {
+        for (const w of q) {
+          w.done();
+          if (typeof w.req.oncomplete === 'function') loop.scope(w.req.oncomplete, w.req, canceled, this, undefined);
+        }
+      });
+    }
+    this.#afterQueue = [];
     if (this._fd > 2) {
       try {
         sys('close', { fd: this._fd });
@@ -248,6 +432,12 @@ export class LibuvStreamWrap extends HandleWrap {
     }
     this._fd = -1;
   }
+}
+
+function closeFd(fd: number) {
+  try {
+    sys('close', { fd });
+  } catch {}
 }
 
 function encodingId(e: string): Enc {
@@ -405,6 +595,12 @@ export function createStreamWrap() {
   streamBaseState = b.streamBaseState;
   return Object.assign(b, { LibuvStreamWrap, WriteWrap, ShutdownWrap });
 }
+
+handleFactories.pipe = (d) => {
+  const p = new Pipe(d.ipc ? 2 : 0);
+  p._setFd(d.fd as number);
+  return p;
+};
 
 export function createPipeWrap() {
   return Object.assign(fromShape('pipe_wrap'), { Pipe, PipeConnectWrap: class PipeConnectWrap {} });

@@ -1,0 +1,3 @@
+{
+  "test-child-process-set-blocking.js": "Spawns python3, an interpreter that does not exist in a browser (like git, it is a separate native program, not a shell feature)."
+}

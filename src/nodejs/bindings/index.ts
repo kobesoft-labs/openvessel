@@ -32,6 +32,7 @@ import { createCrypto } from './crypto.ts';
 import { createBlob } from './blob.ts';
 import { createWorkerBinding } from './worker.ts';
 import { createCaresWrap, createTcpWrap } from './net.ts';
+import { createUdpWrap } from './udp.ts';
 import { createZlib } from './zlib.ts';
 import { createHttpParser } from './http_parser.ts';
 import { createProcessWrap, createSignalWrap, createSpawnSync } from './process_wrap.ts';
@@ -94,6 +95,7 @@ export const factories: Record<string, BindingFactory> = {
   timers: createTimers,
   trace_events: createTraceEvents,
   tty_wrap: createTtyWrap,
+  udp_wrap: createUdpWrap,
   types: createTypes,
   url: createUrl,
   util: createUtil,

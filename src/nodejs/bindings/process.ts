@@ -8,6 +8,7 @@ import { fromShape, shapeOf } from './shape.ts';
 import { perfNow, timeOrigin } from '../../node/native.ts';
 import { hardwareConcurrency, nativeQueueMicrotask } from '../web.ts';
 import { Histogram, createELDHistogram } from './performance.ts';
+import { uvError } from './fs.ts';
 
 const enc = new TextEncoder();
 const t0 = perfNow();
@@ -40,7 +41,15 @@ export function createProcessMethods() {
       return S.cwd;
     },
     chdir(dir: string) {
-      sys('chdir', { p: dir });
+      try {
+        sys('chdir', { p: dir });
+      } catch (e) {
+        let cwd: string | undefined;
+        try {
+          cwd = sys<string>('getcwd');
+        } catch {}
+        throw uvError(e, 'chdir', cwd, dir);
+      }
       S.cwd = sys<string>('getcwd');
     },
     umask(mask?: number) {
@@ -71,8 +80,8 @@ export function createProcessMethods() {
       out[0] = Math.round((perfNow() - t0) * 1000);
       out[2] = 100000;
     },
-    _getActiveRequests: () => [],
-    _getActiveHandles: () => [],
+    _getActiveRequests: () => loop.activeRequestOwners(),
+    _getActiveHandles: () => loop.activeHandleOwners().map((h: any) => h[S.perIsolateSymbols?.owner_symbol] ?? h),
     getActiveResourcesInfo: () => loop.activeResources(),
     _kill(pid: number, sig: number) {
       try {
@@ -93,14 +102,30 @@ export function createProcessMethods() {
       throw e;
     },
     reallyExit: (code: number) => loop.reallyExit(code),
-    execve() {
-      const e = new Error('process.execve is not supported in OpenVessel') as Error & { code: string };
-      e.code = 'ERR_FEATURE_UNAVAILABLE_ON_PLATFORM';
-      throw e;
+    execve(file: string, args: string[], envPairs: string[]) {
+      const env: Record<string, string> = {};
+      for (const p of envPairs ?? []) {
+        const i = p.indexOf('=');
+        if (i > 0) env[p.slice(0, i)] = p.slice(i + 1);
+      }
+      const argv = (args ?? []).map(String);
+      try {
+        sys('execve', { argv: [file, ...argv.slice(1)], argv0: argv[0] ?? file, env });
+      } catch (e: any) {
+        // node_process_methods.cc: a failed execve() leaves nothing to return to
+        const code = e?.code ?? 'EIO';
+        const err = new Error(`process.execve failed with error code ${code}`);
+        writeFd(2, `${err.stack}\n`);
+        try {
+          sys('kill', { pid: S.init.pid, sig: 6 });
+        } catch {}
+        return loop.reallyExit(134);
+      }
+      return loop.reallyExit(0);
     },
     patchProcessObject(process: any) {
       const init = S.init;
-      let title = (init.argv[0] ?? 'node').split('/').pop() || 'node';
+      let title = (S.optionValues?.['--title'] as string) || (init.argv[0] ?? 'node').split('/').pop() || 'node';
       Object.defineProperty(process, 'title', {
         __proto__: null,
         get: () => title,
@@ -139,23 +164,79 @@ export function createProcessMethods() {
   return b;
 }
 
+/** Entries of /etc/passwd or /etc/group: name → [id, primary gid (passwd)]. */
+function readIdDb(file: string): Map<string, number[]> {
+  const out = new Map<string, number[]>();
+  try {
+    const text = new TextDecoder().decode(sys<Uint8Array>('readFile', { p: file }));
+    for (const line of text.split('\n')) {
+      const f = line.split(':');
+      if (f.length >= 3 && f[0]) out.set(f[0], [Number(f[2]), Number(f[3])]);
+    }
+  } catch {}
+  return out;
+}
+
+/**
+ * node_credentials.cc for an unprivileged user: ids are looked up in /etc/passwd and /etc/group
+ * (getpwnam/getgrnam), and changing to another id fails with EPERM like setuid(2) does.
+ */
 export function createCredentials() {
   const b = fromShape('credentials');
+  const ids = { uid: 1000, euid: 1000, gid: 1000, egid: 1000 };
+  const notFound = -1;
+  const byName = (v: unknown, file: string): number => {
+    if (typeof v === 'number') return v >>> 0;
+    const e = readIdDb(file).get(String(v));
+    return e ? e[0] : notFound;
+  };
+  const uidOf = (v: unknown) => byName(v, '/etc/passwd');
+  const gidOf = (v: unknown) => byName(v, '/etc/group');
+  const eperm = (syscall: string) => {
+    const e = new Error('EPERM, Operation not permitted') as Error & { errno: number; code: string; syscall: string };
+    e.errno = 1;
+    e.code = 'EPERM';
+    e.syscall = syscall;
+    return e;
+  };
+  // setuid(2) without CAP_SETUID: only to the real or effective id
+  const setter = (lookup: (v: unknown) => number, allowed: () => number[], set: (id: number) => void, syscall: string) => (v: unknown) => {
+    const id = lookup(v);
+    if (id === notFound) return 1;
+    if (!allowed().includes(id)) throw eperm(syscall);
+    set(id);
+    return 0;
+  };
   return Object.assign(b, {
     safeGetenv: (k: string) => S.process?.env?.[k] ?? S.init.env[k],
-    getTempDir: () => S.init.env.TMPDIR || '/tmp',
+    // uv_os_tmpdir
+    getTempDir() {
+      const env = S.process?.env ?? S.init.env;
+      for (const k of ['TMPDIR', 'TMP', 'TEMP', 'TEMPDIR']) {
+        const v = env[k];
+        if (v) return v.length > 1 && v.endsWith('/') ? v.slice(0, -1) : v;
+      }
+      return '/tmp';
+    },
     implementsPosixCredentials: true,
-    getuid: () => 1000,
-    geteuid: () => 1000,
-    getgid: () => 1000,
-    getegid: () => 1000,
-    getgroups: () => [1000],
-    initgroups: () => {},
-    setegid: () => {},
-    seteuid: () => {},
-    setgid: () => {},
-    setuid: () => {},
-    setgroups: () => {},
+    getuid: () => ids.uid,
+    geteuid: () => ids.euid,
+    getgid: () => ids.gid,
+    getegid: () => ids.egid,
+    getgroups: () => [ids.gid],
+    setuid: setter(uidOf, () => [ids.uid, ids.euid], (id) => (ids.uid = ids.euid = id), 'setuid'),
+    seteuid: setter(uidOf, () => [ids.uid, ids.euid], (id) => (ids.euid = id), 'seteuid'),
+    setgid: setter(gidOf, () => [ids.gid, ids.egid], (id) => (ids.gid = ids.egid = id), 'setgid'),
+    setegid: setter(gidOf, () => [ids.gid, ids.egid], (id) => (ids.egid = id), 'setegid'),
+    setgroups(groups: unknown[]) {
+      for (let i = 0; i < groups.length; i++) if (gidOf(groups[i]) === notFound) return i + 1;
+      throw eperm('setgroups');
+    },
+    initgroups(user: unknown, extraGroup: unknown) {
+      if (gidOf(extraGroup) === notFound) return 2;
+      if (uidOf(user) === notFound) return 1;
+      throw eperm('initgroups');
+    },
   });
 }
 
@@ -198,6 +279,7 @@ export function createTaskQueue() {
 export function createTimers() {
   const b = fromShape('timers');
   loop.setImmediateInfo(b.immediateInfo);
+  if (b.timeoutInfo) loop.setTimeoutInfo(b.timeoutInfo);
   return Object.assign(b, {
     setupTimers: (immediate: () => void, timers: (now: number) => number) => loop.setupTimers(immediate, timers),
     getLibuvNow: () => loop.now(),
@@ -380,6 +462,25 @@ export function createUv() {
 
 export function createOs() {
   const b = fromShape('os');
+  // the nice value set through os.setPriority() on this process (an unprivileged user can only
+  // lower the priority, like setpriority(2) without CAP_SYS_NICE)
+  let ownPriority = 0;
+  const own = (pid: number) => pid === 0 || pid === S.init.pid;
+  const fail = (ctx: Record<string, unknown>, syscall: string, code: string) => {
+    const uv = S.internalBinding('uv');
+    ctx.errno = uv[`UV_${code}`];
+    ctx.code = code;
+    ctx.message = uv.getErrorMessage(ctx.errno);
+    ctx.syscall = syscall;
+  };
+  const exists = (pid: number) => {
+    try {
+      sys('kill', { pid, sig: 0 });
+      return true;
+    } catch {
+      return false;
+    }
+  };
   return Object.assign(b, {
     getHostname: () => S.init.hostname || 'openvessel',
     getLoadAvg: (out: Float64Array) => out.fill(0),
@@ -394,9 +495,36 @@ export function createOs() {
     },
     getInterfaceAddresses: () => ['lo', '127.0.0.1', '255.0.0.0', 'IPv4', '00:00:00:00:00:00', true, -1],
     getHomeDirectory: () => S.process?.env?.HOME ?? S.init.env.HOME ?? '/home/user',
-    getUserInfo: () => ({ uid: 1000, gid: 1000, username: 'user', homedir: S.init.env.HOME ?? '/home/user', shell: '/bin/sh' }),
-    setPriority: () => 0,
-    getPriority: () => 0,
+    getUserInfo(options: { encoding?: string } | null) {
+      // the options' getter runs (and may throw) like in node_os.cc
+      const encoding = options ? options.encoding : undefined;
+      const env = S.process?.env ?? S.init.env;
+      const name = [...readIdDb('/etc/passwd')].find(([, v]) => v[0] === 1000)?.[0] ?? 'user';
+      const info = { uid: 1000, gid: 1000, username: name, homedir: env.HOME ?? '/home/user', shell: '/bin/sh' };
+      if (encoding !== 'buffer') return info;
+      const B = S.requireBuiltin('buffer').Buffer;
+      return { ...info, username: B.from(info.username), homedir: B.from(info.homedir), shell: B.from(info.shell) };
+    },
+    setPriority(pid: number, priority: number, ctx: Record<string, unknown>) {
+      if (!own(pid)) {
+        fail(ctx, 'uv_os_setpriority', pid < 0 || !exists(pid) ? 'ESRCH' : 'EACCES');
+        return -1;
+      }
+      if (priority < ownPriority) {
+        fail(ctx, 'uv_os_setpriority', 'EACCES');
+        return -1;
+      }
+      ownPriority = priority;
+      return 0;
+    },
+    getPriority(pid: number, ctx: Record<string, unknown>) {
+      if (own(pid)) return ownPriority;
+      if (pid < 0 || !exists(pid)) {
+        fail(ctx, 'uv_os_getpriority', 'ESRCH');
+        return undefined;
+      }
+      return 0;
+    },
     getAvailableParallelism: () => hardwareConcurrency,
     getOSInformation: () => ['Linux', '6.8.0-openvessel', '#1 SMP OpenVessel', 'x86_64'],
     isBigEndian: false,
