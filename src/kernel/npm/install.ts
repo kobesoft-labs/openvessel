@@ -582,6 +582,11 @@ export class Installer {
     const prev = this.readHiddenLock();
     const want = new Map<string, Node>();
     for (const n of this.nodes) if (!n.isWorkspace) want.set(this.rel(n.dir), n);
+    // workspace packages are linked into the root node_modules, like npm does
+    for (const ws of this.workspaces.values()) {
+      const link = path.join(this.root.nodeModules, ws.name);
+      want.set(this.rel(link), ws);
+    }
     // prune packages that are no longer in the tree
     for (const loc of Object.keys(prev)) {
       if (!loc.startsWith('node_modules/') && !loc.includes('/node_modules/')) continue;
@@ -605,9 +610,10 @@ export class Installer {
         continue;
       }
       if (n.source.kind === 'link') {
-        mkdirp(path.dirname(n.dir));
-        vfs.rmrf(n.dir);
-        vfs.symlink(path.relative(path.dirname(n.dir), n.source.linkTarget!), n.dir);
+        const at = n.isWorkspace ? path.join(this.o.root, loc) : n.dir;
+        mkdirp(path.dirname(at));
+        if (vfs.tryLookup(at, false)) vfs.rmrf(at);
+        vfs.symlink(path.relative(path.dirname(at), n.source.linkTarget!), at);
         added++;
         continue;
       }
