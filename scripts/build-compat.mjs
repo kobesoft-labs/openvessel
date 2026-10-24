@@ -24,6 +24,19 @@ const COMPAT = [
     artifacts: { 'pagefind.wasm': 'pagefind.wasm' },
   },
   {
+    id: 'cn-font-split',
+    names: ['cn-font-split'],
+    range: '^7.0.0',
+    // the published package, with dist/node replaced and without Koffi or the download on postinstall
+    base: 'package',
+    pkg: (up) => {
+      const { koffi, ...dependencies } = up.dependencies;
+      const { postinstall, ...scripts } = up.scripts ?? {};
+      return { ...up, name: '@openvessel/cn-font-split-wasi', dependencies, scripts, devDependencies: undefined };
+    },
+    artifacts: { 'package/dist/libffi-wasm32-wasip1.wasm': 'dist/libffi-wasm32-wasip1.wasm' },
+  },
+  {
     id: 'resvg-js',
     names: ['@resvg/resvg-js'],
     range: '^2.0.0',
@@ -48,15 +61,18 @@ export async function buildCompat(outDir) {
     }
     const stage = mkdtempSync(join(tmpdir(), `ov-compat-${c.id}-`));
     const pkgDir = join(stage, 'package');
+    // an upstream package to start from (built into vendor/compat), then our files over it
+    if (c.base) cpSync(join(art, c.base), pkgDir, { recursive: true });
     cpSync(join(root, 'compat', c.id, 'package'), pkgDir, { recursive: true });
     for (const [from, to] of Object.entries(c.artifacts ?? {})) cpSync(join(art, from), join(pkgDir, to));
-    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify(c.pkg, null, 2) + '\n');
-    const file = `${c.id}-${c.pkg.version}.tgz`;
+    const pkg = typeof c.pkg === 'function' ? c.pkg(JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'))) : c.pkg;
+    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
+    const file = `${c.id}-${pkg.version}.tgz`;
     // ustar with a "package/" prefix, like `npm pack`
     execFileSync('tar', ['-czf', join(outDir, file), '--format', 'ustar', '-C', stage, 'package'], { env: { ...process.env, COPYFILE_DISABLE: '1' } });
     rmSync(stage, { recursive: true, force: true });
     const integrity = 'sha512-' + createHash('sha512').update(readFileSync(join(outDir, file))).digest('base64');
-    for (const name of c.names) index[name] = { range: c.range, file, integrity, pkg: c.pkg };
+    for (const name of c.names) index[name] = { range: c.range, file, integrity, pkg };
   }
   writeFileSync(join(outDir, 'index.json'), JSON.stringify(index, null, 2) + '\n');
   return index;

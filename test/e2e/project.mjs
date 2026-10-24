@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, statSync, lstatSync, readlinkSync } from 'no
 import { join, relative } from 'node:path';
 import { startServer, openBrowser, exec } from './harness.mjs';
 
-export function collectFiles(dir, { maxFileBytes = 20 * 1024 * 1024 } = {}) {
+export function collectFiles(dir, { maxFileBytes = 64 * 1024 * 1024 } = {}) {
   const out = {};
   const skip = new Set(['node_modules', '.git', 'dist', '.astro', '.vercel', '.netlify', '.cache', '.turbo', '.output']);
   const walk = (d) => {
