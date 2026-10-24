@@ -202,7 +202,7 @@ const add = (s) => scripts.push(s);
 // the same selection as crypto-tables.cjs
 const ciphersSupported = binding
   .getCiphers()
-  .filter((n) => !/ocb|xts|aria|camellia|sm4|des3-wrap|cms3deswrap/i.test(n) && /^(aes|id-aes|chacha20|des-ede|des3)/i.test(n))
+  .filter((n) => !/xts|aria|camellia|sm4/i.test(n) && /^(aes|id-aes|chacha20|des-ede|des3|id-smime-alg-cms3deswrap)/i.test(n))
   .map((n) => n.toLowerCase());
 const splitOps = (data, sizes) => {
   const ops = [];
@@ -241,6 +241,38 @@ for (const name of ciphersSupported) {
   if (/^id-aes\d+-(gcm|ccm)$|^aes\d+$|^des3$|^des-ede3$|^des-ede$/.test(name)) {
     const aead = mode === 'gcm' || mode === 'ccm';
     roundTrip(name, key, info.ivLength ? bytes(info.ivLength) : null, mode === 'ccm' ? { authTagLength: 16 } : undefined, bytes(33), aead && mode === 'ccm' ? [33] : [10, 23], { tag: aead });
+    continue;
+  }
+  if (info.nid === 246) {
+    // 3DES key wrap draws a random IV: only unwrapping real Node's output is deterministic
+    if (name !== 'des3-wrap') continue;
+    for (const n of [8, 16, 40]) {
+      const c = crypto.createCipheriv(name, key, Buffer.alloc(0));
+      const ct = Buffer.concat([c.update(bytes(n)), c.final()]);
+      add({ cipher: name, key: hex(key), iv: '', decrypt: true, ops: [['update', hex(ct)], ['final']] });
+      const bad = Buffer.from(ct);
+      bad[bad.length - 1] ^= 1;
+      add({ cipher: name, key: hex(key), iv: '', decrypt: true, ops: [['update', hex(bad)], ['final']] });
+    }
+    add({ cipher: name, key: hex(key), iv: '', decrypt: true, ops: [['update', hex(bytes(16))], ['final']] });
+    add({ cipher: name, key: hex(key), iv: '', ops: [['update', hex(bytes(12))], ['final']] });
+    continue;
+  }
+  if (mode === 'ocb') {
+    for (const ivl of [12, 1, 15]) {
+      for (const tl of [16, 8, 1]) {
+        const iv = bytes(ivl);
+        for (const [ptl, aadl] of [[0, 0], [1, 0], [16, 5], [70, 33], [48, 32]]) {
+          const pre = aadl ? [['aad', hex(bytes(aadl))]] : [];
+          roundTrip(name, key, iv, { authTagLength: tl }, bytes(ptl), [7, 16, 1], { tag: true, pre });
+        }
+      }
+    }
+    const iv = bytes(12);
+    roundTrip(name, key, iv, { authTagLength: 16 }, bytes(33), [5, 20], { tag: true, pre: [['aad', hex(bytes(16))], ['aad', hex(bytes(20))]] });
+    add({ cipher: name, key: hex(key), iv: hex(iv), ops: [] });
+    add({ cipher: name, key: hex(key), iv: hex(bytes(16)), opts: { authTagLength: 16 }, ops: [] });
+    add({ cipher: name, key: hex(key), iv: hex(iv), opts: { authTagLength: 17 }, ops: [] });
     continue;
   }
   if (mode === 'wrap') {
