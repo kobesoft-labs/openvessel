@@ -13,6 +13,7 @@ import { asymmetric } from './crypto/asym.ts';
 import { DiffieHellman, DiffieHellmanGroup } from './crypto/dh.ts';
 import { AESCipherJob, ECDHBitsJob, ECKeyExportJob, RSACipherJob, RSAKeyExportJob } from './crypto/webcrypto.ts';
 import { err, isAnyBufferSource, view } from './crypto/util.ts';
+import { certExportChallenge, certExportPublicKey, certVerifySpkac } from './crypto/spkac.ts';
 
 export { setBufferPrototype as setCryptoBufferPrototype } from './crypto/util.ts';
 
@@ -79,6 +80,10 @@ export function createCrypto() {
     ECKeyExportJob,
     RSAKeyExportJob,
     RSACipherJob,
+    // SPKAC (crypto.Certificate)
+    certVerifySpkac,
+    certExportPublicKey,
+    certExportChallenge,
     // misc
     timingSafeEqual,
     getFipsCrypto: () => 0,

@@ -49,6 +49,8 @@ export function byteLen(k: RsaKey) {
 export function generateRsa(bits: number, e: number): RsaKey {
   if (bits < 512) throw rsaErr.keySizeTooSmall();
   const E = BigInt(e);
+  // ossl_rsa_check_public_exponent: odd and greater than one
+  if (E <= 1n || (E & 1n) === 0n) throw osslError('020000B2', 'rsa routines', 'pub exponent out of range', 'ERR_OSSL_RSA_PUB_EXPONENT_OUT_OF_RANGE');
   const bitsp = (bits + 1) >> 1;
   const bitsq = bits - bitsp;
   const prime = (b: number) => {
@@ -227,7 +229,7 @@ function digestInfo(algo: DigestAlgo, hash: Uint8Array): Uint8Array {
 export function pkcs1Sign(k: RsaKey, algo: DigestAlgo, hash: Uint8Array): Uint8Array {
   const t = digestInfo(algo, hash);
   const kLen = byteLen(k);
-  if (t.length > kLen - 11) throw osslError('0200006E', 'rsa routines', 'data too large for key size', 'ERR_OSSL_RSA_DATA_TOO_LARGE_FOR_KEY_SIZE');
+  if (t.length > kLen - 11) throw osslError('02000070', 'rsa routines', 'digest too big for rsa key', 'ERR_OSSL_RSA_DIGEST_TOO_BIG_FOR_RSA_KEY');
   return rawPrivate(k, pkcs1Pad(k, t, 1));
 }
 

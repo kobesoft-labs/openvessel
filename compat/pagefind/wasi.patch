@@ -1,0 +1,239 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -194,7 +194,7 @@
+ [dependencies.sha-1]
+ version = "0.10"
+ 
+-[dependencies.tokio]
++[target.'cfg(not(target_os = "wasi"))'.dependencies.tokio]
+ version = "1"
+ features = [
+     "rt-multi-thread",
+@@ -204,6 +204,16 @@
+     "sync",
+ ]
+ 
++[target.'cfg(target_os = "wasi")'.dependencies.tokio]
++version = "1"
++features = [
++    "rt",
++    "time",
++    "macros",
++    "sync",
++    "io-util",
++]
++
+ [dependencies.twelf]
+ version = "0.15"
+ features = [
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -4,7 +4,8 @@
+ 
+ use pagefind::runner::run_indexer;
+ 
+-#[tokio::main]
++#[cfg_attr(not(target_os = "wasi"), tokio::main)]
++#[cfg_attr(target_os = "wasi", tokio::main(flavor = "current_thread"))]
+ async fn main() {
+     match run_indexer().await {
+         Ok(_) => { /* success */ }
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -9,6 +9,9 @@
+ use options::{PagefindInboundConfig, SearchOptions};
+ use output::SyntheticFile;
+ use rayon::prelude::*;
++
++#[cfg(target_os = "wasi")]
++pub mod wasi_fs;
+ pub use service::api;
+ use wax::walk::Entry;
+ use wax::Glob;
+--- a/src/output/mod.rs
++++ b/src/output/mod.rs
+@@ -10,8 +10,12 @@
+ use hashbrown::HashMap;
+ use include_dir::{include_dir, Dir};
+ use minifier::js::minify;
++#[cfg(not(target_os = "wasi"))]
+ use tokio::fs::{create_dir_all, File};
++#[cfg(not(target_os = "wasi"))]
+ use tokio::io::AsyncWriteExt;
++#[cfg(target_os = "wasi")]
++use crate::wasi_fs::{create_dir_all, File};
+ use tokio::time::sleep;
+ 
+ mod entry;
+--- a/src/service/api.rs
++++ b/src/service/api.rs
+@@ -100,11 +100,15 @@
+ 
+         let file = Fossicker::new_synthetic(source_path.map(PathBuf::from), url, content);
+         let state = Arc::clone(&self.search_index);
+-        let data = tokio::task::spawn_blocking(move || {
+-            state.blocking_lock().fossick_one(file)
+-        })
+-        .await
+-        .map_err(|e| anyhow::anyhow!("Task join error: {e}"))??;
++        let data = {
++            #[cfg(not(target_os = "wasi"))]
++            let r = tokio::task::spawn_blocking(move || state.blocking_lock().fossick_one(file))
++                .await
++                .map_err(|e| anyhow::anyhow!("Task join error: {e}"))?;
++            #[cfg(target_os = "wasi")]
++            let r = state.lock().await.fossick_one(file);
++            r
++        }?;
+ 
+         Ok(IndexedFileResponse {
+             page_word_count: data.fragment.data.word_count as u32,
+@@ -156,11 +160,15 @@
+         };
+         let file = Fossicker::new_with_data(url, data);
+         let state = Arc::clone(&self.search_index);
+-        let data = tokio::task::spawn_blocking(move || {
+-            state.blocking_lock().fossick_one(file)
+-        })
+-        .await
+-        .map_err(|e| anyhow::anyhow!("Task join error: {e}"))??;
++        let data = {
++            #[cfg(not(target_os = "wasi"))]
++            let r = tokio::task::spawn_blocking(move || state.blocking_lock().fossick_one(file))
++                .await
++                .map_err(|e| anyhow::anyhow!("Task join error: {e}"))?;
++            #[cfg(target_os = "wasi")]
++            let r = state.lock().await.fossick_one(file);
++            r
++        }?;
+ 
+         Ok(IndexedFileResponse {
+             page_word_count: data.fragment.data.word_count as u32,
+@@ -183,11 +191,15 @@
+         let glob = glob.unwrap_or(defaults.glob);
+ 
+         let state = Arc::clone(&self.search_index);
+-        let page_count = tokio::task::spawn_blocking(move || {
+-            state.blocking_lock().fossick_many(PathBuf::from(path), glob)
+-        })
+-        .await
+-        .map_err(|e| anyhow::anyhow!("Task join error: {e}"))??;
++        let page_count = {
++            #[cfg(not(target_os = "wasi"))]
++            let r = tokio::task::spawn_blocking(move || state.blocking_lock().fossick_many(PathBuf::from(path), glob))
++                .await
++                .map_err(|e| anyhow::anyhow!("Task join error: {e}"))?;
++            #[cfg(target_os = "wasi")]
++            let r = state.lock().await.fossick_many(PathBuf::from(path), glob);
++            r
++        }?;
+ 
+         Ok(page_count)
+     }
+--- a/src/service/mod.rs
++++ b/src/service/mod.rs
+@@ -18,6 +18,7 @@
+ 
+     let parse_error_outgoing_tx = outgoing_tx.clone();
+ 
++    #[cfg(not(target_os = "wasi"))]
+     std::thread::spawn(move || {
+         let mut stdin = std::io::stdin().lock();
+ 
+@@ -70,6 +71,7 @@
+         }
+     });
+ 
++    #[cfg(not(target_os = "wasi"))]
+     std::thread::spawn(move || {
+         let mut stdout = std::io::stdout().lock();
+ 
+@@ -87,8 +89,19 @@
+ 
+     // TODO: Handle incoming messages concurrently
+     loop {
++        #[cfg(not(target_os = "wasi"))]
+         let Some(msg) = incoming_rx.recv().await else {
+             return;
++        };
++        // no threads on wasm: answer what's queued, then block on the next request here
++        #[cfg(target_os = "wasi")]
++        let msg = {
++            let _ = &incoming_tx;
++            wasi_io::flush(&mut outgoing_rx);
++            match wasi_io::read(&parse_error_outgoing_tx) {
++                Some(msg) => msg,
++                None => continue,
++            }
+         };
+         let message_id = msg.message_id;
+ 
+@@ -257,3 +270,47 @@
+         }
+     }
+ }
++
++#[cfg(target_os = "wasi")]
++mod wasi_io {
++    use super::*;
++
++    pub fn flush(rx: &mut mpsc::UnboundedReceiver<ServiceResponse>) {
++        let mut stdout = std::io::stdout().lock();
++        while let Ok(msg) = rx.try_recv() {
++            let encoded = general_purpose::STANDARD.encode(serde_json::to_vec(&msg).unwrap());
++            stdout.write_all(encoded.as_bytes()).unwrap();
++            stdout.write(b",").unwrap();
++        }
++        stdout.flush().unwrap();
++    }
++
++    /// One request from stdin; None after reporting a bad message. Exits at EOF.
++    pub fn read(err_tx: &mpsc::UnboundedSender<ServiceResponse>) -> Option<ServiceRequest> {
++        let mut buf = vec![];
++        std::io::stdin().lock().read_until(b',', &mut buf).unwrap();
++        if buf.pop().is_none() {
++            std::process::exit(0);
++        }
++        let report = |payload| {
++            let _ = err_tx.send(ServiceResponse { message_id: None, payload });
++        };
++        let Ok(decoded) = general_purpose::STANDARD.decode(buf) else {
++            report(ResponseAction::Error { original_message: None, message: "Unparseable message, not valid base64".into() });
++            return None;
++        };
++        match serde_json::from_slice::<ServiceRequest>(&decoded) {
++            Ok(msg) => Some(msg),
++            Err(e) => {
++                report(match std::str::from_utf8(&decoded[..]) {
++                    Ok(msg) => ResponseAction::Error { original_message: Some(msg.to_string()), message: format!("{e}") },
++                    Err(_) => ResponseAction::Error {
++                        original_message: None,
++                        message: "Pagefind was unable to parse the message it was provided via the service".to_string(),
++                    },
++                });
++                None
++            }
++        }
++    }
++}
+--- a/src/wasi_fs.rs
++++ b/src/wasi_fs.rs
+@@ -0,0 +1,18 @@
++//! tokio::fs is not available on wasm: the same calls over std::fs.
++use std::io::Write;
++use std::path::Path;
++
++pub async fn create_dir_all(p: impl AsRef<Path>) -> std::io::Result<()> {
++    std::fs::create_dir_all(p)
++}
++
++pub struct File(std::fs::File);
++
++impl File {
++    pub async fn create(p: impl AsRef<Path>) -> std::io::Result<File> {
++        std::fs::File::create(p).map(File)
++    }
++    pub async fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
++        self.0.write_all(buf)
++    }
++}

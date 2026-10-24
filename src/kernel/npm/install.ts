@@ -31,6 +31,40 @@ const SUBSTITUTES: { name: string; to: string; when?: (v: string) => boolean }[]
   { name: 'sass-embedded', to: 'sass' },
 ];
 
+/** Compat packages (scripts/build-compat.mjs): stand-ins for packages that only ship native binaries. */
+interface CompatEntry {
+  range: string;
+  file: string;
+  integrity: string;
+  pkg: Record<string, any>;
+}
+let compatIndex: Promise<Record<string, CompatEntry>> | null = null;
+function compatOrigin(): string | null {
+  return typeof location !== 'undefined' ? location.origin : null;
+}
+function loadCompat(): Promise<Record<string, CompatEntry>> {
+  const origin = compatOrigin();
+  compatIndex ??= origin
+    ? fetch(`${origin}/compat/index.json`)
+        .then((r) => (r.ok ? r.json() : {}))
+        .catch(() => ({}))
+    : Promise.resolve({});
+  return compatIndex;
+}
+
+/**
+ * Dependencies of wasm builds pinned to what they were built against: their glue reaches into the
+ * runtime's internals, so a later version that still satisfies the range breaks them.
+ */
+const DEP_PINS: { pkg: string; range: string; dep: string; spec: string }[] = [
+  // emscripten + emnapi 1.1 glue; @emnapi/runtime 1.2+ changed the callback-info stack it uses
+  { pkg: '@img/sharp-wasm32', range: '<0.34.0', dep: '@emnapi/runtime', spec: '1.1.1' },
+];
+function pinnedSpec(from: Node, dep: string, spec: string): string {
+  const pin = DEP_PINS.find((p) => p.pkg === from.name && p.dep === dep && semver.satisfies(from.version, p.range));
+  return pin ? pin.spec : spec;
+}
+
 /** Packages that are never installed (native-only and optional at runtime). */
 const SKIP = new Set(['fsevents', 'bufferutil', 'utf-8-validate', 'cpu-features', 'ssh2']);
 
@@ -100,6 +134,16 @@ function withWasiBinding(opt: Record<string, string> | undefined): Record<string
   return { ...opt, [`${base}-wasm32-wasi`]: opt[native] };
 }
 
+/**
+ * napi-rs wasm32-wasi bindings built with emnapi 1.x often don't list @emnapi/core and take
+ * whatever @napi-rs/wasm-runtime's peer finds, which can be another binding's emnapi 2 (its wasm
+ * imports napi_set_last_error, which 2.x dropped). Bindings built for emnapi 2 list it themselves.
+ */
+function withEmnapi(name: string, deps: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!name.endsWith('-wasm32-wasi') || deps?.['@emnapi/core']) return deps;
+  return { '@emnapi/core': '^1.4.0', '@emnapi/runtime': '^1.4.0', ...deps };
+}
+
 function platformOk(pkg: { os?: string[]; cpu?: string[] }): boolean {
   const check = (list: string[] | undefined, want: string) => {
     if (!list || !list.length) return true;
@@ -153,6 +197,8 @@ export class Installer {
           if (!/^(file|link|workspace|git|github|https?):/.test(String(spec)) && !String(spec).includes('/') && !this.workspaces.has(name)) this.o.registry.packument(this.aliasTarget(name, String(spec))).catch(() => {});
         }
       };
+      // (written into the package's own dependencies so peer-set checks see it too)
+      if (!n.isRoot) pkg.dependencies = withEmnapi(n.name, pkg.dependencies);
       add(pkg.dependencies, n.dev, n.optional, false);
       if (!this.o.omitOptional) add(withWasiBinding(pkg.optionalDependencies), n.dev, true, false);
       if (includeDev && !this.o.omitDev) add(pkg.devDependencies, true, false, false);
@@ -173,7 +219,7 @@ export class Installer {
       if (processed % 50 === 0) this.o.progress?.(`resolving… ${this.nodes.length} packages`);
       // optional deps already filtered/failed
       const placeFrom = item.peer ? (item.from.parent ?? item.from) : item.from;
-      const spec = this.overrides[item.name] ?? item.spec;
+      const spec = this.overrides[item.name] ?? pinnedSpec(item.from, item.name, item.spec);
       const visible = this.findVisible(placeFrom, item.name);
       if (visible && (visible.isWorkspace || (this.satisfiesNode(visible, spec) && this.peerSetOk(visible, item.from)))) {
         this.addEdge(item.from, item.name, spec, visible);
@@ -202,7 +248,9 @@ export class Installer {
         continue;
       }
       if (resolved.pkg.deprecated) this.warnOnce(`dep:${item.name}@${resolved.version}`, `npm warn deprecated ${item.name}@${resolved.version}: ${resolved.pkg.deprecated}`);
-      const level = this.choosePlacement(placeFrom, item.name, resolved.version, resolved.pkg);
+      // a pinned dependency stays with its dependent, so nothing else picks up the old version
+      const pinned = spec !== item.spec && this.overrides[item.name] === undefined;
+      const level = pinned ? placeFrom : this.choosePlacement(placeFrom, item.name, resolved.version, resolved.pkg);
       const node = new Node(item.name, resolved.version, resolved.pkg, level, path.join(level.nodeModules, item.name), resolved.source);
       node.dev = item.dev;
       node.optional = item.optional;
@@ -459,6 +507,13 @@ export class Installer {
     if (!version) throw Object.assign(new Error(`No matching version found for ${realName}@${range}.`), { code: 'ETARGET' });
     let pkg = p.versions[version];
     let source: Source = { kind: 'registry', tarball: pkg.dist.tarball, integrity: pkg.dist.integrity, shasum: pkg.dist.shasum, realName: realName !== name ? realName : undefined };
+    // compat packages built by OpenVessel (a wasm build or a JS shim), under the requested name and version
+    const compat = (await loadCompat())[realName];
+    if (compat && semver.satisfies(version, compat.range, { includePrerelease: true })) {
+      pkg = { ...compat.pkg, name: realName, version, dist: { tarball: `${compatOrigin()}/compat/${compat.file}`, integrity: compat.integrity } } as any;
+      source = { kind: 'registry', tarball: `${compatOrigin()}/compat/${compat.file}`, integrity: compat.integrity, realName: compat.pkg.name };
+      return { version, pkg, source };
+    }
     // WebAssembly substitutes for native packages
     const sub = SUBSTITUTES.find((s) => s.name === realName && (!s.when || s.when(version)));
     if (sub) {

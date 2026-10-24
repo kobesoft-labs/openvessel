@@ -5,10 +5,11 @@ import { GHASH } from '@noble/ciphers/_polyval.js';
 import { Poly1305 } from '@noble/ciphers/_poly1305.js';
 import { aes, desEde, type BlockCipher } from './blockcipher.ts';
 import { ChaChaStream } from './chacha.ts';
-import { md5 } from '@noble/hashes/legacy.js';
+import { md5, sha1 } from '@noble/hashes/legacy.js';
 import { CIPHERS, SSL_CIPHERS, type CipherInfo } from './tables.ts';
 import { secretKeyBytes } from './keys.ts';
-import { OSSL, concat, cryptoError, decodeInput, equalBytes, err, toBuffer, view } from './util.ts';
+import { S } from '../../state.ts';
+import { OSSL, concat, cryptoError, decodeInput, equalBytes, err, fillRandom, toBuffer, view } from './util.ts';
 
 /** Thrown inside an engine when OpenSSL fails without queuing an error. */
 const FAIL = Symbol('fail');
@@ -613,6 +614,237 @@ class WrapMode implements Engine {
 }
 
 // -----------------------------------------------------------------------------
+// OCB (RFC 7253) — OpenSSL's aes_ocb: whole blocks go out as they arrive, a partial block waits
+// for final(), and the AAD may come in pieces before the text
+
+function dbl(b: Uint8Array): Uint8Array {
+  const out = new Uint8Array(16);
+  for (let i = 0; i < 15; i++) out[i] = ((b[i] << 1) | (b[i + 1] >>> 7)) & 0xff;
+  out[15] = ((b[15] << 1) & 0xff) ^ (b[0] & 0x80 ? 0x87 : 0);
+  return out;
+}
+
+function xorInto(dst: Uint8Array, src: Uint8Array) {
+  for (let i = 0; i < 16; i++) dst[i] ^= src[i];
+}
+
+function ntz(n: number) {
+  let z = 0;
+  while ((n & 1) === 0) {
+    n >>>= 1;
+    z++;
+  }
+  return z;
+}
+
+class OcbMode implements AeadEngine {
+  private lStar: Uint8Array;
+  private lDollar: Uint8Array;
+  private l: Uint8Array[] = [];
+  private offset: Uint8Array;
+  private checksum = new Uint8Array(16);
+  private blocks = 0;
+  private buf = new Uint8Array(16);
+  private n = 0;
+  // AAD hash state
+  private aadOffset = new Uint8Array(16);
+  private aadSum = new Uint8Array(16);
+  private aadBlocks = 0;
+  private aadBuf = new Uint8Array(16);
+  private aadN = 0;
+  private started = false;
+  private expected: Uint8Array | null = null;
+  private tagValue: Uint8Array | null = null;
+  constructor(
+    private c: BlockCipher,
+    private enc: boolean,
+    nonce: Uint8Array,
+    private tagLen: number,
+  ) {
+    this.lStar = new Uint8Array(16);
+    c.encrypt(this.lStar, 0, this.lStar, 0);
+    this.lDollar = dbl(this.lStar);
+    this.l.push(dbl(this.lDollar));
+    // Nonce = num2str(TAGLEN mod 128, 7) || zeros || 1 || N
+    const full = new Uint8Array(16);
+    full[0] = ((tagLen * 8) % 128) << 1;
+    full.set(nonce, 16 - nonce.length);
+    full[15 - nonce.length] |= 1;
+    const bottom = full[15] & 0x3f;
+    full[15] &= 0xc0;
+    const ktop = new Uint8Array(16);
+    c.encrypt(full, 0, ktop, 0);
+    const stretch = new Uint8Array(24);
+    stretch.set(ktop);
+    for (let i = 0; i < 8; i++) stretch[16 + i] = ktop[i] ^ ktop[i + 1];
+    // Offset_0 = Stretch[1 + bottom .. 128 + bottom]
+    this.offset = new Uint8Array(16);
+    const byteShift = bottom >>> 3;
+    const bitShift = bottom & 7;
+    for (let i = 0; i < 16; i++) {
+      const a = stretch[i + byteShift];
+      const b = stretch[i + byteShift + 1];
+      this.offset[i] = bitShift ? ((a << bitShift) | (b >>> (8 - bitShift))) & 0xff : a;
+    }
+  }
+  private L(i: number): Uint8Array {
+    while (this.l.length <= i) this.l.push(dbl(this.l[this.l.length - 1]));
+    return this.l[i];
+  }
+  private aadBlock(block: Uint8Array) {
+    this.aadBlocks++;
+    xorInto(this.aadOffset, this.L(ntz(this.aadBlocks)));
+    const t = block.slice();
+    xorInto(t, this.aadOffset);
+    this.c.encrypt(t, 0, t, 0);
+    xorInto(this.aadSum, t);
+  }
+  aad(data: Uint8Array) {
+    if (this.started) return false;
+    for (let i = 0; i < data.length; ) {
+      // a full block is only hashed once more AAD follows (the last one may be the final block)
+      if (this.aadN === 16) {
+        this.aadBlock(this.aadBuf);
+        this.aadN = 0;
+      }
+      const take = Math.min(16 - this.aadN, data.length - i);
+      this.aadBuf.set(data.subarray(i, i + take), this.aadN);
+      this.aadN += take;
+      i += take;
+    }
+    return true;
+  }
+  private hashAad(): Uint8Array {
+    if (this.aadN === 16) {
+      this.aadBlock(this.aadBuf);
+      this.aadN = 0;
+    }
+    const sum = this.aadSum.slice();
+    if (this.aadN) {
+      const off = this.aadOffset.slice();
+      xorInto(off, this.lStar);
+      const t = new Uint8Array(16);
+      t.set(this.aadBuf.subarray(0, this.aadN));
+      t[this.aadN] = 0x80;
+      xorInto(t, off);
+      this.c.encrypt(t, 0, t, 0);
+      xorInto(sum, t);
+    }
+    return sum;
+  }
+  private block(src: Uint8Array, so: number, dst: Uint8Array, d: number) {
+    this.blocks++;
+    xorInto(this.offset, this.L(ntz(this.blocks)));
+    const t = src.slice(so, so + 16);
+    if (this.enc) xorInto(this.checksum, t);
+    xorInto(t, this.offset);
+    if (this.enc) this.c.encrypt(t, 0, t, 0);
+    else this.c.decrypt(t, 0, t, 0);
+    xorInto(t, this.offset);
+    if (!this.enc) xorInto(this.checksum, t);
+    dst.set(t, d);
+  }
+  update(data: Uint8Array) {
+    this.started = true;
+    const total = this.n + data.length;
+    const whole = total - (total % 16);
+    const out = new Uint8Array(whole);
+    let o = 0;
+    let i = 0;
+    if (this.n && whole) {
+      const take = 16 - this.n;
+      this.buf.set(data.subarray(0, take), this.n);
+      this.block(this.buf, 0, out, 0);
+      o = 16;
+      i = take;
+      this.n = 0;
+    }
+    for (; o < whole; o += 16, i += 16) this.block(data, i, out, o);
+    this.buf.set(data.subarray(i), this.n);
+    this.n += data.length - i;
+    return out;
+  }
+  expectTag(tag: Uint8Array) {
+    this.expected = tag;
+  }
+  final() {
+    let out = new Uint8Array(0);
+    if (this.n) {
+      xorInto(this.offset, this.lStar);
+      const pad = new Uint8Array(16);
+      this.c.encrypt(this.offset, 0, pad, 0);
+      out = new Uint8Array(this.n);
+      for (let i = 0; i < this.n; i++) out[i] = this.buf[i] ^ pad[i];
+      const plain = this.enc ? this.buf.subarray(0, this.n) : out;
+      const t = new Uint8Array(16);
+      t.set(plain);
+      t[this.n] = 0x80;
+      xorInto(this.checksum, t);
+    }
+    const t = this.checksum.slice();
+    xorInto(t, this.offset);
+    xorInto(t, this.lDollar);
+    this.c.encrypt(t, 0, t, 0);
+    xorInto(t, this.hashAad());
+    const tag = t.subarray(0, this.tagLen);
+    if (this.enc) this.tagValue = tag.slice();
+    else if (!this.expected || !equalBytes(tag, this.expected)) throw FAIL;
+    return out;
+  }
+  tag(len: number) {
+    return this.tagValue!.slice(0, len);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Triple-DES key wrap (RFC 3217, id-smime-alg-CMS3DESwrap) — OpenSSL's des_ede3_wrap
+
+const WRAP_IV = Uint8Array.of(0x4a, 0xdd, 0xa2, 0x2c, 0x79, 0xe8, 0x21, 0x05);
+
+function cbc(c: BlockCipher, enc: boolean, iv: Uint8Array, data: Uint8Array): Uint8Array {
+  const out = new Uint8Array(data.length);
+  const prev = iv.slice();
+  for (let i = 0; i < data.length; i += 8) {
+    if (enc) {
+      for (let k = 0; k < 8; k++) out[i + k] = data[i + k] ^ prev[k];
+      c.encrypt(out, i, out, i);
+      prev.set(out.subarray(i, i + 8));
+    } else {
+      c.decrypt(data, i, out, i);
+      for (let k = 0; k < 8; k++) out[i + k] ^= prev[k];
+      prev.set(data.subarray(i, i + 8));
+    }
+  }
+  return out;
+}
+
+class Des3WrapMode implements Engine {
+  constructor(
+    private c: BlockCipher,
+    private enc: boolean,
+  ) {}
+  update(data: Uint8Array): Uint8Array | null {
+    if (data.length === 0) return new Uint8Array(0);
+    if (data.length % 8) return null;
+    if (this.enc) {
+      const iv = new Uint8Array(8);
+      fillRandom(iv);
+      const inner = cbc(this.c, true, iv, concat([data, sha1(data).subarray(0, 8)]));
+      const t = concat([iv, inner]).reverse();
+      return cbc(this.c, true, WRAP_IV, t);
+    }
+    if (data.length < 24) return null;
+    const t = cbc(this.c, false, WRAP_IV, data).reverse();
+    const plain = cbc(this.c, false, t.subarray(0, 8), t.subarray(8));
+    const msg = plain.subarray(0, plain.length - 8);
+    return equalBytes(sha1(msg).subarray(0, 8), plain.subarray(plain.length - 8)) ? msg.slice() : null;
+  }
+  final() {
+    return new Uint8Array(0);
+  }
+}
+
+// -----------------------------------------------------------------------------
 // cipher lookup
 
 export function findCipher(name: unknown): CipherInfo | undefined {
@@ -627,7 +859,8 @@ function findByNid(nid: number): CipherInfo | undefined {
 
 const isChaChaPoly = (info: CipherInfo) => info.nid === 1018;
 const isChaCha = (info: CipherInfo) => info.nid === 1019;
-const isAuthMode = (info: CipherInfo) => info.mode === 'gcm' || info.mode === 'ccm' || isChaChaPoly(info);
+const isAuthMode = (info: CipherInfo) => info.mode === 'gcm' || info.mode === 'ccm' || info.mode === 'ocb' || isChaChaPoly(info);
+const isDes3Wrap = (info: CipherInfo) => info.nid === 246;
 const isDes = (info: CipherInfo) => /^des/i.test(info.name);
 const isValidGcmTagLength = (n: number) => n === 4 || n === 8 || (n >= 12 && n <= 16);
 
@@ -642,6 +875,7 @@ function makeEngine(info: CipherInfo, key: Uint8Array, iv: Uint8Array, enc: bool
     const s = new ChaChaStream(key, iv);
     return { update: (d) => s.xor(d), final: () => new Uint8Array(0) };
   }
+  if (isDes3Wrap(info)) return new Des3WrapMode(desEde(key), enc);
   const c = isDes(info) ? desEde(key) : aes(key);
   const name = info.name.toLowerCase();
   switch (info.mode) {
@@ -661,6 +895,8 @@ function makeEngine(info: CipherInfo, key: Uint8Array, iv: Uint8Array, enc: bool
       return new GcmMode(c, enc, iv);
     case 'ccm':
       return new CcmMode(c, enc, iv, tagLen);
+    case 'ocb':
+      return new OcbMode(c, enc, iv, tagLen);
     case 'wrap':
       return new WrapMode(c, enc, iv, name.includes('pad'));
   }
@@ -694,7 +930,7 @@ export class CipherBase {
   }
 
   #initAuthenticated(cipherType: string, info: CipherInfo, ivLen: number, authTagLen: number): boolean {
-    const ivOk = info.mode === 'gcm' ? ivLen > 0 : info.mode === 'ccm' ? ivLen >= 7 && ivLen <= 13 : ivLen === 12;
+    const ivOk = info.mode === 'gcm' ? ivLen > 0 : info.mode === 'ccm' ? ivLen >= 7 && ivLen <= 13 : info.mode === 'ocb' ? ivLen >= 1 && ivLen <= 15 : ivLen === 12;
     if (!ivOk) throw err('ERR_CRYPTO_INVALID_IV');
     if (info.mode === 'gcm') {
       if (authTagLen !== -1) {
@@ -822,6 +1058,13 @@ export class CipherBase {
     const len = t.length;
     const valid = this.#info!.mode === 'gcm' ? (this.#authTagLen === -1 || this.#authTagLen === len) && isValidGcmTagLength(len) : this.#authTagLen === len;
     if (!valid) throw err('ERR_CRYPTO_INVALID_AUTH_TAG', `Invalid authentication tag length: ${len}`);
+    if (this.#info!.mode === 'gcm' && this.#authTagLen === -1 && len !== 16 && S.optionValues['--pending-deprecation']) {
+      S.requireBuiltin?.('internal/process/warning').emitWarning(
+        'Using AES-GCM authentication tags of less than 128 bits without specifying the authTagLength option when initializing decryption is deprecated.',
+        'DeprecationWarning',
+        'DEP0182',
+      );
+    }
     this.#authTagLen = len;
     this.#authTagState = kAuthTagKnown;
     this.#authTag = t.slice();
@@ -846,7 +1089,7 @@ export class CipherBase {
 
 /** EVP_CIPHER_do_all_sorted names, restricted to the ciphers implemented here. */
 export function getCiphers() {
-  return Object.keys(CIPHERS).map((k) => (k.startsWith('id-aes') ? k.replace(/-(gcm|ccm)$/, (m) => m.toUpperCase()) : k));
+  return Object.keys(CIPHERS).map((k) => (k.startsWith('id-aes') ? k.replace(/-(gcm|ccm)$/, (m) => m.toUpperCase()) : k === 'id-smime-alg-cms3deswrap' ? 'id-smime-alg-CMS3DESwrap' : k));
 }
 
 export function getSSLCiphers() {
@@ -868,6 +1111,8 @@ export function getCipherInfo(target: any, nameOrNid: unknown, keyLength?: numbe
       if (ivLength < 7 || ivLength > 13) return undefined;
     } else if (info.mode === 'gcm') {
       if (ivLength <= 0) return undefined;
+    } else if (info.mode === 'ocb') {
+      if (ivLength < 1 || ivLength > 15) return undefined;
     } else if (ivLength !== ivLen) return undefined;
     ivLen = ivLength;
   }

@@ -134,7 +134,9 @@ export class Registry {
     let lastErr: unknown;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const res = await this.fetchFn(url);
+        // OpenVessel's own compat packages come from this origin, not through the network policy
+        const own = typeof location !== 'undefined' && url.startsWith(`${location.origin}/compat/`);
+        const res = own ? await fetch(url) : await this.fetchFn(url);
         if (!res.ok) throw Object.assign(new Error(`${res.status} ${res.statusText} - GET ${url}`), { code: 'E' + res.status });
         const b = new Uint8Array(await res.arrayBuffer());
         if (!(await verify(b, integrity, shasum))) throw Object.assign(new Error(`integrity checksum failed for ${url}`), { code: 'EINTEGRITY' });

@@ -1,0 +1,18 @@
+#!/usr/bin/env node
+// pagefind_extended runs the same build (no CJK segmentation). Pagefind's indexer compiled to wasm32-wasi (compat/pagefind/build.mjs), in place of the native
+// binary. Same command line and --service protocol.
+'use strict';
+const { WASI } = require('node:wasi');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const wasi = new WASI({
+  version: 'preview1',
+  args: ['pagefind', ...process.argv.slice(2)],
+  env: process.env,
+  preopens: { '/': '/', '.': process.cwd() },
+  returnOnExit: true,
+});
+const mod = new WebAssembly.Module(fs.readFileSync(path.join(__dirname, '..', 'pagefind.wasm')));
+const instance = new WebAssembly.Instance(mod, wasi.getImportObject());
+process.exitCode = wasi.start(instance);

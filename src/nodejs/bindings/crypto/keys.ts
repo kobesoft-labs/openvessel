@@ -2,6 +2,7 @@
 // NativeKeyObject and SecretKeyGenJob.
 
 import { Enc, decode } from '../buffer.ts';
+import { S } from '../../state.ts';
 import type { Asym } from './asymkeys.ts';
 import { err, fillRandom, isAnyBufferSource, jobClass, stringOrBuffer, toBuffer, view } from './util.ts';
 
@@ -24,6 +25,9 @@ export interface AsymOps {
   asymmetricKeyType(data: KeyData): string | undefined;
   checkEcKeyData(data: KeyData): boolean;
   equals(a: KeyData, b: KeyData): boolean;
+  /** SPKI (public) or PKCS#8 (private) DER, for carrying a key across threads */
+  toDer(data: KeyData): Uint8Array;
+  fromDer(type: 1 | 2, der: Uint8Array): KeyData;
 }
 
 let asymOps: AsymOps | null = null;
@@ -167,6 +171,9 @@ export function secretKeyBytes(v: unknown): Uint8Array {
   return symmetricKeyOf(v);
 }
 
+/** [KeyObject, SecretKeyObject, PublicKeyObject, PrivateKeyObject] as lib/internal/crypto/keys returned them. */
+let keyObjectClasses: (new (handle: KeyObjectHandle) => object)[] | null = null;
+
 /** createNativeKeyObjectClass(callback): the base class for KeyObject. */
 export function createNativeKeyObjectClass(callback: (base: Function) => unknown) {
   class NativeKeyObject {
@@ -175,7 +182,43 @@ export function createNativeKeyObjectClass(callback: (base: Function) => unknown
       nativeKeyData.set(this, handle.data);
     }
   }
-  return callback(NativeKeyObject);
+  const classes = callback(NativeKeyObject);
+  if (Array.isArray(classes)) keyObjectClasses = classes as typeof keyObjectClasses;
+  return classes;
+}
+
+// -----------------------------------------------------------------------------
+// MessagePort transfer (NativeKeyObject is kCloneable: KeyObjectTransferData)
+
+/** The marker a cloned KeyObject travels as: plain data that structured clone carries. */
+export const KEY_OBJECT_CLONE = '__ovKeyObject';
+
+export interface KeyObjectClone {
+  [KEY_OBJECT_CLONE]: { type: 0 | 1 | 2; data: Uint8Array };
+}
+
+/** NativeKeyObject::CloneForMessaging: the plain form of a KeyObject, or undefined for anything else. */
+export function cloneKeyObject(v: unknown): KeyObjectClone | undefined {
+  if (!v || typeof v !== 'object' || v instanceof KeyObjectHandle) return undefined;
+  const d = nativeKeyData.get(v);
+  if (!d) return undefined;
+  const data = d.type === 0 ? d.secret.slice() : asym().toDer(d);
+  return { [KEY_OBJECT_CLONE]: { type: d.type, data } };
+}
+
+export function isKeyObjectClone(v: unknown): v is KeyObjectClone {
+  return !!v && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype && KEY_OBJECT_CLONE in (v as object);
+}
+
+/** KeyObjectTransferData::Deserialize: a new SecretKeyObject / PublicKeyObject / PrivateKeyObject. */
+export function deserializeKeyObject(v: KeyObjectClone): object {
+  const { type, data } = v[KEY_OBJECT_CLONE];
+  // a thread that has not touched crypto yet: loading the module creates the classes
+  if (!keyObjectClasses) S.requireBuiltin?.('internal/crypto/keys');
+  if (!keyObjectClasses) throw err('ERR_CRYPTO_UNSUPPORTED_OPERATION', 'KeyObject is not set up in this thread');
+  const h = new KeyObjectHandle();
+  h.data = type === 0 ? { type: 0, secret: new Uint8Array(data) } : asym().fromDer(type, new Uint8Array(data));
+  return new keyObjectClasses[1 + type](h);
 }
 
 // new SecretKeyGenJob(mode, lengthInBits) → KeyObjectHandle

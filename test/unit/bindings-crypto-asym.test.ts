@@ -87,6 +87,8 @@ test('key import / export round trips', () => {
       const list = kind === 'public' ? k.public : k.private;
       for (const src of list) {
         if (src.result.error) continue;
+        // a JWK names its curve: the key it makes is no longer the explicit-parameters one
+        if (src.enc.format === 'jwk' && k.opts.paramEncoding === 'explicit') continue;
         const h = importKey(kind, src.enc, src.result);
         assert.equal(h.getAsymmetricKeyType(), k.asymmetricKeyType, label);
         assert.deepEqual(details(h), kind === 'public' ? k.publicDetails : k.privateDetails, label);
@@ -446,5 +448,5 @@ test('createNativeKeyObjectClass', () => {
   h.init(0, Buffer.from('k'));
   assert.ok(new KeyObject(h));
   assert.throws(() => new KeyObject({}));
-  assert.deepEqual(b.getCurves(), ['secp256k1', 'secp384r1', 'secp521r1', 'prime256v1']);
+  assert.deepEqual(b.getCurves(), ['secp224r1', 'secp256k1', 'secp384r1', 'secp521r1', 'prime256v1']);
 });

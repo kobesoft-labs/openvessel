@@ -36,6 +36,14 @@ const specs = [
   ['rsa-pss', { modulusLength: 1024 }],
   ['rsa-pss', { modulusLength: 1024, hashAlgorithm: 'sha256', mgf1HashAlgorithm: 'sha1', saltLength: 20 }],
   ['rsa-pss', { modulusLength: 1024, hashAlgorithm: 'sha512' }],
+  ['ec', { namedCurve: 'secp224r1' }],
+  ['ec', { namedCurve: 'P-256', paramEncoding: 'explicit' }],
+  ['ec', { namedCurve: 'secp384r1', paramEncoding: 'explicit' }],
+  ['ec', { namedCurve: 'secp256k1', paramEncoding: 'explicit' }],
+  ['dsa', { modulusLength: 1024 }],
+  ['dsa', { modulusLength: 2048, divisorLength: 224 }],
+  ['dh', { group: 'modp5' }],
+  ['dh', { primeLength: 512 }],
 ];
 
 const pubEncodings = [
@@ -114,13 +122,13 @@ out.parseErrors = [
 
 const message = Buffer.from('The quick brown fox jumps over the lazy dog');
 out.signatures = [];
-const sigKeys = out.keys.filter((k) => !k.type.startsWith('x'));
+const sigKeys = out.keys.filter((k) => !k.type.startsWith('x') && k.type !== 'dh');
 for (const k of sigKeys) {
   const priv = crypto.createPrivateKey({ key: Buffer.from(k.private[1].result.hex, 'hex'), format: 'der', type: 'pkcs8' });
   const isEd = k.type.startsWith('ed');
-  const algs = isEd ? [null] : k.type === 'ec' ? ['sha256', 'sha1', 'sha512', 'sha3-256', null] : ['sha256', 'sha1', 'sha512', 'md5', null];
+  const algs = isEd ? [null] : k.type === 'ec' || k.type === 'dsa' ? ['sha256', 'sha1', 'sha512', 'sha3-256', null] : ['sha256', 'sha1', 'sha512', 'md5', null];
   for (const alg of algs) {
-    const optsList = k.type === 'ec' ? [{}, { dsaEncoding: 'ieee-p1363' }] : k.type === 'rsa' ? [{}, { padding: crypto.constants.RSA_PKCS1_PSS_PADDING }, { padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: 0 }, { padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: -1 }] : [{}];
+    const optsList = k.type === 'ec' || k.type === 'dsa' ? [{}, { dsaEncoding: 'ieee-p1363' }] : k.type === 'rsa' ? [{}, { padding: crypto.constants.RSA_PKCS1_PSS_PADDING }, { padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: 0 }, { padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: -1 }] : [{}];
     for (const o of optsList) {
       const sig = attempt(() => hex(crypto.sign(alg, message, { key: priv, ...o })));
       const streamSig = isEd || alg === null ? undefined : attempt(() => hex(crypto.createSign(alg).update(message).sign({ key: priv, ...o })));
@@ -143,7 +151,7 @@ for (const k of sigKeys) {
 // ECDH / X25519 / diffieHellman
 
 out.ecdh = [];
-for (const curve of ['prime256v1', 'secp384r1', 'secp521r1', 'secp256k1']) {
+for (const curve of ['prime256v1', 'secp384r1', 'secp521r1', 'secp256k1', 'secp224r1']) {
   const a = crypto.createECDH(curve);
   a.generateKeys();
   const b = crypto.createECDH(curve);
@@ -166,8 +174,8 @@ out.ecdhErrors = {
   badPrivate: attempt(() => crypto.createECDH('prime256v1').setPrivateKey(Buffer.alloc(32))),
 };
 out.dh = [];
-for (const type of ['x25519', 'x448', 'ec']) {
-  const opts = type === 'ec' ? { namedCurve: 'P-384' } : {};
+for (const type of ['x25519', 'x448', 'ec', 'dh']) {
+  const opts = type === 'ec' ? { namedCurve: 'P-384' } : type === 'dh' ? { group: 'modp14' } : {};
   const a = crypto.generateKeyPairSync(type, opts);
   const b = crypto.generateKeyPairSync(type, opts);
   out.dh.push({

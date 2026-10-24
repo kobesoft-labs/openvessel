@@ -3,6 +3,7 @@ import { build, context } from 'esbuild';
 import { cpSync, existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { genNodeLib } from './gen-nodelib.mjs';
+import { buildCompat } from './build-compat.mjs';
 
 const root = new URL('..', import.meta.url).pathname;
 const dist = join(root, 'dist');
@@ -67,5 +68,6 @@ if (watch) {
   await Promise.all(configs.map((c) => build(c)));
   if (existsSync(join(root, 'vendor/node/natives.json'))) genNodeLib(join(dist, 'runtime/nodelib.js'));
   else console.warn('vendor/node missing: run node scripts/gen-node-data.mjs to build the ported Node runtime');
+  await buildCompat(join(dist, 'runtime/compat'));
   console.log('built dist/');
 }
