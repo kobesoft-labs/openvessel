@@ -6,7 +6,7 @@ const sw = globalThis as unknown as ServiceWorkerGlobalScope;
 
 // The preview may be served under a path (e.g. /demo/preview/): its own files are under the scope.
 const SCOPE = new URL(sw.registration.scope).pathname;
-const OWN = new Set(['relay.html', 'relay.js', 'sw.js', 'inject.js'].map((f) => `${SCOPE}__ov/${f}`));
+const OWN = new Set([...['relay.html', 'relay.js', 'inject.js'].map((f) => `${SCOPE}__ov/${f}`), `${SCOPE}__ov-sw.js`]);
 
 let kernel: MessagePort | null = null;
 let defaultPort = 0;
@@ -104,9 +104,28 @@ function portFor(clientId: string | null | undefined): number {
   return defaultPort;
 }
 
-const INJECT = `<script src="${SCOPE}__ov/inject.js"></script>`;
+const INJECT_SCRIPT = `<script src="${SCOPE}__ov/inject.js"></script>`;
+
+/**
+ * Served under a path (SCOPE isn't "/"): the site still runs at "/" on its server, so the scope comes
+ * off request paths here and goes onto the root paths the site's pages use — HTML attributes, an
+ * import map for module specifiers (/@vite/client, /src/…), redirects; inject.js does fetch().
+ */
+const MOUNTED = SCOPE !== '/';
+const toServerPath = (p: string) => (MOUNTED && p.startsWith(SCOPE) ? '/' + p.slice(SCOPE.length) : p);
+const toPreviewPath = (p: string) => (MOUNTED && p.startsWith('/') && !p.startsWith('//') && !p.startsWith(SCOPE) ? SCOPE + p.slice(1) : p);
+const IMPORT_MAP = `<script type="importmap">${JSON.stringify({ imports: { '/': SCOPE, [SCOPE]: SCOPE } })}</script>`;
+
+function mountHtml(html: string): string {
+  if (!MOUNTED) return html;
+  return html
+    .replace(/(\s(?:src|href|action|poster|formaction)\s*=\s*)(["'])(\/[^"']*)\2/gi, (_m, a, q, v) => `${a}${q}${toPreviewPath(v)}${q}`)
+    .replace(/(\ssrcset\s*=\s*)(["'])([^"']*)\2/gi, (_m, a, q, v: string) => `${a}${q}${v.replace(/(^|,\s*)(\/[^\s,]*)/g, (_x, sep, u) => sep + toPreviewPath(u))}${q}`);
+}
 
 function injectHtml(html: string): string {
+  html = mountHtml(html);
+  const INJECT = MOUNTED ? IMPORT_MAP + INJECT_SCRIPT : INJECT_SCRIPT;
   const m = /<head[^>]*>/i.exec(html);
   if (m) return html.slice(0, m.index + m[0].length) + INJECT + html.slice(m.index + m[0].length);
   const d = /<!doctype[^>]*>/i.exec(html);
@@ -114,7 +133,7 @@ function injectHtml(html: string): string {
   return INJECT + html;
 }
 
-async function forward(req: Request, port: number, isNavigation: boolean): Promise<Response> {
+async function forward(req: Request, port: number, isNavigation: boolean, attempt = 0): Promise<Response> {
   const k = await getKernel();
   const url = new URL(req.url);
   const id = nextId++;
@@ -138,7 +157,7 @@ async function forward(req: Request, port: number, isNavigation: boolean): Promi
     },
   });
   streams.set(id, { head: resolveHead, ctrl, fail: (msg) => rejectHead(new Error(msg)) });
-  k.postMessage({ k: 'req', id, port, method: req.method, url: url.pathname + url.search, headers, hasBody });
+  k.postMessage({ k: 'req', id, port, method: req.method, url: toServerPath(url.pathname) + url.search, headers, hasBody });
   if (hasBody) {
     const reqBody = new Uint8Array(await req.arrayBuffer());
     if (reqBody.length) k.postMessage({ k: 'body', id, data: reqBody }, [reqBody.buffer]);
@@ -148,6 +167,11 @@ async function forward(req: Request, port: number, isNavigation: boolean): Promi
   try {
     h = await head;
   } catch (e) {
+    // a dev server may listen briefly to probe the port, then for real a moment later (Vite does)
+    if (!hasBody && attempt < 15 && /ECONNREFUSED/.test(String((e as Error).message))) {
+      await new Promise((r) => setTimeout(r, 200));
+      return forward(req, port, isNavigation, attempt + 1);
+    }
     return new Response(errorPage(port, String((e as Error).message)), { status: 502, headers: { 'content-type': 'text/html; charset=utf-8', ...isolationHeaders() } });
   }
   const out = new Headers();
@@ -155,7 +179,7 @@ async function forward(req: Request, port: number, isNavigation: boolean): Promi
     const ln = n.toLowerCase();
     if (ln === 'content-length' || ln === 'transfer-encoding' || ln === 'connection' || ln === 'keep-alive' || ln === 'content-encoding') continue;
     try {
-      out.append(n, v);
+      out.append(n, ln === 'location' ? toPreviewPath(v) : v);
     } catch {}
   }
   for (const [n, v] of Object.entries(isolationHeaders())) if (!out.has(n)) out.set(n, v);
@@ -207,7 +231,7 @@ function openSocket(d: any, src: Client | null) {
   sockets.set(id, port);
   const target = portFor(src?.id) || Number(d.vport) || defaultPort;
   getKernel().then((k) => {
-    k.postMessage({ k: 'ws-open', id, port: target, url: d.path, headers: [['sec-websocket-protocol', (d.protocols ?? []).join(', ')], ['host', `localhost:${target}`], ['origin', d.origin ?? '']].filter(([, v]) => v) });
+    k.postMessage({ k: 'ws-open', id, port: target, url: toServerPath(d.path), headers: [['sec-websocket-protocol', (d.protocols ?? []).join(', ')], ['host', `localhost:${target}`], ['origin', d.origin ?? '']].filter(([, v]) => v) });
     port.onmessage = (e) => {
       const m = e.data;
       if (m.t === 'send') k.postMessage({ k: 'ws-msg', id, data: m.data, binary: m.binary });
@@ -242,7 +266,7 @@ sw.addEventListener('fetch', (ev) => {
     const p = url.searchParams.get('path') || '/';
     if (ev.resultingClientId) clientPorts.set(ev.resultingClientId, port);
     // a redirect with isolation headers (COEP host pages refuse the plain Response.redirect)
-    ev.respondWith(new Response(null, { status: 302, headers: { location: new URL(p, sw.location.origin).href, ...isolationHeaders() } }));
+    ev.respondWith(new Response(null, { status: 302, headers: { location: new URL(toPreviewPath(p), sw.location.origin).href, ...isolationHeaders() } }));
     return;
   }
   const isNav = req.mode === 'navigate';

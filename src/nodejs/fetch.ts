@@ -16,6 +16,76 @@ const NativeReadableStream: typeof ReadableStream = g.ReadableStream;
 const NativeWebSocket: typeof WebSocket = g.WebSocket;
 const NativeEventSource: typeof EventSource = g.EventSource;
 const NativeURL: typeof URL = g.URL;
+const NativeAbortController: typeof AbortController = g.AbortController;
+const NativeAbortSignal: typeof AbortSignal = g.AbortSignal;
+
+/** Node's AbortSignal (lib's EventTarget) as a browser AbortSignal, which the native Request requires. */
+function browserSignal(signal: any): AbortSignal | null | undefined {
+  if (!signal || signal instanceof NativeAbortSignal) return signal;
+  const c = new NativeAbortController();
+  if (signal.aborted) c.abort(signal.reason);
+  else signal.addEventListener?.('abort', () => c.abort(signal.reason), { once: true });
+  return c.signal;
+}
+
+/**
+ * Bodies the browser's Request/Response don't take but Node's (undici) do: lib's ReadableStream (Node's
+ * bootstrap replaces the global) and async iterables. They became the text "[object Object]"; they're
+ * read into a browser stream instead.
+ */
+function browserBody(body: any): any {
+  if (!body || typeof body !== 'object' || body instanceof NativeReadableStream) return body;
+  // undici also takes an async iterable of chunks (Astro's dev server streams pages that way)
+  if (typeof body.getReader !== 'function' && typeof body[Symbol.asyncIterator] === 'function') {
+    const it = body[Symbol.asyncIterator]();
+    return new NativeReadableStream({
+      async pull(c) {
+        const { done, value } = await it.next();
+        if (done) c.close();
+        else c.enqueue(typeof value === 'string' ? new TextEncoder().encode(value) : value);
+      },
+      cancel(reason) {
+        return it.return?.(reason);
+      },
+    });
+  }
+  if (typeof body.getReader !== 'function') return body;
+  const reader = body.getReader();
+  return new NativeReadableStream({
+    async pull(c) {
+      const { done, value } = await reader.read();
+      if (done) c.close();
+      else c.enqueue(typeof value === 'string' ? new TextEncoder().encode(value) : value);
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
+}
+
+function browserInit(init?: RequestInit): RequestInit | undefined {
+  if (!init) return init;
+  const out: any = { ...init };
+  if (init.signal) out.signal = browserSignal(init.signal);
+  if (init.body) out.body = browserBody(init.body);
+  // a streamed body needs duplex: 'half' in browsers (Node's undici implies it)
+  if (init.body && typeof (init.body as any).getReader === 'function' && !out.duplex) out.duplex = 'half';
+  return out;
+}
+
+/** Response as Node exposes it: accepts a body that is one of lib's ReadableStreams. */
+const NodeResponse = class Response extends NativeResponse {
+  constructor(body?: BodyInit | null, init?: ResponseInit) {
+    super(browserBody(body), init);
+  }
+} as typeof Response;
+
+/** Request as Node exposes it: accepts Node's AbortSignal and streamed bodies. */
+const NodeRequest = class Request extends NativeRequest {
+  constructor(input: RequestInfo | URL, init?: RequestInit) {
+    super(input, browserInit(init));
+  }
+} as typeof Request;
 
 function fetchFailed(message: string, code: string): TypeError {
   const cause = Object.assign(new Error(message), { code });
@@ -122,7 +192,7 @@ function loopbackFetch(url: URL, req: Request, body: Uint8Array | null): Promise
 function fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   return loop.track(
     (async () => {
-      const req = input instanceof NativeRequest && !init ? input : new NativeRequest(input as any, init);
+      const req = input instanceof NativeRequest && !init ? input : new NodeRequest(input as any, init);
       const url = new NativeURL(req.url);
       if (url.protocol === 'data:' || url.protocol === 'blob:') return nativeFetch(req);
       if (url.protocol !== 'http:' && url.protocol !== 'https:') throw fetchFailed(`unsupported URL scheme ${url.protocol}`, 'ERR_INVALID_URL');
@@ -174,8 +244,8 @@ Object.defineProperty(g, '__ovUndici', {
   value: {
     fetch,
     Headers: NativeHeaders,
-    Request: NativeRequest,
-    Response: NativeResponse,
+    Request: NodeRequest,
+    Response: NodeResponse,
     FormData: NativeFormData,
     WebSocket: NativeWebSocket,
     EventSource: NativeEventSource,

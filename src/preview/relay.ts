@@ -5,7 +5,7 @@ let kernelPort: MessagePort | null = null;
 let defaultPort = 0;
 
 async function ensureSw(): Promise<ServiceWorkerRegistration> {
-  const reg = await navigator.serviceWorker.register(new URL('./sw.js', location.href), { scope: new URL('../', location.href).pathname });
+  const reg = await navigator.serviceWorker.register(new URL('../__ov-sw.js', location.href), { scope: new URL('../', location.href).pathname });
   await navigator.serviceWorker.ready;
   return reg;
 }
