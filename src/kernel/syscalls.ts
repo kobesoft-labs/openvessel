@@ -5,11 +5,11 @@ import * as path from '../shared/path.ts';
 import { CJS_CONDITIONS, ESM_CONDITIONS } from '../shared/resolve.ts';
 import type { EsmService } from './esm.ts';
 import { O_ACCMODE, O_RDONLY, O_WRONLY, OpenFile, createPipe, createSocketPair } from './io.ts';
-import type { Kernel } from './kernel.ts';
+import { type Kernel, fdPathOf } from './kernel.ts';
 import type { NetRouter } from './net.ts';
 import { type NodeThread, type Proc, exitCodeOf, signalName } from './proc.ts';
 import { connectOutbound, markOutboundTls } from './outbound.ts';
-import { S_IFCHR, S_IFIFO, S_IFREG, S_IFSOCK, isDir } from './vfs.ts';
+import { S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFREG, S_IFSOCK, isDir } from './vfs.ts';
 
 const enc = new TextEncoder();
 
@@ -23,6 +23,35 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
   const abs = (proc: Proc, p: string) => {
     if (typeof p !== 'string' || p === '') throw kerr('ENOENT');
     return p.startsWith('/') ? path.normalize(p) : path.resolve(proc.cwd, p);
+  };
+
+  /**
+   * EACCES unless a process (uid/gid 1000, not root) may add or remove entries in the directory
+   * that holds `p`: write and search permission on it.
+   */
+  const checkDirWritable = (p: string) => {
+    const d = vfs.lookup(path.dirname(p));
+    const shift = d.uid === 1000 ? 6 : d.gid === 1000 ? 3 : 0;
+    if (((d.mode >> shift) & 3) !== 3) throw kerr('EACCES');
+  };
+
+  /** The open file behind fd N of /proc/self/fd/N (ENOENT if it isn't open). */
+  const fdFile = (proc: Proc, fd: number) => {
+    const f = proc.fds.get(fd);
+    if (!f) throw kerr('ENOENT');
+    return f;
+  };
+
+  /**
+   * /proc/self (a link to /proc/<pid>), /proc/<pid> and /proc/<pid>/fd of the calling process, which
+   * the VFS doesn't hold; null for other paths.
+   */
+  const procDirStat = (proc: Proc, p: string, l: boolean) => {
+    const m = /^\/proc\/(self|\d+)(\/fd)?$/.exec(p);
+    if (!m || (m[1] !== 'self' && Number(m[1]) !== proc.pid)) return null;
+    const st = vfs.lstat('/proc');
+    if (m[1] === 'self' && !m[2] && l) return { ...st, ino: 0, mode: S_IFLNK | 0o777, nlink: 1, size: String(proc.pid).length };
+    return { ...st, ino: 0, mode: S_IFDIR | (m[2] ? 0o500 : 0o555), nlink: 2 };
   };
 
   const fstatOf = (f: OpenFile) => {
@@ -89,6 +118,13 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       // ---------------- files ----------------
       case 'stat': {
         const p = abs(proc, a.p);
+        // /proc/self/fd/N is a link to the open file (/dev/stdin and the like link to it)
+        const own = fdPathOf(p, proc.pid);
+        if (a.l && own !== null) return { ...fstatOf(fdFile(proc, own)), mode: S_IFLNK | 0o700, size: 64 };
+        const fd = a.l ? null : kernel.procFdOf(p, proc.pid);
+        if (fd !== null) return fstatOf(fdFile(proc, fd));
+        const dir = procDirStat(proc, p, !!a.l);
+        if (dir) return dir;
         return a.l ? vfs.lstat(p) : vfs.stat(p);
       }
       case 'fstat':
@@ -101,7 +137,9 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         return null;
       }
       case 'open': {
-        const f = kernel.openFile(proc, abs(proc, a.p), a.flags ?? 0, a.mode ?? 0o666);
+        const p = abs(proc, a.p);
+        if ((a.flags ?? 0) & 0o100 && !vfs.tryLookup(p)) checkDirWritable(p);
+        const f = kernel.openFile(proc, p, a.flags ?? 0, a.mode ?? 0o666);
         return proc.allocFd(f, 3);
       }
       case 'close':
@@ -139,6 +177,22 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       }
       case 'readFile': {
         const p = abs(proc, a.p);
+        const fd = kernel.procFdOf(p, proc.pid);
+        if (fd !== null) {
+          const f = fdFile(proc, fd);
+          if (f.kind === 'file' && f.opts.node) return vfs.contents(f.opts.node).slice();
+          return (async () => {
+            const parts: Uint8Array[] = [];
+            for (let d; (d = await f.read(65536)).length; ) parts.push(d);
+            const out = new Uint8Array(parts.reduce((n, x) => n + x.length, 0));
+            let off = 0;
+            for (const x of parts) {
+              out.set(x, off);
+              off += x.length;
+            }
+            return out;
+          })();
+        }
         const n = vfs.lookup(p);
         if (isDir(n)) throw kerr('EISDIR');
         if (n.device) return n.device.read(65536) ?? new Uint8Array(0);
@@ -165,6 +219,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
           return null;
         }
         vfs.lookupParent(p); // ENOENT if parent is missing
+        if (!existing) checkDirWritable(p);
         vfs.writeFile(p, data, (a.mode ?? 0o666) & ~proc.umask);
         return null;
       }
@@ -178,6 +233,10 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       }
       case 'mkdir': {
         const p = abs(proc, a.p);
+        // the directory that gets the first new entry must be writable
+        let first = p;
+        if (a.recursive) while (first !== '/' && !vfs.tryLookup(path.dirname(first))) first = path.dirname(first);
+        if (!vfs.tryLookup(first)) checkDirWritable(first);
         const r = vfs.mkdir(p, a.mode ?? 0o777, !!a.recursive);
         return a.recursive ? (r ?? null) : null;
       }
@@ -186,14 +245,18 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
           const suffix = Array.from({ length: 6 }, () => 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[Math.floor(Math.random() * 62)]).join('');
           const p = abs(proc, a.prefix + suffix);
           if (vfs.exists(p)) continue;
+          checkDirWritable(p);
           vfs.mkdir(p, 0o700);
           return p;
         }
         throw kerr('EEXIST');
       }
-      case 'rmdir':
-        vfs.rmdir(abs(proc, a.p));
+      case 'rmdir': {
+        const p = abs(proc, a.p);
+        if (vfs.tryLookup(p, false)) checkDirWritable(p);
+        vfs.rmdir(p);
         return null;
+      }
       case 'rm': {
         const p = abs(proc, a.p);
         const n = vfs.tryLookup(p, false);
@@ -211,20 +274,46 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         const p = abs(proc, a.p);
         const n = vfs.lookup(p, false);
         if (isDir(n)) throw kerr('EISDIR');
+        checkDirWritable(p);
         vfs.unlink(p);
         return null;
       }
-      case 'rename':
-        vfs.rename(abs(proc, a.from), abs(proc, a.to));
+      case 'rename': {
+        const from = abs(proc, a.from);
+        const to = abs(proc, a.to);
+        if (vfs.tryLookup(from, false)) {
+          checkDirWritable(from);
+          if (vfs.tryLookup(path.dirname(to))) checkDirWritable(to);
+        }
+        vfs.rename(from, to);
         return null;
-      case 'link':
-        vfs.link(abs(proc, a.from), abs(proc, a.to));
+      }
+      case 'link': {
+        const to = abs(proc, a.to);
+        if (vfs.tryLookup(path.dirname(to)) && !vfs.tryLookup(to, false)) checkDirWritable(to);
+        vfs.link(abs(proc, a.from), to);
         return null;
-      case 'symlink':
-        vfs.symlink(a.target, abs(proc, a.p));
+      }
+      case 'symlink': {
+        const p = abs(proc, a.p);
+        if (vfs.tryLookup(path.dirname(p)) && !vfs.tryLookup(p, false)) checkDirWritable(p);
+        vfs.symlink(a.target, p);
         return null;
-      case 'readlink':
-        return vfs.readlink(abs(proc, a.p));
+      }
+      case 'readlink': {
+        const p = abs(proc, a.p);
+        if (p === '/proc/self') return String(proc.pid);
+        const own = fdPathOf(p, proc.pid);
+        if (own !== null) {
+          // what Linux shows: the file's path, or pipe:[id] / socket:[id]
+          const f = fdFile(proc, own);
+          if (f.opts.path) return f.opts.path;
+          if (f.kind === 'tty') return '/dev/tty';
+          const id = (f.opts.reader as { pipe?: { id: number } } | undefined)?.pipe?.id ?? (f.opts.writer as { pipe?: { id: number } } | undefined)?.pipe?.id ?? 0;
+          return `${f.kind === 'socket' ? 'socket' : 'pipe'}:[${id}]`;
+        }
+        return vfs.readlink(p);
+      }
       case 'realpath':
         return vfs.realpath(abs(proc, a.p));
       case 'chmod':
