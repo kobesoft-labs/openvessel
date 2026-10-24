@@ -18,15 +18,25 @@ export class TcpBridge {
 
   /** Opens a connection to a raw listener; returns the connecting side's end. */
   connect(rec: ListenRecord, from?: { address: string; port: number }, accept = 'tcp-accept'): OpenFile | null {
-    const proc = this.kernel.procs.get(rec.pid);
+    // a listening socket shared by several processes: they take turns accepting
+    let owner: { pid: number; tid: number } = rec;
+    if (rec.acceptors?.length) {
+      const all = [{ pid: rec.pid, tid: rec.tid }, ...rec.acceptors].filter((a) => this.kernel.procs.get(a.pid)?.state === 'running');
+      if (all.length) owner = all[(rec.next = ((rec.next ?? -1) + 1) % all.length)];
+    }
+    const proc = this.kernel.procs.get(owner.pid);
     if (!proc || proc.state !== 'running') return null;
     const [serverEnd, clientEnd] = createSocketPair();
     const fd = proc.allocFd(serverEnd, 3);
-    const thread = proc.threads.get(rec.tid) ?? proc.threads.values().next().value;
+    const thread = proc.threads.get(owner.tid) ?? proc.threads.values().next().value;
     const peerPort = from?.port ?? (nextPeerPort = nextPeerPort >= 60000 ? 40000 : nextPeerPort + 1);
     thread?.worker.postMessage({ t: accept, port: rec.port, fd, remoteAddress: from?.address ?? '127.0.0.1', remotePort: peerPort });
+    this.lastAcceptor = { pid: proc.pid, tid: thread?.tid ?? 0 };
     return clientEnd;
   }
+
+  /** Who was handed the last connection made by connect(). */
+  lastAcceptor: { pid: number; tid: number } | null = null;
 
   /** NetRouter.request for raw listeners: HTTP message ⇄ HTTP/1.1 bytes. */
   request(rec: ListenRecord, init: HttpRequestInit, responder: HttpResponder) {

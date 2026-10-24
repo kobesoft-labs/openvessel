@@ -227,14 +227,34 @@ const ls: Program = async (ctx) => {
 const cat: Program = async (ctx) => {
   const { flags, args } = getopt(ctx.argv.slice(1));
   let lineNo = 1;
-  return eachInput(ctx, args, 'cat', (d) => {
-    if (flags.has('n')) {
-      const text = dec.decode(d);
-      const lines = text.split('\n');
-      const last = lines.pop();
-      ctx.out(lines.map((l) => `${String(lineNo++).padStart(6)}\t${l}\n`).join('') + (last ? `${String(lineNo++).padStart(6)}\t${last}` : ''));
-    } else ctx.out(d);
-  });
+  let atLineStart = true;
+  const emit = (d: Uint8Array) => {
+    if (!flags.has('n')) return ctx.out(d);
+    const text = dec.decode(d, { stream: true });
+    let out = '';
+    for (const part of text.split(/(?<=\n)/)) {
+      if (!part) continue;
+      if (atLineStart) out += `${String(lineNo++).padStart(6)}\t`;
+      out += part;
+      atLineStart = part.endsWith('\n');
+    }
+    ctx.out(out);
+  };
+  let st = 0;
+  for (const f of args.length ? args : ['-']) {
+    if (f === '-') {
+      // stream stdin: a reader on the other end of a pipe sees each chunk as it arrives
+      for (let d; (d = await ctx.read(0)); ) emit(d);
+      continue;
+    }
+    try {
+      emit(ctx.vfs.readFile(ctx.resolve(f)));
+    } catch (e) {
+      ctx.err(`cat: ${f}: ${errMsg(e)}\n`);
+      st = 1;
+    }
+  }
+  return st;
 };
 
 const mkdir: Program = async (ctx) => {
@@ -253,6 +273,25 @@ const mkdir: Program = async (ctx) => {
   if (!args.length) {
     ctx.err('mkdir: missing operand\n');
     return 1;
+  }
+  return st;
+};
+
+const mkfifo: Program = async (ctx) => {
+  const { opts, args } = getopt(ctx.argv.slice(1), 'm');
+  if (!args.length) {
+    ctx.err('mkfifo: missing operand\n');
+    return 1;
+  }
+  const mode = opts.has('m') ? parseInt(opts.get('m')!, 8) : 0o666 & ~ctx.proc.umask;
+  let st = 0;
+  for (const a of args) {
+    try {
+      ctx.vfs.mknodFifo(ctx.resolve(a), mode);
+    } catch (e) {
+      ctx.err(`mkfifo: cannot create fifo '${a}': ${errMsg(e)}\n`);
+      st = 1;
+    }
   }
   return st;
 };
@@ -464,6 +503,25 @@ const head: Program = async (ctx) => {
   const { opts, args } = getopt(argv, 'nc');
   const n = Number(opts.get('n') ?? 10);
   const multi = args.length > 1;
+  if (!args.length && (opts.has('c') ? Number(opts.get('c')) >= 0 : n >= 0)) {
+    // stdin is streamed: head exits once it has its lines/bytes, without waiting for EOF
+    let left = opts.has('c') ? Number(opts.get('c')) : n;
+    while (left > 0) {
+      const d = await ctx.read(0);
+      if (!d) break;
+      let end = d.length;
+      if (opts.has('c')) end = Math.min(d.length, left);
+      else
+        for (let i = 0; i < d.length; i++)
+          if (d[i] === 10 && --left === 0) {
+            end = i + 1;
+            break;
+          }
+      if (opts.has('c')) left -= end;
+      ctx.out(d.subarray(0, end));
+    }
+    return 0;
+  }
   return eachInput(ctx, args, 'head', (d, f) => {
     if (multi) ctx.out(`==> ${f} <==\n`);
     if (opts.has('c')) {
@@ -1748,7 +1806,7 @@ const sha256sum = hashProgram('SHA-256');
 
 export function installCoreutils(kernel: Kernel) {
   const progs: Record<string, Program> = {
-    ls, cat, mkdir, rm, rmdir, cp, mv, touch, ln, chmod, head, tail, wc, grep, egrep: grep, fgrep: grep, find, sort, uniq, cut, tr, sed, xargs, tee, env, which, basename, dirname, realpath, readlink, stat, du, df, free, date, sleep, uname, ps, kill, seq, yes, mktemp, base64, diff, clear, nproc, id, hostname, whoami, tty, stty, nohup, nice, less, more: less, file, rev, nl, timeout, time: timeProg, truncate: truncateProg,
+    ls, cat, mkdir, mkfifo, rm, rmdir, cp, mv, touch, ln, chmod, head, tail, wc, grep, egrep: grep, fgrep: grep, find, sort, uniq, cut, tr, sed, xargs, tee, env, which, basename, dirname, realpath, readlink, stat, du, df, free, date, sleep, uname, ps, kill, seq, yes, mktemp, base64, diff, clear, nproc, id, hostname, whoami, tty, stty, nohup, nice, less, more: less, file, rev, nl, timeout, time: timeProg, truncate: truncateProg,
     sha256sum, sha1sum: hashProgram('SHA-1'), sha512sum: hashProgram('SHA-512'), md5sum: hashProgram('MD5'),
     echo: shellBuiltinProgram('echo'), printf: shellBuiltinProgram('printf'), test: shellBuiltinProgram('test'), '[': shellBuiltinProgram('['), true: shellBuiltinProgram('true'), false: shellBuiltinProgram('false'), pwd: shellBuiltinProgram('pwd'),
     chown: async () => 0, sync: async () => 0, true_: async () => 0,

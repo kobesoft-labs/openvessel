@@ -2,6 +2,20 @@
 // through the preview service worker to the virtual server.
 
 (() => {
+  // served under a path (e.g. /demo/preview/): root-relative fetches go under it too
+  const scope = new URL('../', (document.currentScript as HTMLScriptElement | null)?.src ?? location.href).pathname;
+  if (scope !== '/' && !(window.fetch as any).__openvessel) {
+    const fix = (u: string) => (u.startsWith('/') && !u.startsWith('//') && !u.startsWith(scope) ? scope + u.slice(1) : u);
+    const nativeFetch = window.fetch.bind(window);
+    const patched = (input: RequestInfo | URL, init?: RequestInit) => nativeFetch(typeof input === 'string' ? fix(input) : input, init);
+    (patched as any).__openvessel = true;
+    window.fetch = patched as typeof fetch;
+    const open = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: any[]) {
+      return (open as any).call(this, method, typeof url === 'string' ? fix(url) : url, ...rest);
+    } as typeof open;
+  }
+
   const Native = window.WebSocket;
   if ((Native as any).__openvessel) return;
 

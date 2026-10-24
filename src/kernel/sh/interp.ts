@@ -1901,6 +1901,30 @@ export const BUILTINS: Record<string, ShellBuiltin> = {
     }
     return 0;
   },
+  ulimit(sh, args) {
+    // only -n (open files) has an effect: it bounds how many worker threads a process can start
+    let i = 0;
+    let which = 'f';
+    while (i < args.length && args[i].startsWith('-')) {
+      if (args[i] === '-a') {
+        sh.out(`open files                          (-n) ${sh.ctx.proc.nofile}\n`);
+        return 0;
+      }
+      which = args[i].slice(-1);
+      i++;
+    }
+    const value = args[i];
+    if (value === undefined) {
+      sh.out((which === 'n' ? String(sh.ctx.proc.nofile) : 'unlimited') + '\n');
+      return 0;
+    }
+    if (which === 'n') {
+      const n = value === 'unlimited' ? 1024 * 1024 : Number(value);
+      if (!Number.isInteger(n) || n < 0) throw new ShellError(`ulimit: ${value}: invalid number`);
+      sh.ctx.proc.nofile = n;
+    }
+    return 0;
+  },
   umask(sh, args) {
     if (!args.length) {
       sh.out(sh.ctx.proc.umask.toString(8).padStart(4, '0') + '\n');

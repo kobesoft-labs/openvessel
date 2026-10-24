@@ -76,7 +76,7 @@ const ready = (async () => {
   };
   vessel.on('server-ready', ({ port }) => {
     live.add(port);
-    // test runners set this: a preview's request would be a connection the test doesn't expect
+    // automated runs (test/node-compat) set this: a preview would send requests to test servers
     if ((window as any).ovNoAutoPreview) return renderPorts();
     show(port);
   });

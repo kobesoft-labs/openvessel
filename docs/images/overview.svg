@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">OpenVessel: a Node.js virtual machine inside a browser tab</title>
+  <desc id="d">A browser tab contains the host page, the OpenVessel runtime (a kernel Web Worker and one Web Worker per Node.js process) and the preview. The runtime reaches the npm registry only through a network gate; the preview reaches the dev server through a virtual port.</desc>
+  <defs>
+    <linearGradient id="vm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#eef2ff"/><stop offset="1" stop-color="#e0f2fe"/></linearGradient>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#475569"/></marker>
+    <filter id="s" x="-5%" y="-5%" width="110%" height="115%"><feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity=".12"/></filter>
+  </defs>
+  <rect width="960" height="560" rx="18" fill="#f8fafc"/>
+
+  <!-- browser window -->
+  <rect x="24" y="22" width="912" height="516" rx="14" fill="#fff" stroke="#cbd5e1" filter="url(#s)"/>
+  <rect x="24" y="22" width="912" height="38" rx="14" fill="#e2e8f0"/>
+  <rect x="24" y="46" width="912" height="14" fill="#e2e8f0"/>
+  <circle cx="48" cy="41" r="6" fill="#f87171"/><circle cx="68" cy="41" r="6" fill="#fbbf24"/><circle cx="88" cy="41" r="6" fill="#34d399"/>
+  <rect x="120" y="31" width="420" height="20" rx="10" fill="#fff"/>
+  <text x="134" y="45" font-size="12" fill="#475569">your-site.example — one browser tab</text>
+
+  <!-- host page -->
+  <rect x="44" y="78" width="200" height="440" rx="12" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="60" y="102" font-size="13" font-weight="700" fill="#0f172a">Host page</text>
+  <text x="60" y="119" font-size="11" fill="#64748b">your app · your origin</text>
+  <rect x="60" y="134" width="168" height="62" rx="8" fill="#fff" stroke="#e2e8f0"/>
+  <text x="72" y="156" font-size="12" font-weight="600" fill="#334155">Editor / UI</text>
+  <text x="72" y="174" font-size="11" fill="#64748b">mount · exec · spawn</text>
+  <text x="72" y="188" font-size="11" fill="#64748b">fs.watch · createPreview</text>
+  <rect x="60" y="210" width="168" height="40" rx="8" fill="#fff" stroke="#e2e8f0"/>
+  <text x="72" y="234" font-size="12" font-weight="600" fill="#334155">OpenVessel API</text>
+
+  <!-- preview -->
+  <rect x="60" y="296" width="168" height="206" rx="10" fill="#fff" stroke="#94a3b8" stroke-dasharray="4 3"/>
+  <text x="72" y="318" font-size="12" font-weight="700" fill="#0f172a">Preview iframe</text>
+  <text x="72" y="334" font-size="11" fill="#64748b">its own origin · sandboxed</text>
+  <rect x="72" y="346" width="144" height="90" rx="6" fill="#6366f1"/>
+  <text x="84" y="372" font-size="12" font-weight="700" fill="#fff">Your Astro site</text>
+  <rect x="84" y="384" width="100" height="6" rx="3" fill="#c7d2fe"/>
+  <rect x="84" y="398" width="120" height="6" rx="3" fill="#c7d2fe"/>
+  <rect x="84" y="412" width="80" height="6" rx="3" fill="#c7d2fe"/>
+  <text x="72" y="462" font-size="11" fill="#64748b">service worker</text>
+  <text x="72" y="477" font-size="11" fill="#64748b">→ virtual port :4321</text>
+  <text x="72" y="492" font-size="11" fill="#64748b">(HTTP + HMR WebSocket)</text>
+
+  <!-- the VM -->
+  <rect x="268" y="78" width="648" height="440" rx="16" fill="url(#vm)" stroke="#6366f1" stroke-width="2"/>
+  <text x="290" y="106" font-size="16" font-weight="800" fill="#312e81">OpenVessel runtime — a Node.js VM in the tab</text>
+  <text x="290" y="125" font-size="11.5" fill="#4338ca">hidden iframe on its own origin · cross-origin isolated (SharedArrayBuffer)</text>
+
+  <!-- kernel -->
+  <rect x="290" y="142" width="300" height="236" rx="12" fill="#fff" stroke="#a5b4fc" filter="url(#s)"/>
+  <text x="306" y="166" font-size="14" font-weight="700" fill="#1e1b4b">Kernel</text>
+  <text x="358" y="166" font-size="11" fill="#64748b">one Web Worker — the "OS"</text>
+  <g font-size="11.5" fill="#334155">
+    <rect x="306" y="178" width="130" height="28" rx="6" fill="#eef2ff"/><text x="316" y="196">in-memory file system</text>
+    <rect x="444" y="178" width="130" height="28" rx="6" fill="#eef2ff"/><text x="454" y="196">processes · signals</text>
+    <rect x="306" y="212" width="130" height="28" rx="6" fill="#eef2ff"/><text x="316" y="230">pipes · TTY · sockets</text>
+    <rect x="444" y="212" width="130" height="28" rx="6" fill="#eef2ff"/><text x="454" y="230">sh · coreutils</text>
+    <rect x="306" y="246" width="130" height="28" rx="6" fill="#eef2ff"/><text x="316" y="264">npm / pnpm / yarn</text>
+    <rect x="444" y="246" width="130" height="28" rx="6" fill="#eef2ff"/><text x="454" y="264">virtual ports</text>
+    <rect x="306" y="280" width="268" height="28" rx="6" fill="#fef3c7"/><text x="316" y="298">network gate — the only way out</text>
+    <rect x="306" y="314" width="268" height="28" rx="6" fill="#ecfdf5"/><text x="316" y="332">ES modules served by the runtime's service worker</text>
+  </g>
+  <text x="306" y="366" font-size="11" fill="#64748b">sync syscalls: SharedArrayBuffer + Atomics.wait</text>
+
+  <!-- processes -->
+  <g>
+    <rect x="618" y="142" width="278" height="112" rx="12" fill="#fff" stroke="#a5b4fc" filter="url(#s)"/>
+    <text x="634" y="166" font-size="13" font-weight="700" fill="#1e1b4b">node — astro dev</text>
+    <text x="634" y="182" font-size="11" fill="#64748b">a Web Worker per process</text>
+    <rect x="634" y="192" width="246" height="24" rx="6" fill="#dcfce7"/><text x="644" y="208" font-size="11.5" fill="#14532d">Node.js v22 lib/ — unmodified</text>
+    <rect x="634" y="220" width="246" height="24" rx="6" fill="#e0e7ff"/><text x="644" y="236" font-size="11.5" fill="#312e81">internalBinding() in TypeScript</text>
+  </g>
+  <g>
+    <rect x="618" y="266" width="278" height="56" rx="12" fill="#fff" stroke="#c7d2fe"/>
+    <text x="634" y="290" font-size="12.5" font-weight="700" fill="#1e1b4b">node — esbuild · rolldown</text>
+    <text x="634" y="308" font-size="11" fill="#64748b">native parts as WebAssembly (wasm32-wasi)</text>
+  </g>
+  <g>
+    <rect x="618" y="334" width="278" height="44" rx="12" fill="#fff" stroke="#c7d2fe"/>
+    <text x="634" y="361" font-size="12.5" font-weight="700" fill="#1e1b4b">sh — your terminal</text>
+  </g>
+  <path d="M590 210 H618" stroke="#475569" stroke-width="1.6" marker-end="url(#a)" marker-start="url(#a)"/>
+  <path d="M590 294 H618" stroke="#475569" stroke-width="1.6" marker-end="url(#a)" marker-start="url(#a)"/>
+  <path d="M590 356 H618" stroke="#475569" stroke-width="1.6" marker-end="url(#a)" marker-start="url(#a)"/>
+
+  <!-- outside -->
+  <rect x="290" y="398" width="300" height="104" rx="12" fill="#fff" stroke="#e2e8f0"/>
+  <text x="306" y="422" font-size="12.5" font-weight="700" fill="#0f172a">Outside the tab</text>
+  <text x="306" y="442" font-size="11.5" fill="#334155">registry.npmjs.org · fonts · CDNs</text>
+  <text x="306" y="460" font-size="11" fill="#64748b">reached with fetch(), through the gate only</text>
+  <text x="306" y="478" font-size="11" fill="#64748b">no real port is ever opened</text>
+  <path d="M440 398 V384" stroke="#b45309" stroke-width="1.6" stroke-dasharray="4 3" marker-start="url(#a)" marker-end="url(#a)"/>
+
+  <rect x="618" y="398" width="278" height="104" rx="12" fill="#fff" stroke="#e2e8f0"/>
+  <text x="634" y="422" font-size="12.5" font-weight="700" fill="#0f172a">Same API as Node</text>
+  <text x="634" y="442" font-size="11.5" fill="#334155">fs · child_process · net · http</text>
+  <text x="634" y="460" font-size="11.5" fill="#334155">worker_threads · crypto · zlib · vm</text>
+  <text x="634" y="478" font-size="11" fill="#64748b">error messages and stack traces as in Node</text>
+
+  <!-- host <-> runtime, preview <-> port -->
+  <path d="M228 230 H268" stroke="#475569" stroke-width="1.6" marker-end="url(#a)" marker-start="url(#a)"/>
+  <path d="M228 470 C 250 470, 250 262, 290 262" fill="none" stroke="#16a34a" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#a)" marker-start="url(#a)"/>
+</svg>

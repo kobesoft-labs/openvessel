@@ -2,6 +2,7 @@
 // blobs or a file read on demand) plus a window [start, end); readers hand out the parts in order.
 
 import { sys } from '../../node/sys.ts';
+import { registerHostObject } from './messaging.ts';
 import { fromShape } from './shape.ts';
 
 type Part = Uint8Array | BlobHandle | FilePart;
@@ -74,6 +75,13 @@ class BlobHandle {
     };
   }
 }
+
+registerHostObject(BlobHandle.prototype, {
+  name: 'blob:BlobHandle',
+  mode: 2 /* kCloneable */,
+  clone: (h: BlobHandle) => h.chunks().map((c) => c.slice()),
+  revive: (chunks: Uint8Array[]) => new BlobHandle(chunks),
+});
 
 export function createBlob() {
   const b = fromShape('blob');

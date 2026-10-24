@@ -9,10 +9,10 @@ let transform: ((source: string, options: object) => { code: string; map?: strin
 function load() {
   if (transform) return transform;
   const xhr = new NativeXMLHttpRequest();
-  xhr.open('GET', `${S.runtimeOrigin}/ts-strip.js`, false);
+  xhr.open('GET', `${S.runtimeBase}/ts-strip.js`, false);
   xhr.send();
   if (xhr.status !== 200) throw new Error(`could not load the TypeScript transform (${xhr.status})`);
-  (0, eval)(`${xhr.responseText}\n//# sourceURL=${S.runtimeOrigin}/ts-strip.js`);
+  (0, eval)(`${xhr.responseText}\n//# sourceURL=${S.runtimeBase}/ts-strip.js`);
   transform = (globalThis as any).__ovSucraseTransform;
   return transform!;
 }

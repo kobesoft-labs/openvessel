@@ -54,3 +54,16 @@ export function createInspector() {
     putNetworkResource() {},
   });
 }
+
+// internalBinding('profiler'): V8 coverage (NODE_V8_COVERAGE) needs the inspector's profiler,
+// which a browser worker doesn't expose; the directory is accepted and nothing is written.
+export function createProfiler() {
+  const b = fromShape('profiler');
+  return Object.assign(b, {
+    setCoverageDirectory: (_dir: string) => {},
+    setSourceMapCacheGetter: (_fn: unknown) => {},
+    takeCoverage: () => {},
+    stopCoverage: () => {},
+    endCoverage: () => {},
+  });
+}

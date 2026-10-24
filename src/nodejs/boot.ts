@@ -14,6 +14,7 @@ import { installIteratorTracking } from './iterators.ts';
 import { moduleUrlForServed } from './bindings/module_wrap.ts';
 import { fromShape } from './bindings/shape.ts';
 import * as loop from './loop.ts';
+import { createEnvProxy } from './env.ts';
 import { parseCommandLine } from './options.ts';
 import { S, type InitMsg } from './state.ts';
 import './typescript.ts';
@@ -37,6 +38,8 @@ self.onmessage = (ev: MessageEvent) => {
     }
     return;
   }
+  // the kernel asks whether everything it posted before has been handled
+  if (msg?.t === 'ping') return post({ t: 'pong', id: msg.id });
   const h = S.kernelHandlers.get(msg?.t);
   if (h) h(msg);
 };
@@ -55,6 +58,11 @@ function bootFailure(e: unknown): never {
 loop.setExitHook((code: number): never => {
   S.exiting = true;
   if (!S.isMainThread) {
+    for (const fn of S.atThreadExit.splice(0)) {
+      try {
+        fn();
+      } catch {}
+    }
     try {
       sys('threadExit', { code });
     } catch {}
@@ -130,35 +138,6 @@ loop.setFatalPrinter((err: unknown) => {
 // -----------------------------------------------------------------------------
 // process object (node_process_object.cc)
 
-function createEnvProxy(initial: Record<string, string>) {
-  const store: Record<string, string> = Object.create(null);
-  for (const [k, v] of Object.entries(initial)) store[k] = String(v);
-  return new NativeProxy(store, {
-    set(t, k, v) {
-      if (typeof k === 'symbol') {
-        const e = new TypeError('Cannot convert a Symbol value to a string');
-        throw e;
-      }
-      t[k] = String(v);
-      return true;
-    },
-    defineProperty(t, k, d) {
-      if (typeof k === 'symbol') return false;
-      if ('get' in d || 'set' in d || d.configurable === false || d.writable === false || d.enumerable === false) {
-        const e = new TypeError(`'process.env' only accepts a configurable, writable, and enumerable data descriptor`) as TypeError & { code: string };
-        e.code = 'ERR_INVALID_OBJECT_DEFINE_PROPERTY';
-        throw e;
-      }
-      t[k] = String(d.value);
-      return true;
-    },
-    deleteProperty(t, k) {
-      if (typeof k === 'string') delete t[k];
-      return true;
-    },
-  });
-}
-
 function createProcessObject(init: InitMsg) {
   function process() {}
   const proc: any = Object.create(process.prototype);
@@ -168,7 +147,7 @@ function createProcessObject(init: InitMsg) {
   proc.platform = 'linux';
   proc.release = { ...nodeData.release };
   proc._rawDebug = (...a: unknown[]) => writeFd(2, a.join(' ') + '\n');
-  proc.env = createEnvProxy(init.env);
+  proc.env = createEnvProxy(init.env, init.sharedEnv);
   proc[S.privateSymbols.exit_info_private_symbol] = new Int32Array(3);
   return proc;
 }
@@ -383,7 +362,7 @@ function boot(init: InitMsg) {
   mark('init received');
   S.init = init;
   S.isMainThread = init.kind === 'main';
-  S.runtimeOrigin = self.location.origin;
+  S.runtimeBase = new URL('.', self.location.href).href.replace(/\/$/, '');
   S.cwd = init.cwd;
   initSys(init.sab, (m, t) => scopePost(m, t ?? []));
 
@@ -403,9 +382,10 @@ function boot(init: InitMsg) {
     S.argv = cl.argv;
     S.hasEval = cl.execArgv.some((a) => /^(-e|-p|-pe|--eval|--print)(=|$)/.test(a));
   } else {
-    const cl = parseCommandLine(['node', ...(init.execArgv ?? [])], '');
+    // a thread starts with its execArgv and the NODE_OPTIONS of its env (Worker::New)
+    const cl = parseCommandLine(['node', ...(init.execArgv ?? [])], init.env.NODE_OPTIONS ?? '');
     S.optionValues = cl.values;
-    S.execArgv = init.execArgv ?? [];
+    S.execArgv = cl.execArgv;
     S.argv = init.argv;
   }
 

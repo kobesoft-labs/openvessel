@@ -16,4 +16,6 @@ export const nativeStructuredClone: typeof structuredClone = g.structuredClone.b
 export const nativeQueueMicrotask: typeof queueMicrotask = g.queueMicrotask.bind(g);
 export const nativeFetch: typeof fetch = g.fetch.bind(g);
 export const NativeXMLHttpRequest: typeof XMLHttpRequest = g.XMLHttpRequest;
+export const NativePerformanceObserver: typeof PerformanceObserver | undefined = g.PerformanceObserver;
+export const nativePerformance: Performance = g.performance;
 export const hardwareConcurrency: number = g.navigator?.hardwareConcurrency || 4;

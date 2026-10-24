@@ -2,7 +2,7 @@
 // (toASCII / toUnicode), which url.ts shares.
 
 import { fromShape } from './shape.ts';
-import { latin1 } from './buffer.ts';
+import { latin1, utf8EncodeInto } from './buffer.ts';
 
 const utf8Enc = new TextEncoder();
 const utf8Dec = new TextDecoder('utf-8', { ignoreBOM: true });
@@ -27,7 +27,7 @@ export function bufferSourceBytes(v: unknown): Uint8Array | null {
 
 /** TextDecoder rejects views on a SharedArrayBuffer in some browsers; copy those. */
 export function decodable(b: Uint8Array): Uint8Array {
-  return typeof SharedArrayBuffer === 'function' && b.buffer instanceof SharedArrayBuffer ? b.slice() : b;
+  return Object.prototype.toString.call(b.buffer) === '[object SharedArrayBuffer]' ? new Uint8Array(b) : b;
 }
 
 // -----------------------------------------------------------------------------
@@ -205,9 +205,9 @@ export function createEncodingBinding() {
     encodeIntoResults,
 
     encodeInto(source: string, dest: Uint8Array) {
-      const r = utf8Enc.encodeInto(source, dest);
-      encodeIntoResults[0] = r.read!;
-      encodeIntoResults[1] = r.written!;
+      const r = utf8EncodeInto(source, dest);
+      encodeIntoResults[0] = r.read;
+      encodeIntoResults[1] = r.written;
     },
 
     encodeUtf8String(str: string) {

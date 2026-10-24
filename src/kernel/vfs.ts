@@ -13,6 +13,17 @@ export const S_IFIFO = 0o010000;
 
 export const DEV_ID = 2049;
 const MAX_SYMLINKS = 40;
+// Linux's PATH_MAX and NAME_MAX (in bytes)
+const PATH_MAX = 4096;
+const NAME_MAX = 255;
+
+const byteLength = (s: string) => (s.length * 3 <= NAME_MAX ? s.length : textEncoder.encode(s).length);
+
+/** ENAMETOOLONG for a path longer than PATH_MAX or a component longer than NAME_MAX. */
+function checkNames(path: string, parts: string[]) {
+  if (path.length >= PATH_MAX / 3 && textEncoder.encode(path).length >= PATH_MAX) throw kerr('ENAMETOOLONG');
+  for (const part of parts) if (part.length > NAME_MAX / 3 && byteLength(part) > NAME_MAX) throw kerr('ENAMETOOLONG');
+}
 
 export interface CharDevice {
   read(len: number): Uint8Array | null; // null = would block (not used for simple devices)
@@ -29,7 +40,7 @@ export interface Inode {
   mtimeMs: number;
   ctimeMs: number;
   birthtimeMs: number;
-  // regular file
+  // regular file (data may be shorter than size: the rest is a hole that reads as zeros)
   data?: Uint8Array;
   size: number;
   // directory
@@ -40,6 +51,8 @@ export interface Inode {
   // character device
   device?: CharDevice;
   rdev?: number;
+  // FIFO: the pipe shared by its open ends (the kernel's; exists while an end is open)
+  fifo?: unknown;
 }
 
 export interface StatData {
@@ -144,6 +157,7 @@ export class VFS {
   private walk(path: string, follow: boolean, depth: number): { node: Inode; real: string } {
     if (depth > MAX_SYMLINKS) throw kerr('ELOOP');
     const parts = splitPath(path);
+    checkNames(path, parts);
     let node = this.root;
     let realParts: string[] = [];
     for (let i = 0; i < parts.length; i++) {
@@ -179,6 +193,7 @@ export class VFS {
   /** Returns the parent directory inode and the final name component. */
   lookupParent(path: string): { dir: Inode; name: string; dirPath: string } {
     const parts = splitPath(path);
+    checkNames(path, parts);
     if (parts.length === 0) throw kerr('EEXIST');
     const name = parts[parts.length - 1];
     const dirPath = '/' + parts.slice(0, -1).join('/');
@@ -348,6 +363,12 @@ export class VFS {
     if (isDir(node)) throw kerr('EISDIR');
     if (node.device) return new Uint8Array(0);
     node.atimeMs = Date.now();
+    return this.contents(node);
+  }
+
+  /** A regular file's bytes (filling in a hole left by truncate()). */
+  contents(node: Inode): Uint8Array {
+    if (node.data!.length < node.size) this.ensureCapacity(node, node.size);
     return node.data!.subarray(0, node.size);
   }
 
@@ -385,7 +406,14 @@ export class VFS {
     }
     if (position >= node.size) return 0;
     const n = Math.min(buf.length, node.size - position);
-    buf.set(node.data!.subarray(position, position + n));
+    const data = node.data!;
+    if (position + n <= data.length) buf.set(data.subarray(position, position + n));
+    else {
+      // past the end of the stored bytes: a hole
+      const stored = data.subarray(Math.min(position, data.length), position + n);
+      buf.set(stored);
+      buf.fill(0, stored.length, n);
+    }
     node.atimeMs = Date.now();
     return n;
   }
@@ -418,10 +446,8 @@ export class VFS {
   truncateNode(node: Inode, len: number, pathForEvent?: string) {
     if (isDir(node)) throw kerr('EISDIR');
     if (!isFile(node)) return;
-    if (len > node.size) {
-      this.ensureCapacity(node, len);
-      node.data!.fill(0, node.size, len);
-    }
+    // growing leaves a hole (no memory is taken until it is written or read whole)
+    if (len > node.size) node.data!.fill(0, node.size, Math.min(len, node.data!.length));
     node.size = len;
     const now = Date.now();
     node.mtimeMs = now;
@@ -545,6 +571,17 @@ export class VFS {
     dir.entries!.set(name, node);
   }
 
+  /** mkfifo(3): a FIFO inode (EEXIST if the name exists). */
+  mknodFifo(path: string, mode = 0o666) {
+    const { dir, name } = this.lookupParent(path);
+    if (dir.entries!.has(name)) throw kerr('EEXIST');
+    const node = this.newInode(S_IFIFO | (mode & 0o7777));
+    dir.entries!.set(name, node);
+    this.touchDir(dir);
+    this.emit('rename', path);
+    return node;
+  }
+
   /** bind(2) of a Unix domain socket: a socket inode at `path` (EADDRINUSE if the name exists). */
   mknodSock(path: string, mode = 0o755): Inode {
     const { dir, name } = this.lookupParent(path);
@@ -575,7 +612,7 @@ export class VFS {
       this.symlink(node.target!, to);
       return;
     }
-    const n = this.writeFile(to, node.data!.subarray(0, node.size), node.mode & 0o7777);
+    const n = this.writeFile(to, this.contents(node), node.mode & 0o7777);
     n.mode = (n.mode & S_IFMT) | (node.mode & 0o7777);
   }
 }

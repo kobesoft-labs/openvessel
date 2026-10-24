@@ -32,6 +32,7 @@ import { createCrypto } from './crypto.ts';
 import { createBlob } from './blob.ts';
 import { createWorkerBinding } from './worker.ts';
 import { createCaresWrap, createTcpWrap } from './net.ts';
+import { createUdpWrap } from './udp.ts';
 import { createZlib } from './zlib.ts';
 import { createHttpParser } from './http_parser.ts';
 import { createProcessWrap, createSignalWrap, createSpawnSync } from './process_wrap.ts';
@@ -47,7 +48,7 @@ import { createV8 } from './v8.ts';
 import { createHeapUtils } from './heap_utils.ts';
 import { createWasiBinding } from './wasi.ts';
 import { createTlsWrap } from './tls_wrap.ts';
-import { createInspector } from './inspector.ts';
+import { createInspector, createProfiler } from './inspector.ts';
 
 export type BindingFactory = () => any;
 
@@ -92,9 +93,11 @@ export const factories: Record<string, BindingFactory> = {
   tcp_wrap: createTcpWrap,
   tls_wrap: createTlsWrap,
   inspector: createInspector,
+  profiler: createProfiler,
   timers: createTimers,
   trace_events: createTraceEvents,
   tty_wrap: createTtyWrap,
+  udp_wrap: createUdpWrap,
   types: createTypes,
   url: createUrl,
   util: createUtil,
@@ -141,17 +144,28 @@ export function getLinkedBinding(name: string): never {
   throw e;
 }
 
-/** NODE_DEFINE_CONSTANT: every constant is read-only and can't be deleted (zlib.constants.Z_OK = 1 throws). */
+/**
+ * node_constants.cc: the os/fs/crypto/zlib/trace groups (and os's nested ones) have a null
+ * prototype, and NODE_DEFINE_CONSTANT makes every constant read-only and undeletable
+ * (zlib.constants.Z_OK = 1 throws).
+ */
 function createConstants() {
+  const b = fromShape('constants');
+  const nullProto = (o: unknown) => {
+    if (!o || typeof o !== 'object') return;
+    Object.setPrototypeOf(o, null);
+    for (const v of Object.values(o)) if (v && typeof v === 'object' && !ArrayBuffer.isView(v)) nullProto(v);
+  };
+  for (const k of ['os', 'fs', 'crypto', 'zlib', 'trace']) nullProto(b[k]);
   const lock = (o: Record<string, unknown>) => {
     for (const k of Object.keys(o)) {
       const v = o[k];
       if (v !== null && typeof v === 'object') lock(v as Record<string, unknown>);
       else Object.defineProperty(o, k, { writable: false, configurable: false });
     }
-    return o;
   };
-  return lock(fromShape('constants'));
+  lock(b);
+  return b;
 }
 
 function createOptions() {

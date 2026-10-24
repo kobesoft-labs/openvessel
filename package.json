@@ -2,7 +2,7 @@
   "name": "openvessel",
   "version": "0.1.0",
   "description": "A browser-only Node.js-like environment for building and previewing Astro sites. Clean-room, no real ports.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/host/index.js",
   "exports": {

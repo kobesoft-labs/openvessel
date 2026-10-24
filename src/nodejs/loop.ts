@@ -35,11 +35,15 @@ export interface LoopHandle {
   refed: boolean;
   /** shown by process.getActiveResourcesInfo() */
   resourceName?: string;
+  /** the JS object process._getActiveHandles() reports (HandleWrap::GetOwner) */
+  owner?: object;
 }
 
 export const handles = new Set<LoopHandle>();
 let pendingReqs = 0;
 const reqNames: string[] = [];
+/** requests in flight (ReqWrap::GetOwner), for process._getActiveRequests() */
+const reqs = new Set<{ name: string; owner?: object }>();
 
 export function addHandle(h: LoopHandle) {
   handles.add(h);
@@ -50,14 +54,17 @@ export function removeHandle(h: LoopHandle) {
 }
 
 /** A request (uv_req_t) in flight keeps the loop alive until done(). */
-export function startReq(name = 'FSReqCallback'): () => void {
+export function startReq(name = 'FSReqCallback', owner?: object): () => void {
   pendingReqs++;
   reqNames.push(name);
+  const req = { name, owner };
+  reqs.add(req);
   let done = false;
   return () => {
     if (done) return;
     done = true;
     pendingReqs--;
+    reqs.delete(req);
     const i = reqNames.indexOf(name);
     if (i >= 0) reqNames.splice(i, 1);
     scheduleAliveCheck();
@@ -70,12 +77,35 @@ export function track<T>(p: Promise<T>): Promise<T> {
   return p.finally(done);
 }
 
+/** GetActiveResourcesInfo: requests, ref'd handles, then one entry per ref'd Timeout and Immediate. */
 export function activeResources(): string[] {
-  const out = [...reqNames];
-  for (const h of handles) if (h.active && h.refed) out.push(h.resourceName ?? 'Handle');
-  if (timer.id !== null && timer.refed) out.push('Timeout');
-  if (immediateInfo && immediateInfo[kRefCount] > 0) out.push('Immediate');
+  const out = reqNames.filter((n) => n !== 'HandleClose'); // uv_close is not a request
+  for (const h of handles) if (h.refed) out.push(h.resourceName ?? 'Handle');
+  const timeouts = timeoutInfo ? timeoutInfo[0] : timer.id !== null && timer.refed ? 1 : 0;
+  for (let i = 0; i < timeouts; i++) out.push('Timeout');
+  const immediates = immediateInfo ? immediateInfo[kRefCount] : 0;
+  for (let i = 0; i < immediates; i++) out.push('Immediate');
   return out;
+}
+
+/** process._getActiveHandles(): owners of the ref'd handles. */
+export function activeHandleOwners(): object[] {
+  const out: object[] = [];
+  for (const h of handles) if (h.refed && h.owner) out.push(h.owner);
+  return out;
+}
+
+/** process._getActiveRequests(): owners of requests in flight. */
+export function activeRequestOwners(): object[] {
+  const out: object[] = [];
+  // closing a handle is not a request in libuv
+  for (const r of reqs) if (r.name !== 'HandleClose') out.push(r.owner ?? {});
+  return out;
+}
+
+let timeoutInfo: Int32Array | null = null;
+export function setTimeoutInfo(info: Int32Array) {
+  timeoutInfo = info;
 }
 
 // -----------------------------------------------------------------------------
@@ -297,7 +327,23 @@ function onLoopEmpty() {
     scope(() => S.process.emit('beforeExit', currentExitCode()));
     if (alive()) return;
   }
+  // the loop ran dry while a module's top-level await is still pending: kUnsettledTopLevelAwait
+  const f = exitInfo();
+  const stalled = !f[0] && !f[2] ? S.unsettledTopLevelAwait?.() : null;
+  if (stalled) {
+    f[1] = 13;
+    f[2] = 1;
+    printStalled(stalled);
+  }
   emitProcessExit();
+}
+
+function printStalled(s: { url: string; line: number; source: string }) {
+  const text = s.source.split('\n')[s.line - 1] ?? '';
+  const col = Math.max(0, text.search(/\bawait\b/));
+  try {
+    S.process._rawDebug?.(`Warning: Detected unsettled top-level await at ${s.url}:${s.line}\n${text}\n${' '.repeat(col)}^\n\n`);
+  } catch {}
 }
 
 /** EmitProcessExitInternal: 'exit' event, then terminate with process.exitCode. */
@@ -339,7 +385,8 @@ export function triggerUncaughtException(err: unknown, fromPromise: boolean) {
   const fe = S.process?._fatalException;
   if (inFatal || typeof fe !== 'function') {
     printFatal(err);
-    reallyExit(7);
+    // kInvalidFatalExceptionMonkeyPatching when process._fatalException was replaced
+    reallyExit(inFatal || !S.process ? 7 : 6);
   }
   inFatal = true;
   let handled = false;
@@ -354,5 +401,5 @@ export function triggerUncaughtException(err: unknown, fromPromise: boolean) {
   if (handled) return;
   printFatal(err);
   const f = exitInfo();
-  reallyExit(f[2] && f[1] ? f[1] : 1);
+  reallyExit(f[2] ? f[1] : 1); // env->exit_code(kGenericUserError): an exit handler may have set it
 }

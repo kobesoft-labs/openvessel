@@ -8,28 +8,36 @@ import * as loop from '../loop.ts';
 import { S } from '../state.ts';
 import { NativeURL } from '../web.ts';
 import { fromShape } from './shape.ts';
-import { LibuvStreamWrap } from './stream.ts';
+import { type HandleDescriptor, LibuvStreamWrap, handleFactories } from './stream.ts';
 
 function errno(code: string): number {
   return S.internalBinding('uv')[`UV_${code}`] ?? -1;
 }
 
 const servers = new Map<number, TCPWrap>();
+// connects to a server of this same thread complete after its accept (the kernel has queued the
+// 'tcp-accept' message by the time the connect syscall returns), as both sides of a loopback
+// connection are ready in the same libuv poll
+const connectsAwaitingAccept = new Map<number, (() => void)[]>();
 let acceptInstalled = false;
 function installAccept() {
   if (acceptInstalled) return;
   acceptInstalled = true;
   S.kernelHandlers.set('tcp-accept', (msg: { port: number; fd: number; remoteAddress: string; remotePort: number }) => {
+    const waiting = connectsAwaitingAccept.get(msg.port);
+    const connected = waiting?.shift();
+    if (waiting && !waiting.length) connectsAwaitingAccept.delete(msg.port);
     const server = servers.get(msg.port);
     if (!server || typeof server.onconnection !== 'function') {
       try {
         sys('close', { fd: msg.fd });
       } catch {}
-      return;
+    } else {
+      const client = new TCPWrap(0);
+      client._attach(msg.fd, { address: server._address, port: msg.port }, { address: msg.remoteAddress, port: msg.remotePort });
+      loop.scope(server.onconnection, server, 0, client);
     }
-    const client = new TCPWrap(0);
-    client._attach(msg.fd, { address: server._address, port: msg.port }, { address: msg.remoteAddress, port: msg.remotePort });
-    loop.scope(server.onconnection, server, 0, client);
+    connected?.();
   });
 }
 
@@ -72,9 +80,19 @@ class TCPWrap extends LibuvStreamWrap {
     return 0;
   }
 
+  /** @internal a listening socket received from another process: listen() joins it */
+  _shared = false;
+
+  override _sendDescriptor(): HandleDescriptor | null {
+    if (this.#listening) return { type: 'tcp-listen', port: this.#port, address: this._address };
+    if (this._fd < 0) return null;
+    return { type: 'tcp', fd: this._fd, address: this._address, port: this.#port, peer: this.#peer };
+  }
+
   listen(_backlog: number) {
     try {
-      this.#port = sys<number>('listen', { port: this.#port, kind: 'raw', host: this._address });
+      if (this._shared) sys('listenShare', { port: this.#port });
+      else this.#port = sys<number>('listen', { port: this.#port, kind: 'raw', host: this._address });
     } catch (e) {
       return e instanceof SysError ? errno(e.code) : errno('EADDRINUSE');
     }
@@ -97,12 +115,23 @@ class TCPWrap extends LibuvStreamWrap {
       return this.#completeConnect(req, 0);
     }
     let fd: number;
+    let acceptedHere = false;
     try {
-      fd = sys<number>('tcpConnect', { port, host: address });
+      ({ fd, self: acceptedHere } = sys<{ fd: number; self: boolean }>('tcpConnect', { port, host: address }));
     } catch (e) {
       return this.#completeConnect(req, e instanceof SysError ? errno(e.code) : errno('ECONNREFUSED'));
     }
     this._attach(fd, { address: isV6(address) ? '::1' : '127.0.0.1', port: 0 }, { address: isV6(address) ? '::1' : '127.0.0.1', port });
+    if (acceptedHere && servers.has(port)) {
+      const done = loop.startReq('TCPConnectWrap');
+      let list = connectsAwaitingAccept.get(port);
+      if (!list) connectsAwaitingAccept.set(port, (list = []));
+      list.push(() => {
+        done();
+        this.#completeConnect(req, 0);
+      });
+      return 0;
+    }
     return this.#completeConnect(req, 0);
   }
   connect6(req: any, address: string, port: number) {
@@ -162,6 +191,18 @@ class TCPWrap extends LibuvStreamWrap {
     super._onClose();
   }
 }
+
+handleFactories.tcp = (d) => {
+  const t = new TCPWrap(0);
+  t._attach(d.fd as number, { address: String(d.address ?? '127.0.0.1'), port: Number(d.port ?? 0) }, (d.peer as { address: string; port: number } | null) ?? { address: '127.0.0.1', port: 0 });
+  return t;
+};
+handleFactories['tcp-listen'] = (d) => {
+  const t = new TCPWrap(1);
+  t.bind(String(d.address ?? ''), Number(d.port));
+  t._shared = true;
+  return t;
+};
 
 export function createTcpWrap() {
   return Object.assign(fromShape('tcp_wrap'), {
