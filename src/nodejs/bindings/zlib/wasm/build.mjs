@@ -6,7 +6,8 @@
 // Needs LLVM with the wasm32 target and wasm-ld (Homebrew: `brew install llvm lld`).
 // Override with CLANG=/path/to/clang WASM_LD=/path/to/wasm-ld.
 //
-// Library versions match Node v22.20.0 (process.versions.brotli / process.versions.zstd).
+// Library versions match Node v22.23.4 (process.versions.brotli / process.versions.zstd); brotli gets
+// node-brotli.patch, the decoder change Node carries in deps/brotli.
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -29,6 +30,7 @@ const SOURCES = {
     url: 'https://github.com/google/brotli/archive/refs/tags/v1.1.0.tar.gz',
     sha256: 'e720a6ca29428b803f4ad165371771f5398faba397edf6778837a18599ea13ff',
     dir: 'brotli-1.1.0',
+    patch: 'node-brotli.patch',
     license: 'MIT',
   },
   zstd: {
@@ -45,7 +47,10 @@ function fetchSource(s) {
   if (!existsSync(tgz)) execFileSync('curl', ['-sSfL', '-o', tgz, s.url], { stdio: 'inherit' });
   const sum = createHash('sha256').update(readFileSync(tgz)).digest('hex');
   if (sum !== s.sha256) throw new Error(`${tgz}: sha256 ${sum} != ${s.sha256}`);
-  if (!existsSync(join(work, s.dir))) execFileSync('tar', ['xzf', tgz, '-C', work], { stdio: 'inherit' });
+  if (!existsSync(join(work, s.dir))) {
+    execFileSync('tar', ['xzf', tgz, '-C', work], { stdio: 'inherit' });
+    if (s.patch) execFileSync('patch', ['-p1', '-d', join(work, s.dir), '-i', join(here, s.patch)], { stdio: 'inherit' });
+  }
   return join(work, s.dir);
 }
 
