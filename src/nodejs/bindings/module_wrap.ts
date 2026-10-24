@@ -236,8 +236,11 @@ export class ModuleWrap {
         if (range.attrStart >= 0) edits.push({ s: range.attrStart, e: range.attrEnd, text: '' });
       }
     });
-    for (const m of this.#metaRanges) edits.push({ s: m.start, e: m.end, text: '__ov$meta()' });
-    for (const d of this.#dynamicRanges) edits.push({ s: d.kwStart, e: d.kwEnd, text: '__ov$import' });
+    // through globalThis rather than module-local helpers: code that stringifies a function and
+    // evaluates it elsewhere (vite's CSS preprocessor workers via artichokie) keeps working
+    const lit = JSON.stringify(this.id);
+    for (const m of this.#metaRanges) edits.push({ s: m.start, e: m.end, text: `globalThis.__ovImportMeta(${lit})` });
+    for (const d of this.#dynamicRanges) edits.push({ s: d.kwStart, e: d.kwEnd, text: `globalThis.__ovDynamicImport.bind(null,${lit})` });
     edits.sort((a, b) => a.s - b.s);
     let out = '';
     let last = 0;
@@ -247,12 +250,8 @@ export class ModuleWrap {
       last = ed.e;
     }
     out += src.slice(last);
-    const lit = JSON.stringify(this.id);
-    let tail = '';
-    if (this.#metaRanges.length) tail += `\nvar __ov$m;function __ov$meta(){return __ov$m||(__ov$m=globalThis.__ovImportMeta(${lit}))}`;
-    if (this.#dynamicRanges.length) tail += `\nfunction __ov$import(s,o){return globalThis.__ovDynamicImport(${lit},s,o)}`;
     // keep source maps pointing at the original file
-    return out + tail + `\n//# sourceURL=${this.url}`;
+    return out + `\n//# sourceURL=${this.url}`;
   }
 
   #syntheticSource(): string {
@@ -730,6 +729,14 @@ export class ModuleWrap {
   }
 }
 
+/** import() in code evaluated away from its module (another thread): resolved from the cwd. */
+function importFromCwd(specifier: unknown, options?: { with?: Record<string, string> }) {
+  const { getOrInitializeCascadedLoader } = S.requireBuiltin('internal/modules/esm/loader');
+  const { pathToFileURL } = S.requireBuiltin('internal/url');
+  const parent = pathToFileURL(`${S.process.cwd()}/`).href;
+  return getOrInitializeCascadedLoader().import(String(specifier), parent, options?.with ?? {});
+}
+
 /** The module URL (file://…) for a URL the runtime served the module at, if it is one. */
 export function moduleUrlForServed(url: string): string | undefined {
   const m = /\/__ov\/mw\/\d+\/(\d+)\.mjs$/.exec(url);
@@ -748,8 +755,8 @@ export function createModuleWrap() {
   const g = globalThis as any;
   Object.defineProperties(g, {
     __ovSynthetic: { value: (id: string, setters: (i: number, v: unknown) => void) => byId.get(id)?._bindSynthetic(setters), configurable: true },
-    __ovImportMeta: { value: (id: string) => byId.get(id)?._importMeta(), configurable: true },
-    __ovDynamicImport: { value: (id: string, s: unknown, o?: any) => byId.get(id)!._dynamicImport(s, o), configurable: true },
+    __ovImportMeta: { value: (id: string) => byId.get(id)?._importMeta() ?? {}, configurable: true },
+    __ovDynamicImport: { value: (id: string, s: unknown, o?: any) => byId.get(id)?._dynamicImport(s, o) ?? importFromCwd(s, o), configurable: true },
     __ovSyncNamespace: { value: (id: string) => byId.get(id)?._syncNamespace(), configurable: true },
     __ov$importMeta: { value: (id: string) => byId.get(id)?._importMeta(), configurable: true },
     __ov$dynamicImport: { value: (id: string, s: unknown, o?: any) => byId.get(id)!._dynamicImport(s, o), configurable: true },
