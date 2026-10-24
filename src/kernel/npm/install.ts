@@ -134,6 +134,16 @@ function withWasiBinding(opt: Record<string, string> | undefined): Record<string
   return { ...opt, [`${base}-wasm32-wasi`]: opt[native] };
 }
 
+/**
+ * napi-rs wasm32-wasi bindings built with emnapi 1.x often don't list @emnapi/core and take
+ * whatever @napi-rs/wasm-runtime's peer finds, which can be another binding's emnapi 2 (its wasm
+ * imports napi_set_last_error, which 2.x dropped). Bindings built for emnapi 2 list it themselves.
+ */
+function withEmnapi(name: string, deps: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!name.endsWith('-wasm32-wasi') || deps?.['@emnapi/core']) return deps;
+  return { '@emnapi/core': '^1.4.0', '@emnapi/runtime': '^1.4.0', ...deps };
+}
+
 function platformOk(pkg: { os?: string[]; cpu?: string[] }): boolean {
   const check = (list: string[] | undefined, want: string) => {
     if (!list || !list.length) return true;
@@ -187,6 +197,8 @@ export class Installer {
           if (!/^(file|link|workspace|git|github|https?):/.test(String(spec)) && !String(spec).includes('/') && !this.workspaces.has(name)) this.o.registry.packument(this.aliasTarget(name, String(spec))).catch(() => {});
         }
       };
+      // (written into the package's own dependencies so peer-set checks see it too)
+      if (!n.isRoot) pkg.dependencies = withEmnapi(n.name, pkg.dependencies);
       add(pkg.dependencies, n.dev, n.optional, false);
       if (!this.o.omitOptional) add(withWasiBinding(pkg.optionalDependencies), n.dev, true, false);
       if (includeDev && !this.o.omitDev) add(pkg.devDependencies, true, false, false);
