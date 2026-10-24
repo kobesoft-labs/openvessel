@@ -31,6 +31,12 @@ export interface WritableEnd {
 
 export type FileKind = 'file' | 'dir' | 'pipe' | 'tty' | 'null' | 'socket';
 
+/** Something sent along with a byte of a socket's data (SCM_RIGHTS): a file and/or a description. */
+export interface PipeAttachment {
+  meta: Record<string, unknown>;
+  file?: OpenFile;
+}
+
 export class OpenFile {
   refs = 1;
   pos = 0;
@@ -154,6 +160,10 @@ export class OpenFile {
 export class Pipe {
   private chunks: Uint8Array[] = [];
   private size = 0;
+  /** stream positions (bytes ever written / read), to keep attachments with their byte */
+  private writePos = 0;
+  private readPos = 0;
+  private attachments: { at: number; item: PipeAttachment }[] = [];
   readers = 0;
   writers = 0;
   private waiting: { max: number; resolve: (d: Uint8Array | null) => void }[] = [];
@@ -167,8 +177,21 @@ export class Pipe {
    */
   awaitingWriter = false;
   awaitingReader = false;
+  /** what a non-blocking write may fill up to (Linux's default pipe buffer) */
+  capacity = 65536;
 
   constructor(public id: number) {}
+
+  /** Room left for a non-blocking writer. */
+  get space() {
+    return Math.max(0, this.capacity - this.size);
+  }
+
+  /** Calls fn once the buffer has been read empty, or nobody reads any more. */
+  onDrain(fn: () => void) {
+    if (this.size === 0 || this.readers === 0) fn();
+    else this.drainWaiters.push(fn);
+  }
 
   readEnd(): ReadableEnd & { pipe: Pipe } {
     const self = this;
@@ -188,20 +211,24 @@ export class Pipe {
     return this.size;
   }
 
-  write(data: Uint8Array): number {
+  write(data: Uint8Array, attachment?: PipeAttachment): number {
     if (this.readers === 0 && !this.awaitingReader) {
       this.onBroken?.();
       throw kerr('EPIPE');
     }
     if (data.length === 0) return 0;
     const copy = data.slice();
-    if (this.waiting.length > 0 && this.chunks.length === 0) {
+    if (attachment) this.attachments.push({ at: this.writePos, item: attachment });
+    this.writePos += copy.length;
+    if (this.waiting.length > 0 && this.chunks.length === 0 && this.attachments.length === 0) {
       const w = this.waiting.shift()!;
       if (copy.length <= w.max) {
+        this.readPos += copy.length;
         w.resolve(copy);
         this.notify();
         return data.length;
       }
+      this.readPos += w.max;
       w.resolve(copy.subarray(0, w.max));
       this.chunks.push(copy.subarray(w.max));
       this.size += copy.length - w.max;
@@ -218,7 +245,34 @@ export class Pipe {
     for (const fn of [...this.onReadable]) fn();
   }
 
+  /** Takes up to max bytes, never past the byte the next attachment belongs to. */
   private take(max: number): Uint8Array {
+    for (const a of this.attachments) {
+      if (a.at > this.readPos) {
+        max = Math.min(max, a.at - this.readPos);
+        break;
+      }
+    }
+    const d = this.takeBytes(max);
+    this.readPos += d.length;
+    // a plain reader drops what was attached to the bytes it took
+    while (this.attachments.length && this.attachments[0].at < this.readPos) this.attachments.shift()!.item.file?.unref();
+    return d;
+  }
+
+  /** Like tryRead, also returning what was sent along with the first byte. */
+  tryReadAttached(max: number): { data: Uint8Array; item?: PipeAttachment } | null | undefined {
+    if (this.size > 0) {
+      const item = this.attachments[0]?.at === this.readPos ? this.attachments.shift()!.item : undefined;
+      const data = this.take(max);
+      if (this.size === 0) this.flushWaiting();
+      return { data, item };
+    }
+    if (this.writers === 0) return null;
+    return undefined;
+  }
+
+  private takeBytes(max: number): Uint8Array {
     if (this.chunks.length === 1 || this.chunks[0].length >= max) {
       const c = this.chunks[0];
       if (c.length <= max) {
@@ -295,6 +349,7 @@ export class Pipe {
       this.readers = 0;
       this.chunks = [];
       this.size = 0;
+      for (const a of this.attachments.splice(0)) a.item.file?.unref();
       const d = this.drainWaiters;
       this.drainWaiters = [];
       for (const fn of d) fn();
@@ -356,6 +411,8 @@ export function createPipe(): { pipe: Pipe; r: OpenFile; w: OpenFile } {
 export function createSocketPair(): [OpenFile, OpenFile] {
   const a = createPipe();
   const b = createPipe();
+  // a socket's send buffer (net.core.wmem_default)
+  a.pipe.capacity = b.pipe.capacity = 212992;
   const end = (r: OpenFile, w: OpenFile) => {
     const f = new OpenFile('socket', O_RDWR, { reader: r.opts.reader, writer: w.opts.writer });
     let writeOpen = true;

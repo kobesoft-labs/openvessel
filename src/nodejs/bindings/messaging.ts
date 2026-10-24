@@ -392,6 +392,8 @@ function serialize(value: unknown, list: unknown[], source: NodeMessagePort | nu
   };
   const enc = (v: unknown): unknown => {
     if (v === null || typeof v !== 'object') return v; // functions and symbols: the browser throws
+    // process.env is a Proxy, which the browser won't clone; Node clones it as a plain object
+    if (v === S.process?.env) return enc({ ...(v as object) });
     const seen = memo.get(v);
     if (seen !== undefined) return seen;
     if (Array.isArray(v)) {

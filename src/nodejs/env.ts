@@ -2,6 +2,8 @@
 // SHARE_ENV: then the threads that share it keep the variables in shared memory (a KVStore the
 // threads hold together), and every access first picks up what another thread changed.
 
+import { S } from './state.ts';
+
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
@@ -81,29 +83,55 @@ class SharedStore {
 let shared: SharedStore | null = null;
 let local: Record<string, string> | null = null;
 
-function invalidDescriptor(): TypeError {
-  const e = new TypeError(`'process.env' only accepts a configurable, writable, and enumerable data descriptor`) as TypeError & { code: string };
+function invalidDefine(msg: string): TypeError {
+  const e = new TypeError(msg) as TypeError & { code: string };
   e.code = 'ERR_INVALID_OBJECT_DEFINE_PROPERTY';
   return e;
 }
 
-/** The process.env object; `sharedSab` when the thread was started with SHARE_ENV. */
+/** Sets a variable as an own data property (a name like "__proto__" must not reach the setter). */
+function put(store: Record<string, string>, k: string, v: string) {
+  Object.defineProperty(store, k, { value: v, writable: true, enumerable: true, configurable: true });
+}
+function replaceAll(store: Record<string, string>, next: Record<string, string>) {
+  for (const k of Object.keys(store)) delete store[k];
+  for (const k of Object.keys(next)) put(store, k, next[k]);
+}
+
+let warnedNonString = false;
+/** The string a value is stored as; anything but a string, number or boolean is DEP0104. */
+function toValue(v: unknown): string {
+  if (typeof v === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
+  if (!warnedNonString && typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean' && S.optionValues?.['--pending-deprecation']) {
+    warnedNonString = true;
+    try {
+      S.process.emitWarning(
+        'Assigning any value other than a string, number, or boolean to a process.env property is deprecated. Please make sure to convert the value to a string before setting process.env with it.',
+        'DeprecationWarning',
+        'DEP0104',
+      );
+    } catch {}
+  }
+  return String(v);
+}
+
+/**
+ * The process.env object; `sharedSab` when the thread was started with SHARE_ENV. String keys are
+ * the environment; anything else (symbols, Object.prototype's members) behaves like an ordinary
+ * object, so `process.env.hasOwnProperty` is the inherited function until a variable of that name is set.
+ */
 export function createEnvProxy(initial: Record<string, string>, sharedSab?: SharedArrayBuffer) {
-  const store: Record<string, string> = Object.create(null);
-  for (const [k, v] of Object.entries(initial)) store[k] = String(v);
+  const store: Record<string, string> = {};
+  for (const [k, v] of Object.entries(initial)) put(store, k, String(v));
   local = store;
   if (sharedSab) shared = new SharedStore(sharedSab);
   const sync = () => {
     const next = shared?.changes();
-    if (!next) return;
-    for (const k of Object.keys(store)) delete store[k];
-    Object.assign(store, next);
+    if (next) replaceAll(store, next);
   };
   const write = (fn: (s: Record<string, string>) => void) => {
     if (!shared) return fn(store);
-    const next = shared.update(fn);
-    for (const k of Object.keys(store)) delete store[k];
-    Object.assign(store, next);
+    replaceAll(store, shared.update(fn));
   };
   return new Proxy(store, {
     get(t, k, r) {
@@ -124,19 +152,17 @@ export function createEnvProxy(initial: Record<string, string>, sharedSab?: Shar
     },
     set(_t, k, v) {
       if (typeof k === 'symbol') throw new TypeError('Cannot convert a Symbol value to a string');
-      const s = String(v);
-      write((st) => {
-        st[k] = s;
-      });
+      const s = toValue(v);
+      // setenv(3) refuses an empty name: nothing is stored
+      if (k !== '') write((st) => put(st, k, s));
       return true;
     },
     defineProperty(_t, k, d) {
+      if ('get' in d || 'set' in d) throw invalidDefine(`'process.env' does not accept an accessor(getter/setter) descriptor`);
+      if (!('value' in d) || d.configurable !== true || d.writable !== true || d.enumerable !== true) throw invalidDefine(`'process.env' only accepts a configurable, writable, and enumerable data descriptor`);
       if (typeof k === 'symbol') return false;
-      if ('get' in d || 'set' in d || d.configurable !== true || d.writable !== true || d.enumerable !== true) throw invalidDescriptor();
-      const s = String(d.value);
-      write((st) => {
-        st[k] = s;
-      });
+      const s = toValue(d.value);
+      if (k !== '') write((st) => put(st, k, s));
       return true;
     },
     deleteProperty(_t, k) {

@@ -161,6 +161,8 @@ async function runOv(tests) {
       }
     }
     await session.page.evaluate(() => window.ov.network.setPolicy({ mode: 'allow-all' }));
+    // no preview of the ports tests listen on (its requests would reach the test servers)
+    await session.page.evaluate(() => (window.ovNoAutoPreview = true));
     if (flag('--port')) await session.page.evaluate(() => window.ov.exec('mkdir -p /etc/openvessel && echo port > /etc/openvessel/node'));
     await mount(session.page, files);
   };
@@ -216,7 +218,7 @@ async function runOv(tests) {
         }
       }
     };
-    await Promise.all(Array.from({ length: 4 }, worker));
+    await Promise.all(Array.from({ length: 4 }, (_, slot) => worker(slot)));
   } finally {
     writeFileSync(join(resultsDir, 'ov.json'), JSON.stringify(res, null, 1));
     await session.browser.close();

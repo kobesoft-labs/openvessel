@@ -35,6 +35,8 @@ self.onmessage = (ev: MessageEvent) => {
     }
     return;
   }
+  // the kernel asks whether everything it posted before has been handled
+  if (msg?.t === 'ping') return post({ t: 'pong', id: msg.id });
   const h = S.kernelHandlers.get(msg?.t);
   if (h) h(msg);
 };
@@ -343,7 +345,7 @@ function boot(init: InitMsg) {
     // a thread starts with its execArgv and the NODE_OPTIONS of its env (Worker::New)
     const cl = parseCommandLine(['node', ...(init.execArgv ?? [])], init.env.NODE_OPTIONS ?? '');
     S.optionValues = cl.values;
-    S.execArgv = init.execArgv ?? [];
+    S.execArgv = cl.execArgv;
     S.argv = init.argv;
   }
 
