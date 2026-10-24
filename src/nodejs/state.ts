@@ -50,6 +50,8 @@ export const S = {
   /** errors.setPrepareStackTraceCallback / setEnhanceStackForFatalException */
   prepareStackTrace: null as null | ((global: unknown, error: Error, trace: unknown[]) => string),
   enhanceStack: null as null | { before: (e: Error) => string; after: (e: Error) => string },
+  /** The caller's stack as V8 CallSites, the way Node sees them (runtime frames left out). */
+  callSites: null as null | ((limit: number) => any[]),
   /** internalBinding('builtins'), built at boot from the bundled lib. */
   builtinsBinding: null as any,
   /** Parsed CLI option values (internalBinding('options').getCLIOptionsValues()). */

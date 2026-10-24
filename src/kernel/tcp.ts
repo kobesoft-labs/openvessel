@@ -35,6 +35,7 @@ export class TcpBridge {
       responder.error(`connect ECONNREFUSED 127.0.0.1:${rec.port}`);
       return null;
     }
+    conn.bridged = true;
     let closed = false;
     const close = () => {
       if (closed) return;

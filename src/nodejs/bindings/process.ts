@@ -2,6 +2,7 @@
 // errors, symbols, async_wrap, trace_events, performance, mksnapshot, config, constants, uv, os.
 
 import { sys } from '../../node/sys.ts';
+import { NativeProxy } from '../proxies.ts';
 import * as loop from '../loop.ts';
 import { S } from '../state.ts';
 import { fromShape, shapeOf } from './shape.ts';
@@ -87,8 +88,17 @@ export function createProcessMethods() {
     _debugEnd: () => {},
     abort: () => loop.reallyExit(134),
     causeSegfault: () => loop.reallyExit(139),
-    dlopen() {
-      const e = new Error('Native addons (.node files) cannot run in OpenVessel. Use the WebAssembly build of the package.') as Error & { code: string };
+    dlopen(_module: unknown, filename: string) {
+      // what glibc's dlopen says about a file that isn't a shared object; a real one can't load here
+      let message = 'Native addons (.node files) cannot run in OpenVessel. Use the WebAssembly build of the package.';
+      try {
+        const head = sys<Uint8Array>('readFile', { p: String(filename) });
+        if (head.length < 64) message = `${filename}: file too short`;
+        else if (head[0] !== 0x7f || head[1] !== 0x45 || head[2] !== 0x4c || head[3] !== 0x46) message = `${filename}: invalid ELF header`;
+      } catch {
+        message = `${filename}: cannot open shared object file: No such file or directory`;
+      }
+      const e = new Error(message) as Error & { code: string };
       e.code = 'ERR_DLOPEN_FAILED';
       throw e;
     },
@@ -164,7 +174,7 @@ export function createTaskQueue() {
   const raw = b.tickInfo as Uint8Array;
   // Writes to tickInfo come from process.nextTick(); when that happens outside a callback scope
   // (inside a promise job), schedule the tick callback the way V8's microtask hooks would.
-  const tickInfo = new Proxy(raw, {
+  const tickInfo = new NativeProxy(raw, {
     get: (t, k) => (t as any)[k],
     set(t, k, v) {
       (t as any)[k] = v;

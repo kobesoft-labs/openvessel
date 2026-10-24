@@ -16,8 +16,10 @@ const enc = new TextEncoder();
 export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter) {
   const vfs = kernel.vfs;
   const watchers = new Map<string, () => void>(); // `${pid}:${id}` → stop
-  const readers = new Map<string, { active: boolean }>(); // `${pid}:${fd}`
+  const readers = new Map<string, { active: boolean; release: () => void }>(); // `${pid}:${fd}`
   const reservedTids = new Set<number>();
+  // TLS inside the runtime is pass-through; the two ends exchange their certificates here instead
+  const tlsEnds = new WeakMap<OpenFile, { certs: string[]; notify: (certs: string[]) => void }>(); // DER, base64
   let nextTid = 100000;
 
   const abs = (proc: Proc, p: string) => {
@@ -499,6 +501,22 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         }
         return null;
       }
+      case 'tlsHello': {
+        // returns the peer's certificates when it said hello first; else (wait) they come as a
+        // 'tls-peer' message. Nothing to wait for when the other end isn't a process's socket.
+        const f = proc.fds.get(a.fd);
+        const peer = f?.peer;
+        if (!f || !peer || peer.bridged) return { wait: false, certs: null };
+        const certs: string[] = a.certs ?? [];
+        const theirs = tlsEnds.get(peer);
+        if (theirs) {
+          tlsEnds.delete(peer);
+          theirs.notify(certs);
+          return { wait: false, certs: theirs.certs };
+        }
+        tlsEnds.set(f, { certs, notify: (c) => kernel.postTo(proc, thread, { t: 'tls-peer', fd: a.fd, certs: c }) });
+        return { wait: true, certs: null };
+      }
       case 'tcpConnect': {
         const rec = kernel.ports.get(Number(a.port));
         if (!rec || rec.host !== 'raw') throw kerr('ECONNREFUSED');
@@ -565,7 +583,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         const key = `${proc.pid}:${msg.fd}`;
         const existing = readers.get(key);
         if (existing?.active) return;
-        const state = { active: true };
+        const state = { active: true, release: () => {} };
         readers.set(key, state);
         const f = proc.fds.get(msg.fd);
         if (!f) {
@@ -583,6 +601,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
           f.unref();
         };
         proc.onExit.add(release);
+        state.release = release;
         (async () => {
           try {
             while (state.active && proc.state === 'running') {
@@ -606,8 +625,10 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         return;
       }
       case 'readStop': {
+        // drop the reader's reference now, not when its pending read returns: when the process
+        // closes the fd next, the other end of the socketpair must see EOF
         const st = readers.get(`${proc.pid}:${msg.fd}`);
-        if (st) st.active = false;
+        if (st) st.release();
         return;
       }
       case 'readOnce': {

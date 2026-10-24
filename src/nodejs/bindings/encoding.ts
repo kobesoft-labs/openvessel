@@ -152,6 +152,21 @@ function labelViaURL(label: string): string | null {
   }
 }
 
+const RTL = /[\p{Script=Hebrew}\p{Script=Arabic}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Samaritan}\p{Script=Mandaic}\p{Script=Adlam}\p{Script=Hanifi_Rohingya}]/u;
+const hasLtrLetter = (u: string) => Array.from(u).some((ch) => /\p{L}/u.test(ch) && !RTL.test(ch));
+
+/**
+ * UTS #46 validity of a label decoded from "xn--", as ada checks it: already in mapped form
+ * ("㉓" maps to "23", so it isn't valid as is), no controls, U+FFFD or joiners, and an RTL label
+ * holds no left-to-right letters (the Bidi rule).
+ */
+function validDecodedLabel(u: string): boolean {
+  if (u.normalize('NFKC').toLowerCase() !== u) return false;
+  if (/[\p{Cc}\ufffd\u200c\u200d]/u.test(u)) return false;
+  if (RTL.test(u) && hasLtrLetter(u)) return false;
+  return true;
+}
+
 /**
  * ada::idna::to_ascii: UTS #46 processing (non-transitional, no STD3 rules, no DNS length check);
  * "" on error. ASCII labels pass through lowercased; "xn--" labels must decode to a valid label.
@@ -164,7 +179,11 @@ export function toASCII(input: string): string {
   for (let label of labels) {
     if (label !== '' && isAscii(label)) {
       label = label.toLowerCase();
-      if (label.startsWith('xn--') && (punycodeDecode(label.slice(4))?.length ?? 0) === 0) return '';
+      if (label.startsWith('xn--')) {
+        const decoded = punycodeDecode(label.slice(4));
+        if (!decoded?.length) return '';
+        if (!validDecodedLabel(fromCodePoints(decoded))) return '';
+      }
       if (label.startsWith('xn--') && labelViaURL(label) !== label) return '';
     } else if (label !== '') {
       const mapped = labelViaURL(label);

@@ -149,6 +149,9 @@ class TCPWrap extends LibuvStreamWrap {
   }
 
   protected override _onClose() {
+    // stop the kernel's reads of the fd, or the peer never sees EOF once it is closed (lib also
+    // writes handle.reading itself, so that flag doesn't say whether a read is running)
+    this.readStop();
     if (this.#listening) {
       servers.delete(this.#port);
       try {

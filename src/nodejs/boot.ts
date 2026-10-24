@@ -7,7 +7,10 @@ import { ids, params, sources } from './nodelib.js';
 import nodeData from '../node/data/process.json';
 import { initSys, post, sys } from '../node/sys.ts';
 import { getInternalBinding, getLinkedBinding } from './bindings/index.ts';
-import { lineOneOffset } from './bindings/contextify.ts';
+import { compiledPositions, lineOneOffset } from './bindings/contextify.ts';
+import { bare } from './bindings/util.ts';
+import { NativeProxy, installProxyTracking } from './proxies.ts';
+import { installIteratorTracking } from './iterators.ts';
 import { moduleUrlForServed } from './bindings/module_wrap.ts';
 import { fromShape } from './bindings/shape.ts';
 import * as loop from './loop.ts';
@@ -130,7 +133,7 @@ loop.setFatalPrinter((err: unknown) => {
 function createEnvProxy(initial: Record<string, string>) {
   const store: Record<string, string> = Object.create(null);
   for (const [k, v] of Object.entries(initial)) store[k] = String(v);
-  return new Proxy(store, {
+  return new NativeProxy(store, {
     set(t, k, v) {
       if (typeof k === 'symbol') {
         const e = new TypeError('Cannot convert a Symbol value to a string');
@@ -188,23 +191,34 @@ function createProcessObject(init: InitMsg) {
 const kMapped = Symbol('ov.mappedFrame');
 function asCompiledFrame(cs: any) {
   if (!cs?.isEval?.() || cs[kMapped]) return cs;
-  const file = cs.getScriptNameOrSourceURL?.() || cs.getFileName?.();
-  if (!file) return cs;
-  const line = cs.getLineNumber();
-  let col = cs.getColumnNumber();
-  const shift = line === 1 ? (lineOneOffset.get(file) ?? 0) : 0;
-  col -= shift;
+  const source = cs.getScriptNameOrSourceURL?.() || cs.getFileName?.();
+  if (!source) return cs;
+  const rawLine = cs.getLineNumber();
+  const rawCol = cs.getColumnNumber();
+  let file = source;
+  let line = rawLine;
+  let col = rawCol;
+  // vm.compileFunction code (see contextify.ts compileVmFunction)
+  const pos = compiledPositions.get(source);
+  if (pos) {
+    file = pos.file || '<anonymous>';
+    if (rawLine === 2) col += pos.column;
+    line += pos.line;
+  } else if (rawLine === 1) col -= lineOneOffset.get(source) ?? 0;
   const name = cs.getFunctionName?.();
   let text: string;
   if (!name || name === 'eval') text = cs.getTypeName?.() === 'Object' ? `Object.<anonymous> (${file}:${line}:${col})` : `${file}:${line}:${col}`;
-  else if (shift) text = String(cs).replace(`:${line}:${col + shift}`, `:${line}:${col}`);
+  else if (file !== source || line !== rawLine || col !== rawCol) text = String(cs).replace(`${source}:${rawLine}:${rawCol}`, `${file}:${line}:${col}`);
   else return cs;
-  return new Proxy(cs, {
+  const fileName = pos ? pos.file || undefined : file;
+  return new NativeProxy(cs, {
     get(target, k) {
       if (k === kMapped) return true;
       if (k === 'toString') return () => text;
       if (k === 'getColumnNumber') return () => col;
-      if (k === 'getFileName') return () => file;
+      if (k === 'getLineNumber') return () => line;
+      if (k === 'getFileName') return () => fileName;
+      if (k === 'getScriptNameOrSourceURL') return () => fileName;
       const v = target[k];
       return typeof v === 'function' ? v.bind(target) : v;
     },
@@ -249,8 +263,8 @@ function installStackTraceHook() {
   const nodePrepare = (Error as any).prepareStackTrace as (e: Error, t: any[]) => unknown;
   const runtimeFile = new URL(import.meta.url).pathname;
   let inCallback = false;
-  function prepareStackTrace(error: Error, trace: any[]) {
-    const frames = trace.filter((cs) => {
+  const nodeFrames = (trace: any[]) =>
+    trace.filter((cs) => {
       const f = cs?.getFileName?.();
       if (typeof f === 'string' && f.endsWith(runtimeFile)) return false;
       // the boundary of an indirect eval that compiled a module or script (code evaluated by the
@@ -258,6 +272,8 @@ function installStackTraceHook() {
       if (!f && !cs?.getScriptNameOrSourceURL?.() && cs?.getFunctionName?.() === 'eval' && String(cs?.getEvalOrigin?.() ?? '').includes(runtimeFile)) return false;
       return true;
     }).map(asCompiledFrame);
+  function prepareStackTrace(error: Error, trace: any[]) {
+    const frames = nodeFrames(trace);
     if (inCallback || !S.prepareStackTrace) return nodePrepare(error, frames);
     inCallback = true;
     try {
@@ -267,13 +283,31 @@ function installStackTraceHook() {
     }
   }
   Object.defineProperty(Error, 'prepareStackTrace', { value: prepareStackTrace, writable: true, enumerable: false, configurable: true });
+  // StackTrace::CurrentStackTrace: neither Error.stackTraceLimit nor a user's prepareStackTrace applies
+  S.callSites = (limit: number) => {
+    const E = Error as any;
+    const prep = Object.getOwnPropertyDescriptor(E, 'prepareStackTrace');
+    const max = E.stackTraceLimit;
+    const holder: { stack?: any } = {};
+    try {
+      E.stackTraceLimit = limit + 32;
+      Object.defineProperty(E, 'prepareStackTrace', bare({ value: (_e: Error, t: any[]) => t, writable: true, configurable: true }));
+      E.captureStackTrace(holder);
+      return nodeFrames(holder.stack ?? []).slice(0, limit);
+    } finally {
+      E.stackTraceLimit = max;
+      if (prep) Object.defineProperty(E, 'prepareStackTrace', bare(prep));
+      else delete E.prepareStackTrace;
+    }
+  };
 }
 
 /**
  * Makes the global object look like Node's: names a Worker has but Node doesn't (postMessage,
  * location, indexedDB, onmessage, addEventListener…) are hidden, and enumerability follows Node.
  * Prototypes are left alone (EventTarget.prototype is shared with AbortSignal, MessagePort…);
- * inherited names are shadowed on the global itself.
+ * inherited names are shadowed on the global itself. Where Node defines a global that the browser
+ * also has on WorkerGlobalScope.prototype (setTimeout, navigator…), the prototype's copy is dropped.
  */
 function shapeGlobal() {
   const nodeGlobals = nodeData.globals as Record<string, boolean>;
@@ -290,6 +324,12 @@ function shapeGlobal() {
       try {
         if (name in nodeGlobals) {
           if (own && d.configurable && d.enumerable !== nodeGlobals[name]) Object.defineProperty(g, name, { enumerable: nodeGlobals[name] });
+          // Node defines these on the global itself (some only later, like navigator): with the
+          // prototype's copy gone, `delete globalThis.setTimeout` leaves nothing behind and an
+          // object inheriting the global's prototype has no browser accessors, as in Node
+          for (let p = Object.getPrototypeOf(g); p && p !== EventTarget.prototype && p !== Object.prototype; p = Object.getPrototypeOf(p)) {
+            if (Object.getOwnPropertyDescriptor(p, name)?.configurable) delete p[name];
+          }
           continue;
         }
         if (own && d.configurable) delete g[name];
@@ -351,7 +391,7 @@ function boot(init: InitMsg) {
   if (S.isMainThread) {
     const cl = parseCommandLine(init.argv, init.env.NODE_OPTIONS ?? '');
     if (cl.error) {
-      writeFd(2, `${init.argv[0] ?? 'node'}: ${cl.error}\n`);
+      writeFd(2, cl.error.split('\n').map((l) => `${init.argv[0] ?? 'node'}: ${l}\n`).join(''));
       loop.reallyExit(9);
     }
     if (cl.values['--version']) {
@@ -382,6 +422,8 @@ function boot(init: InitMsg) {
     loop.triggerUncaughtException(e.error ?? new Error(e.message), false);
   });
 
+  installProxyTracking();
+  installIteratorTracking();
   // per-context scripts (node_realm / node_context_data)
   const util = getInternalBinding('util');
   const symbols = getInternalBinding('symbols');
@@ -412,7 +454,7 @@ function boot(init: InitMsg) {
     },
     hasCachedBuiltins: () => true,
     getCacheUsage: () => ({ compiledWithCache: [], compiledWithoutCache: [], compiledInSnapshot: [] }),
-    natives: new Proxy(Object.create(null), {
+    natives: new NativeProxy(Object.create(null), {
       get: (_t, k) => (typeof k === 'string' ? sources[k] : undefined),
       has: (_t, k) => typeof k === 'string' && k in sources,
       ownKeys: () => ids,

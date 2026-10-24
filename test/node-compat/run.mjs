@@ -151,7 +151,11 @@ async function runOv(tests) {
         await new Promise((r) => setTimeout(r, 2000));
       }
     }
-    await session.page.evaluate(() => window.ov.network.setPolicy({ mode: 'allow-all' }));
+    await session.page.evaluate(() => {
+      // no preview iframe connecting to the servers the tests start
+      window.ovNoAutoPreview = true;
+      return window.ov.network.setPolicy({ mode: 'allow-all' });
+    });
     if (flag('--port')) await session.page.evaluate(() => window.ov.exec('mkdir -p /etc/openvessel && echo port > /etc/openvessel/node'));
     await mount(session.page, files);
   };

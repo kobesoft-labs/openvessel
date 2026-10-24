@@ -1,0 +1,3 @@
+{
+  "test-assert.js": "Its 'Additional assert' case needs a vm context with its own builtins (a RangeError made there isn't an instance of the main RangeError); a browser worker can't create another V8 realm."
+}

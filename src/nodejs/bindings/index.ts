@@ -59,6 +59,7 @@ export const factories: Record<string, BindingFactory> = {
   builtins: () => S.builtinsBinding,
   cares_wrap: createCaresWrap,
   config: createConfig,
+  constants: createConstants,
   contextify: createContextify,
   credentials: createCredentials,
   crypto: createCrypto,
@@ -138,6 +139,19 @@ export function getLinkedBinding(name: string): never {
   const e = new Error(`No such binding: ${name}`) as Error & { code: string };
   e.code = 'ERR_INVALID_MODULE';
   throw e;
+}
+
+/** NODE_DEFINE_CONSTANT: every constant is read-only and can't be deleted (zlib.constants.Z_OK = 1 throws). */
+function createConstants() {
+  const lock = (o: Record<string, unknown>) => {
+    for (const k of Object.keys(o)) {
+      const v = o[k];
+      if (v !== null && typeof v === 'object') lock(v as Record<string, unknown>);
+      else Object.defineProperty(o, k, { writable: false, configurable: false });
+    }
+    return o;
+  };
+  return lock(fromShape('constants'));
 }
 
 function createOptions() {

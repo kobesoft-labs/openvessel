@@ -39,6 +39,10 @@ export class OpenFile {
   onClose?: () => void;
   /** sockets: half-close the write side */
   shutdownWrite?: () => void;
+  /** a socketpair end: the other end */
+  peer?: OpenFile;
+  /** the connecting end the kernel itself holds (an HTTP request from the preview bridged to TCP) */
+  bridged?: boolean;
   constructor(
     public kind: FileKind,
     public flags: number,
@@ -331,7 +335,11 @@ export function createSocketPair(): [OpenFile, OpenFile] {
     };
     return f;
   };
-  return [end(a.r, b.w), end(b.r, a.w)];
+  const x = end(a.r, b.w);
+  const y = end(b.r, a.w);
+  x.peer = y;
+  y.peer = x;
+  return [x, y];
 }
 
 // ---------------------------------------------------------------------------

@@ -31,6 +31,18 @@ function check(ok: unknown, what: string): asserts ok {
 }
 
 const isView = (v: unknown): v is ArrayBufferView => ArrayBuffer.isView(v);
+// a view's real size (ArrayBufferViewContents), whatever its own `length`/`byteLength` claim
+const viewByteLength = (() => {
+  const typed = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'byteLength')!.get!;
+  const data = Object.getOwnPropertyDescriptor(DataView.prototype, 'byteLength')!.get!;
+  return (v: ArrayBufferView): number => (v instanceof DataView ? data.call(v) : typed.call(v));
+})();
+const viewByteOffset = (() => {
+  const typed = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'byteOffset')!.get!;
+  const data = Object.getOwnPropertyDescriptor(DataView.prototype, 'byteOffset')!.get!;
+  return (v: ArrayBufferView): number => (v instanceof DataView ? data.call(v) : typed.call(v));
+})();
+const realBytes = (v: ArrayBufferView) => new Uint8Array(v.buffer, viewByteOffset(v), viewByteLength(v));
 
 // -----------------------------------------------------------------------------
 // CompressionStream<Context>
@@ -93,16 +105,16 @@ abstract class CompressionStream<C extends CompressionContext> {
     let inLen = 0;
     if (args[1] !== null) {
       check(isView(args[1]), 'in must be a buffer');
-      input = bytesOf(args[1]);
+      input = realBytes(args[1]);
       inOff = Number(args[2]) >>> 0;
       inLen = Number(args[3]) >>> 0;
-      check(inOff + inLen <= input.length, 'in is out of bounds');
+      if (inOff + inLen > input.length) throw nodeError(RangeError, 'ERR_OUT_OF_RANGE', 'input buffer is out of bounds');
     }
     check(isView(args[4]), 'out must be a buffer');
-    const out = bytesOf(args[4]);
+    const out = realBytes(args[4]);
     const outOff = Number(args[5]) >>> 0;
     const outLen = Number(args[6]) >>> 0;
-    check(outOff + outLen <= out.length, 'out is out of bounds');
+    if (outOff + outLen > out.length) throw nodeError(RangeError, 'ERR_OUT_OF_RANGE', 'output buffer is out of bounds');
 
     check(this.#initDone, 'write before init');
     check(!this.#closed, 'already finalized');
@@ -167,6 +179,8 @@ abstract class CompressionStream<C extends CompressionContext> {
   }
 
   reset() {
+    // the threadpool may be using the stream's state
+    if (this.#writeInProgress) throw new Error('Cannot reset zlib stream while a write is in progress');
     const err = this.#ctx.resetStream();
     if (err) this.emitError(err);
   }

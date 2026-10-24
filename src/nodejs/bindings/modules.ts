@@ -42,12 +42,15 @@ function read(path: string, isESM?: boolean, base?: string, specifier?: string):
   }
   const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
   const raw = (v: unknown) => (v === undefined || v === null ? undefined : typeof v === 'string' ? v : JSON.stringify(v));
+  // the file's own keys only (not what Object.prototype may have gained)
+  const field = (k: string) => (json !== null && typeof json === 'object' && Object.prototype.hasOwnProperty.call(json, k) ? json[k] : undefined);
+  const type = field('type');
   const t: Tuple = [
-    str(json?.name),
-    str(json?.main),
-    json?.type === 'module' || json?.type === 'commonjs' ? json.type : 'none',
-    raw(json?.imports),
-    raw(json?.exports),
+    str(field('name')),
+    str(field('main')),
+    type === 'module' || type === 'commonjs' ? type : 'none',
+    raw(field('imports')),
+    raw(field('exports')),
     path,
   ];
   cache.set(path, t);

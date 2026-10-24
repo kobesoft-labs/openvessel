@@ -76,6 +76,8 @@ const ready = (async () => {
   };
   vessel.on('server-ready', ({ port }) => {
     live.add(port);
+    // test runners set this: a preview's request would be a connection the test doesn't expect
+    if ((window as any).ovNoAutoPreview) return renderPorts();
     show(port);
   });
   vessel.on('port-closed', ({ port }) => {
