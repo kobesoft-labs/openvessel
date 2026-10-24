@@ -21,7 +21,10 @@ import {
   okpFromPrivate,
   parsePrivate,
   parsePublicOrPrivate,
+  pkcs8,
   randomScalar,
+  readPkcs8,
+  readSpki,
   spki,
   writePrivate,
   writePublic,
@@ -136,6 +139,8 @@ registerAsymOps({
     }
   },
   equals: (a, b) => sameKey(asymOf(a), asymOf(b)),
+  toDer: (data) => (data.type === 2 ? pkcs8(asymOf(data)) : spki(asymOf(data))),
+  fromDer: (type, bytes) => ({ type, asym: type === 2 ? readPkcs8(bytes) : readSpki(bytes) }),
 });
 
 // -----------------------------------------------------------------------------
@@ -193,7 +198,7 @@ function signDigest(a: Asym, algo: DigestAlgo, hash: Uint8Array, padding: number
   throw notSupportedForKeyType();
 }
 
-function verifyDigest(a: Asym, algo: DigestAlgo, hash: Uint8Array, sig: Uint8Array, padding: number | undefined, saltLength: number | undefined): boolean {
+export function verifyDigest(a: Asym, algo: DigestAlgo, hash: Uint8Array, sig: Uint8Array, padding: number | undefined, saltLength: number | undefined): boolean {
   if ('rsa' in a) {
     const pad = padding ?? (a.kind === 'rsa-pss' ? RSA_PKCS1_PSS_PADDING : RSA_PKCS1_PADDING);
     if (pad === RSA_PKCS1_PSS_PADDING) {

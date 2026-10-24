@@ -87,6 +87,8 @@ test('key import / export round trips', () => {
       const list = kind === 'public' ? k.public : k.private;
       for (const src of list) {
         if (src.result.error) continue;
+        // a JWK names its curve: the key it makes is no longer the explicit-parameters one
+        if (src.enc.format === 'jwk' && k.opts.paramEncoding === 'explicit') continue;
         const h = importKey(kind, src.enc, src.result);
         assert.equal(h.getAsymmetricKeyType(), k.asymmetricKeyType, label);
         assert.deepEqual(details(h), kind === 'public' ? k.publicDetails : k.privateDetails, label);

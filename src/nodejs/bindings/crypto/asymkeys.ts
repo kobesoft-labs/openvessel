@@ -31,6 +31,8 @@ export interface Curve {
   size: number;
   /** no JWK "crv" for this curve (ExportJWKEcKey) */
   noJwk?: boolean;
+  /** the X9.62 seed OpenSSL writes into explicit parameters */
+  seed?: string;
 }
 
 // secp224r1 (P-224) is not in @noble/curves' presets
@@ -48,10 +50,10 @@ const p224 = ecdsa(
 );
 
 export const CURVES: Curve[] = [
-  { name: 'secp224r1', oid: '1.3.132.0.33', jwk: 'P-224', impl: p224 as unknown as typeof p256, size: 28, noJwk: true },
-  { name: 'prime256v1', oid: '1.2.840.10045.3.1.7', jwk: 'P-256', impl: p256, size: 32 },
-  { name: 'secp384r1', oid: '1.3.132.0.34', jwk: 'P-384', impl: p384, size: 48 },
-  { name: 'secp521r1', oid: '1.3.132.0.35', jwk: 'P-521', impl: p521, size: 66 },
+  { name: 'secp224r1', oid: '1.3.132.0.33', jwk: 'P-224', impl: p224 as unknown as typeof p256, size: 28, noJwk: true, seed: 'bd71344799d5c7fcdc45b59fa3b9ab8f6a948bc5' },
+  { name: 'prime256v1', oid: '1.2.840.10045.3.1.7', jwk: 'P-256', impl: p256, size: 32, seed: 'c49d360886e704936a6678e1139d26b7819f7e90' },
+  { name: 'secp384r1', oid: '1.3.132.0.34', jwk: 'P-384', impl: p384, size: 48, seed: 'a335926aa319a27a1d00896a6773a4827acdac73' },
+  { name: 'secp521r1', oid: '1.3.132.0.35', jwk: 'P-521', impl: p521, size: 66, seed: 'd09e8800291cb85396cc6717393284aaa0da64ba' },
   { name: 'secp256k1', oid: '1.3.132.0.10', jwk: 'secp256k1', impl: secp256k1 as unknown as typeof p256, size: 32 },
 ];
 
@@ -229,7 +231,8 @@ function ecParamsDer(curve: Curve): Uint8Array {
   const c = curve.impl.Point.CURVE();
   const fe = (n: bigint) => der.octets(bigBytes(n, curve.size));
   const base = curve.impl.Point.BASE.toBytes(false);
-  return der.seq(der.int(1), der.seq(der.oid(OID.primeField), der.int(c.p)), der.seq(fe(c.a), fe(c.b)), der.octets(base), der.int(c.n), der.int(c.h ?? 1n));
+  const curveSeq = curve.seed ? der.seq(fe(c.a), fe(c.b), der.bitString(encode(curve.seed, Enc.HEX))) : der.seq(fe(c.a), fe(c.b));
+  return der.seq(der.int(1), der.seq(der.oid(OID.primeField), der.int(c.p)), curveSeq, der.octets(base), der.int(c.n), der.int(c.h ?? 1n));
 }
 
 /** The named curve whose parameters an explicit ECParameters spells out. */
@@ -238,7 +241,7 @@ function curveFromParams(n: der.Node): Curve | undefined {
   const [fieldOid, prime] = der.children(der.expect(field, 0x30));
   if (der.readOid(fieldOid) !== OID.primeField) return undefined;
   const p = der.readInt(prime);
-  const [a, b] = der.children(der.expect(curveSeq, 0x30)).map((x) => bytesToBigInt(der.expect(x, 0x04).body));
+  const [a, b] = der.children(der.expect(curveSeq, 0x30)).slice(0, 2).map((x) => bytesToBigInt(der.expect(x, 0x04).body));
   const nOrder = der.readInt(order);
   const g = der.expect(base, 0x04).body;
   return CURVES.find((cv) => {
