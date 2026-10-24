@@ -70,6 +70,8 @@ export const S = {
   sourceLine: null as null | ((file: string, line: number) => string | undefined),
   /** Handlers for messages the kernel posts to this worker, by message type. */
   kernelHandlers: new Map<string, (msg: any) => void>(),
+  /** A module whose top-level await is still pending (module_wrap), for exit code 13. */
+  unsettledTopLevelAwait: null as null | (() => { url: string; line: number; source: string } | null),
   /** Run before a worker thread exits (Environment cleanup hooks). */
   atThreadExit: [] as (() => void)[],
 };

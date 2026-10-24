@@ -309,7 +309,23 @@ function onLoopEmpty() {
     scope(() => S.process.emit('beforeExit', currentExitCode()));
     if (alive()) return;
   }
+  // the loop ran dry while a module's top-level await is still pending: kUnsettledTopLevelAwait
+  const f = exitInfo();
+  const stalled = !f[0] && !f[2] ? S.unsettledTopLevelAwait?.() : null;
+  if (stalled) {
+    f[1] = 13;
+    f[2] = 1;
+    printStalled(stalled);
+  }
   emitProcessExit();
+}
+
+function printStalled(s: { url: string; line: number; source: string }) {
+  const text = s.source.split('\n')[s.line - 1] ?? '';
+  const col = Math.max(0, text.search(/\bawait\b/));
+  try {
+    S.process._rawDebug?.(`Warning: Detected unsettled top-level await at ${s.url}:${s.line}\n${text}\n${' '.repeat(col)}^\n\n`);
+  } catch {}
 }
 
 /** EmitProcessExitInternal: 'exit' event, then terminate with process.exitCode. */
