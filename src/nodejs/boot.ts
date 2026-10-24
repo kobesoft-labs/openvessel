@@ -343,7 +343,7 @@ function boot(init: InitMsg) {
   mark('init received');
   S.init = init;
   S.isMainThread = init.kind === 'main';
-  S.runtimeOrigin = self.location.origin;
+  S.runtimeBase = new URL('.', self.location.href).href.replace(/\/$/, '');
   S.cwd = init.cwd;
   initSys(init.sab, (m, t) => scopePost(m, t ?? []));
 

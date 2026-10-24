@@ -20,10 +20,10 @@ export interface OutboundTarget {
 const targets = new WeakMap<OpenFile, OutboundTarget>();
 
 /** Opens an outbound connection; returns the process's end. */
-export function connectOutbound(origin: string, target: OutboundTarget, by: string): OpenFile {
+export function connectOutbound(base: string, target: OutboundTarget, by: string): OpenFile {
   const [processEnd, ours] = createSocketPair();
   targets.set(processEnd, target);
-  void serve(origin, target, by, ours);
+  void serve(base, target, by, ours);
   return processEnd;
 }
 
@@ -82,7 +82,7 @@ class Reader {
   }
 }
 
-async function serve(origin: string, target: OutboundTarget, by: string, conn: OpenFile) {
+async function serve(base: string, target: OutboundTarget, by: string, conn: OpenFile) {
   const r = new Reader(conn);
   const write = (d: Uint8Array | string) => conn.write(typeof d === 'string' ? enc.encode(d) : d);
   try {
@@ -117,7 +117,7 @@ async function serve(origin: string, target: OutboundTarget, by: string, conn: O
       // the Host header names the site (the address may be a stand-in for an unresolved name)
       const host = get('host') ?? (target.port === (target.tls ? 443 : 80) ? target.host : `${target.host}:${target.port}`);
       const url = /^https?:\/\//i.test(path) ? path : `${target.tls ? 'https' : 'http'}://${host}${path}`;
-      const ok = await forward(origin, by, url, method, headers, body, write);
+      const ok = await forward(base, by, url, method, headers, body, write);
       if (!ok || !keepAlive) return;
     }
   } catch {
@@ -153,11 +153,11 @@ async function readBody(r: Reader, te: string | undefined, cl: string | undefine
   return r.take(n);
 }
 
-async function forward(origin: string, by: string, url: string, method: string, headers: [string, string][], body: Uint8Array, write: (d: Uint8Array | string) => number): Promise<boolean> {
+async function forward(base: string, by: string, url: string, method: string, headers: [string, string][], body: Uint8Array, write: (d: Uint8Array | string) => number): Promise<boolean> {
   const pass = headers.filter(([k]) => !HOP.test(k));
   let res: Response;
   try {
-    res = await fetch(`${origin}/__ov/net?url=${encodeURIComponent(url)}`, {
+    res = await fetch(`${base}/__ov/net?url=${encodeURIComponent(url)}`, {
       method: method === 'GET' || method === 'HEAD' ? method : 'POST',
       headers: { 'x-ov-h': encodeURIComponent(JSON.stringify(pass)), 'x-ov-by': encodeURIComponent(by), 'x-ov-method': method },
       body: method === 'GET' || method === 'HEAD' ? undefined : (body as BodyInit),

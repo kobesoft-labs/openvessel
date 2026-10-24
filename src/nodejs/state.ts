@@ -41,7 +41,8 @@ export const S = {
   hasEval: false,
   argv: [] as string[],
   /** The origin serving the runtime (for ESM URLs). */
-  runtimeOrigin: '',
+  /** URL of the runtime's directory (no trailing slash): node-process.js, ts-strip.js and /__ov/… are under it */
+  runtimeBase: '',
   cwd: '/',
   exiting: false,
   /** Set by the task_queue binding; called from the Worker's rejection events. */

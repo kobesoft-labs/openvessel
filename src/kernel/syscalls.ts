@@ -8,6 +8,7 @@ import { O_ACCMODE, O_RDONLY, O_WRONLY, OpenFile, createPipe, createSocketPair }
 import { type Kernel, fdPathOf } from './kernel.ts';
 import type { NetRouter } from './net.ts';
 import { type NodeThread, type Proc, exitCodeOf, signalName } from './proc.ts';
+import { RUNTIME_BASE } from './base.ts';
 import { connectOutbound, markOutboundTls } from './outbound.ts';
 import { S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFREG, S_IFSOCK, isDir } from './vfs.ts';
 
@@ -597,7 +598,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       }
       case 'tcpConnectOut': {
         // not a virtual port: HTTP over the policy-checked proxy (see outbound.ts)
-        const end = connectOutbound(self.location.origin, { host: String(a.host), port: Number(a.port), tls: !!a.tls }, `${proc.pid} ${proc.argv.slice(0, 3).join(' ')}`.slice(0, 200));
+        const end = connectOutbound(RUNTIME_BASE, { host: String(a.host), port: Number(a.port), tls: !!a.tls }, `${proc.pid} ${proc.argv.slice(0, 3).join(' ')}`.slice(0, 200));
         return proc.allocFd(end, 3);
       }
       case 'tcpSetTls': {

@@ -71,7 +71,7 @@ let importMetaCallback: ((symbol: unknown, meta: object, wrap: ModuleWrap) => vo
 let dynamicImportCallback: ((symbol: unknown, specifier: string, attributes: Record<string, string>, referrerName: string) => Promise<unknown>) | null = null;
 
 function moduleUrl(id: string) {
-  return `${S.runtimeOrigin}/__ov/mw/${S.init.pid}/${id}.mjs`;
+  return `${S.runtimeBase}/__ov/mw/${S.init.pid}/${id}.mjs`;
 }
 
 /** The `with { … }` / `assert { … }` clause that starts before attrStart, as [start, end). */

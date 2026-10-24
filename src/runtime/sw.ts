@@ -117,25 +117,51 @@ function errorResponse(kind: string, message: string) {
   return new Response(message, { status: kind === 'denied' ? 403 : 502, headers: { 'x-ov-error': kind, 'x-ov-message': encodeURIComponent(message), 'content-type': 'text/plain' } });
 }
 
+// The runtime may be served under a path (e.g. /demo/runtime/): its /__ov/… URLs are relative to the scope.
+const SCOPE = new URL(sw.registration.scope).pathname;
+
+/**
+ * Static hosts that can't set headers (GitHub Pages): the runtime's own files get the cross-origin
+ * isolation headers here, which the kernel's SharedArrayBuffer needs. Headers already set are kept.
+ */
+const ISOLATION: Record<string, string> = {
+  'cross-origin-opener-policy': 'same-origin',
+  'cross-origin-embedder-policy': 'require-corp',
+  'cross-origin-resource-policy': 'cross-origin',
+};
+async function withIsolation(req: Request): Promise<Response> {
+  const res = await fetch(req);
+  if (res.type === 'opaque' || res.type === 'opaqueredirect' || res.status === 0) return res;
+  const missing = Object.keys(ISOLATION).filter((k) => !res.headers.has(k));
+  if (!missing.length) return res;
+  const headers = new Headers(res.headers);
+  for (const k of missing) headers.set(k, ISOLATION[k]);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
 sw.addEventListener('fetch', (ev) => {
   const url = new URL(ev.request.url);
-  if (url.origin !== sw.location.origin) return;
-  if (url.pathname.startsWith('/__ov/esm/') || url.pathname.startsWith('/__ov/builtin/') || url.pathname.startsWith('/__ov/mw/')) {
+  if (url.origin !== sw.location.origin || !url.pathname.startsWith(SCOPE)) return;
+  // /__ov/… relative to where the runtime is served
+  const path = '/' + url.pathname.slice(SCOPE.length);
+  if (path.startsWith('/__ov/esm/') || path.startsWith('/__ov/builtin/') || path.startsWith('/__ov/mw/')) {
     ev.respondWith(
-      ask({ k: 'esm', pathname: url.pathname, search: url.search }).then(
+      ask({ k: 'esm', pathname: path, search: url.search }).then(
         (r) => new Response(r.body, { status: r.status, headers: { 'content-type': `${r.type}; charset=utf-8`, 'cache-control': 'no-store', 'cross-origin-resource-policy': 'same-origin' } }),
         (e) => new Response(`throw new Error(${JSON.stringify(String(e?.message ?? e))});`, { status: 200, headers: { 'content-type': 'text/javascript' } }),
       ),
     );
     return;
   }
-  if (url.pathname === '/__ov/net') {
+  if (path === '/__ov/net') {
     ev.respondWith(handleNet(ev.request, url));
     return;
   }
-  if (url.pathname === '/__ov/ping') {
+  if (path === '/__ov/ping') {
     ev.respondWith(new Response('pong', { headers: { 'content-type': 'text/plain' } }));
+    return;
   }
+  if (ev.request.method === 'GET') ev.respondWith(withIsolation(ev.request));
 });
 
 export {};

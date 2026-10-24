@@ -97,6 +97,8 @@ export class OpenVessel {
   private relayFrame: HTMLIFrameElement | null = null;
   private relayReady: Promise<void> | null = null;
   private previewOrigin: string | null = null;
+  /** The preview's base URL with a trailing slash (it may be served under a path). */
+  private previewBase = '';
   private opts!: BootOptions;
   private servers = new Map<number, { port: number; pid: number }>();
   private watchId = 1;
@@ -145,7 +147,11 @@ export class OpenVessel {
     document.body.appendChild(frame);
     await ready;
     if (opts.network) await this._call('network.setPolicy', { policy: opts.network });
-    if (opts.previewUrl) this.previewOrigin = new URL(opts.previewUrl, location.href).origin;
+    if (opts.previewUrl) {
+      const u = new URL(opts.previewUrl, location.href);
+      this.previewOrigin = u.origin;
+      this.previewBase = new URL('./', u).href;
+    }
   }
 
   /** @internal */
@@ -354,7 +360,7 @@ export class OpenVessel {
   }
 
   private previewUrlFor(port: number, path = '/') {
-    return `${this.previewOrigin}/__ov/open?port=${port}&path=${encodeURIComponent(path)}`;
+    return `${this.previewBase}__ov/open?port=${port}&path=${encodeURIComponent(path)}`;
   }
 
   /** Returns a URL that shows `port` in an iframe (after the preview relay is ready). */
