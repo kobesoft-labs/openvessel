@@ -152,6 +152,8 @@ async function runOv(tests) {
       }
     }
     await session.page.evaluate(() => window.ov.network.setPolicy({ mode: 'allow-all' }));
+    // no preview of the ports tests listen on (its requests would reach the test servers)
+    await session.page.evaluate(() => (window.ovNoAutoPreview = true));
     if (flag('--port')) await session.page.evaluate(() => window.ov.exec('mkdir -p /etc/openvessel && echo port > /etc/openvessel/node'));
     await mount(session.page, files);
   };
@@ -160,15 +162,16 @@ async function runOv(tests) {
   const t0 = Date.now();
   try {
     const queue = [...tests];
-    const worker = async () => {
+    // each parallel slot gets its own test/.tmp.<n> (TEST_THREAD_ID, as Node's tools/test.py sets it)
+    const worker = async (slot) => {
       for (let t; (t = queue.shift()); ) {
         let r;
         try {
           r = await session.page.evaluate(
-            async ({ file, ms }) => {
+            async ({ file, ms, slot }) => {
               const ov = window.ov;
               const t0 = performance.now();
-              const p = await ov.spawn('node', [`test/parallel/${file}`], { cwd: '/node' });
+              const p = await ov.spawn('node', [`test/parallel/${file}`], { cwd: '/node', env: { TEST_THREAD_ID: String(slot) } });
               let timedOut = false;
               const timer = setTimeout(() => {
                 timedOut = true;
@@ -178,7 +181,7 @@ async function runOv(tests) {
               clearTimeout(timer);
               return { code, timedOut: timedOut || code === -1, out: p.collected.slice(-20000), ms: Math.round(performance.now() - t0) };
             },
-            { file: t.file, ms: PER_TEST_MS },
+            { file: t.file, ms: PER_TEST_MS, slot },
             { timeout: PER_TEST_MS + 15000 },
           );
         } catch (e) {
@@ -195,7 +198,7 @@ async function runOv(tests) {
         }
       }
     };
-    await Promise.all(Array.from({ length: 4 }, worker));
+    await Promise.all(Array.from({ length: 4 }, (_, slot) => worker(slot)));
   } finally {
     writeFileSync(join(resultsDir, 'ov.json'), JSON.stringify(res, null, 1));
     await session.browser.close();
