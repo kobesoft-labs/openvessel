@@ -845,10 +845,12 @@ function observeFetches() {
   if (fetchObserver || !NativePerformanceObserver) return;
   try {
     (nativePerformance as any).setResourceTimingBufferSize?.(100000);
-    fetchObserver = new NativePerformanceObserver((list) => {
-      for (const e of list.getEntries()) fetched.add(e.name);
-      for (const w of [...fetchWaiters]) w();
-    });
+    fetchObserver = new NativePerformanceObserver((list) =>
+      withArrayIteration(() => {
+        for (const e of list.getEntries()) fetched.add(e.name);
+        for (const w of [...fetchWaiters]) w();
+      }),
+    );
     fetchObserver.observe({ type: 'resource', buffered: true });
   } catch {
     fetchObserver = null;
