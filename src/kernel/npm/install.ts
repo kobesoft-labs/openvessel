@@ -31,6 +31,27 @@ const SUBSTITUTES: { name: string; to: string; when?: (v: string) => boolean }[]
   { name: 'sass-embedded', to: 'sass' },
 ];
 
+/** Compat packages (scripts/build-compat.mjs): stand-ins for packages that only ship native binaries. */
+interface CompatEntry {
+  range: string;
+  file: string;
+  integrity: string;
+  pkg: Record<string, any>;
+}
+let compatIndex: Promise<Record<string, CompatEntry>> | null = null;
+function compatOrigin(): string | null {
+  return typeof location !== 'undefined' ? location.origin : null;
+}
+function loadCompat(): Promise<Record<string, CompatEntry>> {
+  const origin = compatOrigin();
+  compatIndex ??= origin
+    ? fetch(`${origin}/compat/index.json`)
+        .then((r) => (r.ok ? r.json() : {}))
+        .catch(() => ({}))
+    : Promise.resolve({});
+  return compatIndex;
+}
+
 /** Packages that are never installed (native-only and optional at runtime). */
 const SKIP = new Set(['fsevents', 'bufferutil', 'utf-8-validate', 'cpu-features', 'ssh2']);
 
@@ -459,6 +480,13 @@ export class Installer {
     if (!version) throw Object.assign(new Error(`No matching version found for ${realName}@${range}.`), { code: 'ETARGET' });
     let pkg = p.versions[version];
     let source: Source = { kind: 'registry', tarball: pkg.dist.tarball, integrity: pkg.dist.integrity, shasum: pkg.dist.shasum, realName: realName !== name ? realName : undefined };
+    // compat packages built by OpenVessel (a wasm build or a JS shim), under the requested name and version
+    const compat = (await loadCompat())[realName];
+    if (compat && semver.satisfies(version, compat.range, { includePrerelease: true })) {
+      pkg = { ...compat.pkg, name: realName, version, dist: { tarball: `${compatOrigin()}/compat/${compat.file}`, integrity: compat.integrity } } as any;
+      source = { kind: 'registry', tarball: `${compatOrigin()}/compat/${compat.file}`, integrity: compat.integrity, realName: compat.pkg.name };
+      return { version, pkg, source };
+    }
     // WebAssembly substitutes for native packages
     const sub = SUBSTITUTES.find((s) => s.name === realName && (!s.when || s.when(version)));
     if (sub) {
