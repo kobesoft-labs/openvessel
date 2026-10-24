@@ -52,6 +52,19 @@ function loadCompat(): Promise<Record<string, CompatEntry>> {
   return compatIndex;
 }
 
+/**
+ * Dependencies of wasm builds pinned to what they were built against: their glue reaches into the
+ * runtime's internals, so a later version that still satisfies the range breaks them.
+ */
+const DEP_PINS: { pkg: string; range: string; dep: string; spec: string }[] = [
+  // emscripten + emnapi 1.1 glue; @emnapi/runtime 1.2+ changed the callback-info stack it uses
+  { pkg: '@img/sharp-wasm32', range: '<0.34.0', dep: '@emnapi/runtime', spec: '1.1.1' },
+];
+function pinnedSpec(from: Node, dep: string, spec: string): string {
+  const pin = DEP_PINS.find((p) => p.pkg === from.name && p.dep === dep && semver.satisfies(from.version, p.range));
+  return pin ? pin.spec : spec;
+}
+
 /** Packages that are never installed (native-only and optional at runtime). */
 const SKIP = new Set(['fsevents', 'bufferutil', 'utf-8-validate', 'cpu-features', 'ssh2']);
 
@@ -194,7 +207,7 @@ export class Installer {
       if (processed % 50 === 0) this.o.progress?.(`resolving… ${this.nodes.length} packages`);
       // optional deps already filtered/failed
       const placeFrom = item.peer ? (item.from.parent ?? item.from) : item.from;
-      const spec = this.overrides[item.name] ?? item.spec;
+      const spec = this.overrides[item.name] ?? pinnedSpec(item.from, item.name, item.spec);
       const visible = this.findVisible(placeFrom, item.name);
       if (visible && (visible.isWorkspace || (this.satisfiesNode(visible, spec) && this.peerSetOk(visible, item.from)))) {
         this.addEdge(item.from, item.name, spec, visible);
@@ -223,7 +236,9 @@ export class Installer {
         continue;
       }
       if (resolved.pkg.deprecated) this.warnOnce(`dep:${item.name}@${resolved.version}`, `npm warn deprecated ${item.name}@${resolved.version}: ${resolved.pkg.deprecated}`);
-      const level = this.choosePlacement(placeFrom, item.name, resolved.version, resolved.pkg);
+      // a pinned dependency stays with its dependent, so nothing else picks up the old version
+      const pinned = spec !== item.spec && this.overrides[item.name] === undefined;
+      const level = pinned ? placeFrom : this.choosePlacement(placeFrom, item.name, resolved.version, resolved.pkg);
       const node = new Node(item.name, resolved.version, resolved.pkg, level, path.join(level.nodeModules, item.name), resolved.source);
       node.dev = item.dev;
       node.optional = item.optional;
