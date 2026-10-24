@@ -167,6 +167,16 @@ function withEmnapi(name: string, deps: Record<string, string> | undefined): Rec
   return { '@emnapi/core': '^1.4.0', '@emnapi/runtime': '^1.4.0', ...deps };
 }
 
+/**
+ * sharp 0.35+ ships its wasm build only under @img/sharp-webcontainers-wasm32, but on linux-x64
+ * it falls back to require('@img/sharp-wasm32'), which then finds whatever version is hoisted.
+ * Its own version, as its own dependency, lands next to it.
+ */
+function withSharpWasm(n: { name: string; version: string }, opt: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (n.name !== 'sharp' || !semver.satisfies(n.version, '>=0.35.0-0', { includePrerelease: true }) || opt?.['@img/sharp-wasm32']) return opt;
+  return { ...opt, '@img/sharp-wasm32': n.version };
+}
+
 function platformOk(pkg: { os?: string[]; cpu?: string[] }): boolean {
   const check = (list: string[] | undefined, want: string) => {
     if (!list || !list.length) return true;
@@ -223,7 +233,7 @@ export class Installer {
       // (written into the package's own dependencies so peer-set checks see it too)
       if (!n.isRoot) pkg.dependencies = withEmnapi(n.name, pkg.dependencies);
       add(pkg.dependencies, n.dev, n.optional, false);
-      if (!this.o.omitOptional) add(withWasiBinding(pkg.optionalDependencies), n.dev, true, false);
+      if (!this.o.omitOptional) add(withWasiBinding(withSharpWasm(n, pkg.optionalDependencies)), n.dev, true, false);
       if (includeDev && !this.o.omitDev) add(pkg.devDependencies, true, false, false);
       if (!this.o.omitPeer && !n.isRoot) {
         const meta = pkg.peerDependenciesMeta ?? {};
