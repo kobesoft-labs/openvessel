@@ -65,6 +65,29 @@ function pinnedSpec(from: Node, dep: string, spec: string): string {
   return pin ? pin.spec : spec;
 }
 
+/**
+ * Old majors with only native builds, moved to the first line that has a wasm build (same API for
+ * what the callers use). sharp before 0.33 bundled libvips as a .node addon.
+ */
+const UPGRADES: { name: string; range: string; to: string }[] = [{ name: 'sharp', range: '<0.33.0', to: '^0.34.0' }];
+
+/** The `packages:` list of pnpm-workspace.yaml (other keys hold lists too: overrides, excludes…). */
+function pnpmWorkspacePackages(yaml: string): string[] {
+  const out: string[] = [];
+  let inPackages = false;
+  for (const line of yaml.split(/\r?\n/)) {
+    if (/^\S/.test(line)) {
+      inPackages = /^packages\s*:/.test(line);
+      const inline = /^packages\s*:\s*\[(.*)\]/.exec(line);
+      if (inline) for (const p of inline[1].split(',')) out.push(p.trim().replace(/^['"]|['"]$/g, ''));
+      continue;
+    }
+    const m = inPackages && /^\s*-\s*['"]?([^'"#\n]+?)['"]?\s*(#.*)?$/.exec(line);
+    if (m) out.push(m[1]);
+  }
+  return out.filter(Boolean);
+}
+
 /** Packages that are never installed (native-only and optional at runtime). */
 const SKIP = new Set(['fsevents', 'bufferutil', 'utf-8-validate', 'cpu-features', 'ssh2']);
 
@@ -293,7 +316,7 @@ export class Installer {
     let pnpmWs: string[] = [];
     try {
       const y = dec.decode(this.o.vfs.readFile(path.join(this.o.root, 'pnpm-workspace.yaml')));
-      pnpmWs = [...y.matchAll(/^\s*-\s*['"]?([^'"\n]+)['"]?\s*$/gm)].map((m) => m[1]);
+      pnpmWs = pnpmWorkspacePackages(y);
     } catch {}
     for (const pat of [...patterns, ...pnpmWs]) {
       if (pat.startsWith('!')) continue;
@@ -503,7 +526,9 @@ export class Installer {
     }
     range = range.trim();
     const p = await this.o.registry.packument(realName);
-    const version = this.pickVersion(p, realName, range);
+    let version = this.pickVersion(p, realName, range);
+    const up = version && UPGRADES.find((u) => u.name === realName && semver.satisfies(version!, u.range));
+    if (up) version = this.pickVersion(p, realName, up.to);
     if (!version) throw Object.assign(new Error(`No matching version found for ${realName}@${range}.`), { code: 'ETARGET' });
     let pkg = p.versions[version];
     let source: Source = { kind: 'registry', tarball: pkg.dist.tarball, integrity: pkg.dist.integrity, shasum: pkg.dist.shasum, realName: realName !== name ? realName : undefined };
