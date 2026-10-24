@@ -11,7 +11,6 @@ import { parse as parseEsm } from 'es-module-lexer/js';
 import { sys } from '../../node/sys.ts';
 import * as loop from '../loop.ts';
 import { S, lib } from '../state.ts';
-import { NativePerformanceObserver, nativePerformance } from '../web.ts';
 import { fromShape } from './shape.ts';
 import { sucrase } from '../typescript.ts';
 import { cachedDataMatches, contextScope, makeCachedData, setPrivate } from './contextify.ts';
@@ -264,6 +263,9 @@ export class ModuleWrap {
     }
     out += src.slice(last);
     // keep source maps pointing at the original file
+    // the module evaluate() runs: an import that reports evaluation has begun (imports are hoisted:
+    // it runs after the dependencies, right before this module's body)
+    if (this.#reportStart) out += `\nimport "data:text/javascript,globalThis.__ovEvaluationStarted(${encodeURIComponent(JSON.stringify(this.id))})";`;
     return out + `\n//# sourceURL=${this.url}`;
   }
 
@@ -296,6 +298,8 @@ export class ModuleWrap {
       if (m.#source != null) fn(m.url, m.#source);
     });
   }
+
+  #reportStart = false;
 
   servedUrl(): string {
     return moduleUrl(this.id);
@@ -423,6 +427,7 @@ export class ModuleWrap {
         return (this.#evaluation = rejectedPromise(e));
       }
     }
+    if (!this.#registered && this.#source != null) this.#reportStart = true;
     try {
       this.#register();
     } catch (e) {
@@ -431,16 +436,15 @@ export class ModuleWrap {
       return Promise.reject(e);
     }
     this.#status = kEvaluating;
-    // loading (the browser fetching the graph) is work the loop waits for; a top-level await that
-    // never settles afterwards is not (Node exits with 13 when nothing else is left)
+    // loading the graph is work the loop waits for; a top-level await that never settles once the
+    // body runs is not (Node exits with 13 when nothing else is left)
     const done = loop.startReq('ModuleEvaluation');
-    const urls: string[] = [];
-    this.#walk((m) => urls.push(m.servedUrl()));
-    whenFetched(urls, done);
+    if (this.#reportStart) evaluationStarted.set(this.id, done);
     pendingEvaluations.add(this);
     this.#evaluation = import(/* @vite-ignore */ this.servedUrl()).then(
       (ns) => {
         done();
+        evaluationStarted.delete(this.id);
         pendingEvaluations.delete(this);
         this.#realNs = ns;
         if (!this.#isVm) this.#namespace = ns;
@@ -451,6 +455,7 @@ export class ModuleWrap {
       },
       (e) => {
         done();
+        evaluationStarted.delete(this.id);
         pendingEvaluations.delete(this);
         this.#status = kErrored;
         this.#error = e;
@@ -801,35 +806,8 @@ function unsettledTopLevelAwait(): { url: string; line: number; source: string }
   return null;
 }
 
-// URLs the browser has fetched (Resource Timing), to tell loading from waiting
-const fetched = new Set<string>();
-const fetchWaiters = new Set<() => void>();
-let fetchObserver: PerformanceObserver | null = null;
-function observeFetches() {
-  if (fetchObserver || !NativePerformanceObserver) return;
-  try {
-    (nativePerformance as any).setResourceTimingBufferSize?.(100000);
-    fetchObserver = new NativePerformanceObserver((list) => {
-      for (const e of list.getEntries()) fetched.add(e.name);
-      for (const w of [...fetchWaiters]) w();
-    });
-    fetchObserver.observe({ type: 'resource', buffered: true });
-  } catch {
-    fetchObserver = null;
-  }
-}
-/** Calls done once every URL has been fetched (or never, without Resource Timing: then evaluation settling does). */
-function whenFetched(urls: string[], done: () => void) {
-  if (!fetchObserver) return;
-  const check = () => {
-    if (urls.every((u) => fetched.has(u))) {
-      fetchWaiters.delete(check);
-      done();
-    }
-  };
-  fetchWaiters.add(check);
-  check();
-}
+// evaluate()'s request, released when the module's body is about to run (see #rewritten)
+const evaluationStarted = new Map<string, () => void>();
 
 /** The module URL (file://…) for a URL the runtime served the module at, if it is one. */
 export function moduleUrlForServed(url: string): string | undefined {
@@ -845,8 +823,15 @@ export function importFromScript(referrerSymbol: unknown, referrerName: string, 
 }
 
 export function createModuleWrap() {
-  observeFetches();
   S.unsettledTopLevelAwait = unsettledTopLevelAwait;
+  Object.defineProperty(globalThis, '__ovEvaluationStarted', {
+    value: (id: string) => {
+      const done = evaluationStarted.get(id);
+      evaluationStarted.delete(id);
+      done?.();
+    },
+    configurable: true,
+  });
   const b = fromShape('module_wrap');
   const g = globalThis as any;
   Object.defineProperties(g, {
