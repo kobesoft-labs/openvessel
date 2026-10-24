@@ -70,7 +70,10 @@ loop.setExitHook((code: number): never => {
 
 function sourceArrow(err: any): string {
   const arrowSym = S.privateSymbols.arrow_message_private_symbol;
-  if (err && typeof err === 'object' && arrowSym && typeof err[arrowSym] === 'string') return err[arrowSym];
+  // the stack already starts with the arrow (vm scripts run with displayErrors)
+  const decorated = S.privateSymbols.decorated_private_symbol;
+  if (err && typeof err === 'object' && decorated && err[decorated]) return '';
+  if (err && typeof err === 'object' && arrowSym && typeof err[arrowSym] === 'string') return `${err[arrowSym]}\n`;
   const stack = typeof err?.stack === 'string' ? err.stack : '';
   const m = /\(?((?:\/|file:\/\/|node:)[^():]+):(\d+):(\d+)\)?/.exec(stack.split('\n').find((l: string) => /^\s+at /.test(l)) ?? '');
   if (!m) return '';

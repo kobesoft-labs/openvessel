@@ -13,6 +13,8 @@ import * as loop from '../loop.ts';
 import { S, lib } from '../state.ts';
 import { fromShape } from './shape.ts';
 import { sucrase } from '../typescript.ts';
+import { cachedDataMatches, contextScope, makeCachedData, setPrivate } from './contextify.ts';
+import { fulfilledPromise, rejectedPromise } from './util.ts';
 
 const kUninstantiated = 0;
 const kInstantiating = 1;
@@ -26,6 +28,41 @@ interface Request {
   attributes: Record<string, string>;
   /** source ranges of every occurrence of this request's specifier text */
   ranges: { start: number; end: number; attrStart: number; attrEnd: number }[];
+  /** `export * from` this request */
+  star: boolean;
+  /** names the module imports or re-exports from this request by name ('default' for a default import) */
+  names: Set<string>;
+}
+
+function bindingNames(p: any, out: Set<string>) {
+  if (!p) return;
+  if (p.type === 'Identifier') out.add(p.name);
+  else if (p.type === 'ObjectPattern') for (const q of p.properties) bindingNames(q.type === 'RestElement' ? q.argument : q.value, out);
+  else if (p.type === 'ArrayPattern') for (const q of p.elements) bindingNames(q, out);
+  else if (p.type === 'RestElement') bindingNames(p.argument, out);
+  else if (p.type === 'AssignmentPattern') bindingNames(p.left, out);
+}
+
+function linkFailure(message: string) {
+  const e = new Error(message) as Error & { code: string };
+  e.code = 'ERR_VM_MODULE_LINK_FAILURE';
+  return e;
+}
+
+/** The names a static import/re-export statement takes from its module (statement text up to the specifier). */
+function importedNames(head: string, out: Set<string>) {
+  const isExport = /^export\b/.test(head);
+  if (!isExport) {
+    const d = /^import\s+([\w$]+)\s*(?:,|from\b)/.exec(head);
+    if (d && d[1] !== 'from') out.add('default');
+  }
+  const braces = /\{([^}]*)\}/.exec(head);
+  if (!braces) return;
+  for (const part of braces[1].split(',')) {
+    const name = part.trim().split(/\s+as\s+/)[0]?.trim();
+    if (!name) continue;
+    out.add(/^['"]/.test(name) ? name.slice(1, -1) : name.replace(/^type\s+/, ''));
+  }
 }
 
 let nextId = 1;
@@ -81,15 +118,36 @@ export class ModuleWrap {
   #syncExports: Record<string, unknown> | null = null;
   #tla: boolean | undefined;
   #meta: object | null = null;
+  /** created by vm.SourceTextModule (no id symbol of the default loader) */
+  #isVm = false;
+  #context: unknown;
+  #linkCalled = false;
+  #localExports: string[] = [];
+  /** the namespace handed to lib before (or instead of) the browser's */
+  #facade: object | null = null;
+  #realNs: object | null = null;
+  /** `export * from` statements, up to the specifier's quote */
+  #starRanges: { s: number; e: number }[] = [];
+  /** an async (top-level await) evaluation has settled */
+  #asyncSettled = false;
 
   constructor(url: string, context: unknown, sourceOrNames: string | string[], lineOffsetOrSteps?: number | (() => void), _columnOffset?: number, hostDefinedOption?: unknown) {
-    void context;
+    this.#context = context;
     this.url = url;
     this.id = String(nextId++);
     byId.set(this.id, this);
+    // like V8's ModuleWrap::New: the 6th argument is the id symbol when it is one (otherwise
+    // cachedData), and every wrap gets an id symbol — vm.Module registers its callbacks under it
+    this.#hostDefinedOption = typeof hostDefinedOption === 'symbol' ? hostDefinedOption : Symbol(url);
+    setPrivate(this, S.privateSymbols.host_defined_option_symbol, this.#hostDefinedOption);
     if (typeof sourceOrNames === 'string') {
+      this.#isVm = typeof hostDefinedOption !== 'symbol';
+      if (ArrayBuffer.isView(hostDefinedOption) && !cachedDataMatches(hostDefinedOption, sourceOrNames)) {
+        const e = new Error('cachedData buffer was rejected') as Error & { code: string };
+        e.code = 'ERR_VM_MODULE_CACHED_DATA_REJECTED';
+        throw e;
+      }
       this.#source = sourceOrNames;
-      this.#hostDefinedOption = hostDefinedOption;
       this.#analyze(sourceOrNames);
     } else {
       this.#exportNames = [...sourceOrNames];
@@ -99,13 +157,15 @@ export class ModuleWrap {
 
   #analyze(src: string) {
     let imports: any[];
+    let exports: any[];
     try {
-      [imports] = parseEsm(src, this.url) as any;
+      [imports, exports] = parseEsm(src, this.url) as any;
     } catch (e: any) {
       // let V8 report the syntax error the way Node would: as a SyntaxError on construction
       const err = new SyntaxError(e?.message ?? 'Invalid or unexpected token');
       throw err;
     }
+    this.#localExports = exports.filter((e: any) => e.type !== 'reexport-all' && typeof e.name === 'string').map((e: any) => e.name);
     const index = new Map<string, Request>();
     for (const imp of imports) {
       // es-module-lexer reports import.meta either as its own type or as a "dynamic" import at -2
@@ -123,12 +183,19 @@ export class ModuleWrap {
       const key = imp.specifier + '\0' + JSON.stringify(attributes);
       let r = index.get(key);
       if (!r) {
-        r = { specifier: imp.specifier, attributes, ranges: [] };
+        r = { specifier: imp.specifier, attributes: Object.freeze(attributes), ranges: [], star: false, names: new Set() };
         index.set(key, r);
         this.#requests.push(r);
       }
       const [as, ae] = imp.attributesStart >= 0 ? attributeClause(src, imp.attributesStart) : [-1, -1];
       r.ranges.push({ start: imp.start, end: imp.end, attrStart: as, attrEnd: ae });
+      if (imp.type === 'reexport-star') {
+        r.star = true;
+        this.#starRanges.push({ s: imp.importStart, e: imp.start - 1 });
+      }
+      else if (imp.importStart >= 0 && imp.start > imp.importStart) {
+        importedNames(src.slice(imp.importStart, imp.start), r.names);
+      }
     }
     const sm = /\/\/[#@] sourceMappingURL=(\S+)\s*$/.exec(src.slice(-512));
     if (sm) this.sourceMapURL = sm[1];
@@ -142,6 +209,7 @@ export class ModuleWrap {
 
   /** link(modules) since Node 22.23; link(specifiers, modules) before. Aligned with getModuleRequests(). */
   link(...args: [ModuleWrap[]] | [string[], ModuleWrap[]]) {
+    this.#linkCalled = true;
     if (this.#exportNames) return;
     const modules = (args.length === 1 ? args[0] : args[1]) as ModuleWrap[];
     const specifiers = args.length === 1 ? null : (args[0] as string[]);
@@ -232,8 +300,40 @@ export class ModuleWrap {
     for (const m of this.#linked) if (m) m.#walk(fn, seen);
   }
 
+  /** Export names, as the namespace lists them (star exports resolved through the links). */
+  #allExportNames(seen = new Set<ModuleWrap>()): Set<string> {
+    if (this.#exportNames) return new Set(this.#exportNames);
+    const out = new Set(this.#localExports);
+    if (seen.has(this)) return out;
+    seen.add(this);
+    this.#requests.forEach((r, i) => {
+      const t = this.#linked[i];
+      if (r.star && t) for (const n of t.#allExportNames(seen)) if (n !== 'default') out.add(n);
+    });
+    return out;
+  }
+
+  /** What V8 checks while instantiating a vm module graph: every request linked, every imported name exported. */
+  #checkLinks() {
+    this.#walk((m) => {
+      if (!m.#isVm || m.#exportNames || m.#status >= kInstantiated) return;
+      // a module without requests needn't be linked, unless it's the one being instantiated
+      if (!m.#linkCalled && (m === this || m.#requests.length)) throw linkFailure(`module ${m.url} is not linked`);
+      m.#requests.forEach((r, i) => {
+        const t = m.#linked[i];
+        if (!t) throw linkFailure(`request for '${r.specifier}' is not resolved`);
+        if (!r.names.size) return;
+        const names = t.#allExportNames();
+        for (const n of r.names) {
+          if (!names.has(n)) throw new SyntaxError(`The requested module '${r.specifier}' does not provide an export named '${n}'`);
+        }
+      });
+    });
+  }
+
   instantiate() {
     if (this.#status >= kInstantiated) return;
+    this.#checkLinks();
     this.#status = kInstantiating;
     this.#walk((m) => {
       if (m.#status < kInstantiated) m.#status = kInstantiated;
@@ -246,12 +346,63 @@ export class ModuleWrap {
   }
 
   evaluate(_timeout?: number, _breakOnSigint?: boolean): Promise<unknown> {
+    // once settled, V8 hands out an already settled promise
+    if (this.#asyncSettled) return this.#status === kErrored ? rejectedPromise(this.#error) : fulfilledPromise(undefined);
     if (this.#evaluation) return this.#evaluation;
     if (this.#status === kErrored) return Promise.reject(this.#error);
     if (this.#status < kInstantiated) this.instantiate();
     if (this.#syncExports) {
-      this.#evaluation = Promise.resolve(undefined);
+      this.#evaluation = fulfilledPromise(undefined);
       return this.#evaluation;
+    }
+    // V8 runs synthetic modules, and module graphs without top-level await, synchronously: the
+    // promise is already settled and the namespace readable when evaluate() returns
+    if (this.#exportNames) {
+      this.#status = kEvaluating;
+      try {
+        this.#runSyntheticSteps();
+        this.#status = kEvaluated;
+        return (this.#evaluation = fulfilledPromise(undefined));
+      } catch (e) {
+        this.#status = kErrored;
+        this.#error = e;
+        return (this.#evaluation = rejectedPromise(e));
+      }
+    }
+    if (this.#isVm && this.isGraphAsync()) {
+      // dependencies first, awaiting the ones with top-level await; doesn't hold the event loop
+      // (like V8, a module waiting on nothing leaves its promise pending)
+      this.#status = kEvaluating;
+      this.#evaluation = this.#evaluateAsyncGraph().then(
+        () => {
+          this.#walk((m) => {
+            if (m.#status < kEvaluated) m.#status = kEvaluated;
+          });
+          this.#asyncSettled = true;
+          return undefined;
+        },
+        (e) => {
+          this.#status = kErrored;
+          this.#error = e;
+          this.#asyncSettled = true;
+          throw e;
+        },
+      );
+      return this.#evaluation;
+    }
+    if (this.#isVm) {
+      this.#status = kEvaluating;
+      try {
+        this.#evaluateSyncGraph();
+        this.#walk((m) => {
+          if (m.#status < kEvaluated) m.#status = kEvaluated;
+        });
+        return (this.#evaluation = fulfilledPromise(undefined));
+      } catch (e) {
+        this.#status = kErrored;
+        this.#error = e;
+        return (this.#evaluation = rejectedPromise(e));
+      }
     }
     try {
       this.#register();
@@ -265,7 +416,8 @@ export class ModuleWrap {
     this.#evaluation = import(/* @vite-ignore */ this.servedUrl()).then(
       (ns) => {
         done();
-        this.#namespace = ns;
+        this.#realNs = ns;
+        if (!this.#isVm) this.#namespace = ns;
         this.#walk((m) => {
           if (m.#status < kEvaluated) m.#status = kEvaluated;
         });
@@ -317,8 +469,43 @@ export class ModuleWrap {
       this.#namespace = exportsObj;
       return exportsObj;
     }
+    if (this.#status === kErrored) throw this.#error;
+    return this.#runSource(false);
+  }
+
+  #asyncStarted = false;
+  #asyncEvaluation: Promise<void> | null = null;
+
+  /** A vm module graph with top-level await: dependencies in order (awaiting the async ones), then this. */
+  #evaluateAsyncGraph(): Promise<void> {
+    if (this.#asyncEvaluation) return this.#asyncEvaluation;
+    // a cycle back to a module already running: don't wait for it
+    if (this.#asyncStarted) return Promise.resolve();
+    this.#asyncStarted = true;
+    return (this.#asyncEvaluation = (async () => {
+      if (this.#exportNames || this.#syncExports || this.#namespace) {
+        this.#evaluateSyncGraph();
+        return;
+      }
+      if (this.#status === kErrored) throw this.#error;
+      for (const dep of this.#linked) {
+        if (!dep) continue;
+        if (dep.isGraphAsync()) await dep.#evaluateAsyncGraph();
+        else dep.#evaluateSyncGraph();
+      }
+      await this.#runSource(this.hasTopLevelAwait());
+    })());
+  }
+
+  /**
+   * Runs a source module as a CommonJS-shaped function (sucrase's imports transform; an async
+   * function when it has top-level await). Its links are already evaluated, or are evaluated on
+   * require.
+   */
+  #runSource(async: boolean): any {
     const exportsObj: Record<string, unknown> = {};
     this.#syncExports = exportsObj;
+    if (this.#status < kEvaluating) this.#status = kEvaluating;
     // import.meta and import() go through our hooks first; then ESM syntax becomes require/exports
     const prepared = this.#rewrittenForSync();
     const code = sucrase().transform(prepared, { transforms: ['imports'], keepUnusedImports: true, filePath: this.url }).code;
@@ -326,22 +513,60 @@ export class ModuleWrap {
       const i = this.#requests.findIndex((r) => r.specifier === spec);
       const target = i >= 0 ? this.#linked[i] : undefined;
       if (!target) throw new Error(`module ${this.url} is not linked (${spec})`);
-      return target.#evaluateSyncGraph();
+      const ns = target.#evaluateSyncGraph();
+      // vm modules see real namespaces: static `export *`, live and uninitialized bindings
+      return this.#isVm ? target.#facadeNs() : ns;
     };
     const module = { exports: exportsObj };
-    const fn = (0, eval)(`(function (exports, require, module) {${code}\n})\n//# sourceURL=${this.url}`);
-    fn.call(undefined, exportsObj, requireLinked, module);
-    if (module.exports !== exportsObj) Object.assign(exportsObj, module.exports);
-    Object.defineProperty(exportsObj, Symbol.toStringTag, { value: 'Module' });
-    this.#namespace = exportsObj;
-    return exportsObj;
+    const scope = contextScope(this.#context);
+    const head = `${async ? 'async ' : ''}function (exports, require, module) {`;
+    const fn = scope
+      ? (0, eval)(`(function (__ov$s) { with (__ov$s) return ${head}${code}\n} })\n//# sourceURL=${this.url}`)(scope)
+      : (0, eval)(`(${head}${code}\n})\n//# sourceURL=${this.url}`);
+    const fail = (e: unknown) => {
+      this.#status = kErrored;
+      this.#error = e;
+      throw e;
+    };
+    const finish = () => {
+      if (module.exports !== exportsObj) Object.assign(exportsObj, module.exports);
+      Object.defineProperty(exportsObj, Symbol.toStringTag, { value: 'Module' });
+      this.#namespace = exportsObj;
+      return exportsObj;
+    };
+    let ret: unknown;
+    try {
+      ret = fn.call(undefined, exportsObj, requireLinked, module);
+    } catch (e) {
+      fail(e);
+    }
+    return async ? (ret as Promise<unknown>).then(finish, fail) : finish();
   }
 
   #rewrittenForSync(): string {
     const src = this.#source!;
     const edits: { s: number; e: number; text: string }[] = [];
-    for (const m of this.#metaRanges) edits.push({ s: m.start, e: m.end, text: `globalThis.__ovImportMeta(${JSON.stringify(this.id)})` });
-    for (const d of this.#dynamicRanges) edits.push({ s: d.kwStart, e: d.kwEnd, text: `globalThis.__ovDynamicImport.bind(null, ${JSON.stringify(this.id)})` });
+    // bare names (not globalThis.…): a module run in a vm context resolves globalThis to the context
+    for (const m of this.#metaRanges) edits.push({ s: m.start, e: m.end, text: `__ov$importMeta(${JSON.stringify(this.id)})` });
+    for (const d of this.#dynamicRanges) edits.push({ s: d.kwStart, e: d.kwEnd, text: `__ov$dynamicImport.bind(null, ${JSON.stringify(this.id)})` });
+    // vm modules resolve `export *` statically (#readExport); sucrase's copy of the keys at require
+    // time would read uninitialized bindings in a cycle. Keep the import for evaluation order.
+    if (this.#isVm) for (const r of this.#starRanges) edits.push({ s: r.s, e: r.e, text: 'import ' });
+    // sucrase exports only the first name of `export const a = 1, b = 2`: split off an export list
+    if (/\bexport\s+(?:const|let|var)\s[^;]*,/.test(src)) {
+      try {
+        const acorn = lib('internal/deps/acorn/acorn/dist/acorn');
+        const ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true });
+        for (const st of ast.body) {
+          const decl = st.type === 'ExportNamedDeclaration' ? st.declaration : null;
+          if (decl?.type !== 'VariableDeclaration' || decl.declarations.length < 2) continue;
+          const names = new Set<string>();
+          for (const d of decl.declarations) bindingNames(d.id, names);
+          edits.push({ s: st.start, e: decl.start, text: '' });
+          edits.push({ s: st.end, e: st.end, text: `;export { ${[...names].join(', ')} };` });
+        }
+      } catch {}
+    }
     edits.sort((a, b) => a.s - b.s);
     let out = '';
     let last = 0;
@@ -353,10 +578,60 @@ export class ModuleWrap {
   }
 
   getNamespace() {
-    if (this.#namespace) return this.#namespace;
+    if (this.#isVm || (this.#exportNames && !this.#namespace)) {
+      if (this.#status >= kInstantiated) return this.#facadeNs();
+    } else if (this.#namespace) return this.#namespace;
     const e = new Error(`cannot get namespace, module has not been evaluated: ${this.url}`) as Error & { code: string };
     e.code = 'ERR_MODULE_NOT_INSTANTIATED';
     throw e;
+  }
+
+  /**
+   * A module namespace object for lib: sealed, null prototype, sorted names, data properties
+   * whose values are read live (synthetic values, the sync exports, or the browser's namespace).
+   */
+  #makeFacade(): object {
+    const names = [...this.#allExportNames()].sort();
+    const target = Object.create(null);
+    for (const n of names) Object.defineProperty(target, n, { value: undefined, writable: true, enumerable: true, configurable: false });
+    Object.defineProperty(target, Symbol.toStringTag, { value: 'Module' });
+    Object.preventExtensions(target);
+    const has = new Set(names);
+    const read = (k: string) => this.#readExport(k, new Set());
+    return new Proxy(target, {
+      // so sucrase's interop helpers (vm modules run as CommonJS) use it as it is
+      get: (t, k) => (typeof k === 'string' && has.has(k) ? read(k) : k === '__esModule' ? true : Reflect.get(t, k)),
+      getOwnPropertyDescriptor: (t, k) => {
+        const d = Reflect.getOwnPropertyDescriptor(t, k);
+        if (d && typeof k === 'string') d.value = read(k);
+        return d;
+      },
+      set: () => false,
+      defineProperty: () => false,
+      deleteProperty: (t, k) => !Reflect.has(t, k),
+    });
+  }
+
+  /** An export's current value; ReferenceError while it is uninitialized (as V8's TDZ). */
+  #readExport(k: string, seen: Set<ModuleWrap>): unknown {
+    if (this.#exportNames) return this.#values[this.#exportNames.indexOf(k)];
+    if (this.#realNs) return (this.#realNs as any)[k];
+    const ex = this.#syncExports;
+    if (ex && Object.prototype.hasOwnProperty.call(ex, k)) return ex[k];
+    // `export *` is resolved statically, as V8 does (sucrase copies whatever exists at require time)
+    if (!seen.has(this)) {
+      seen.add(this);
+      for (let i = 0; i < this.#requests.length; i++) {
+        const t = this.#linked[i];
+        if (this.#requests[i].star && t && k !== 'default' && t.#allExportNames().has(k)) return t.#readExport(k, seen);
+      }
+    }
+    if (ex && this.#status === kEvaluated) return undefined;
+    throw new ReferenceError(`${k} is not defined`);
+  }
+
+  #facadeNs(): object {
+    return (this.#facade ??= this.#makeFacade());
   }
 
   getNamespaceSync() {
@@ -416,18 +691,21 @@ export class ModuleWrap {
   }
 
   createCachedData() {
-    return new Uint8Array(0);
+    return makeCachedData(this.#source ?? '');
+  }
+
+  #runSyntheticSteps() {
+    if (!this.#evaluationSteps) return;
+    const steps = this.#evaluationSteps;
+    this.#evaluationSteps = null;
+    steps.call(this);
   }
 
   /** @internal called from the generated synthetic module when the browser evaluates it */
   _bindSynthetic(setters: (i: number, v: unknown) => void) {
     this.#setters = setters;
     this.#values.forEach((v, i) => setters(i, v));
-    if (this.#evaluationSteps) {
-      const steps = this.#evaluationSteps;
-      this.#evaluationSteps = null;
-      steps.call(this);
-    }
+    this.#runSyntheticSteps();
   }
 
   /** @internal */
@@ -473,6 +751,8 @@ export function createModuleWrap() {
     __ovImportMeta: { value: (id: string) => byId.get(id)?._importMeta(), configurable: true },
     __ovDynamicImport: { value: (id: string, s: unknown, o?: any) => byId.get(id)!._dynamicImport(s, o), configurable: true },
     __ovSyncNamespace: { value: (id: string) => byId.get(id)?._syncNamespace(), configurable: true },
+    __ov$importMeta: { value: (id: string) => byId.get(id)?._importMeta(), configurable: true },
+    __ov$dynamicImport: { value: (id: string, s: unknown, o?: any) => byId.get(id)!._dynamicImport(s, o), configurable: true },
   });
   return Object.assign(b, {
     ModuleWrap,
