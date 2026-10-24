@@ -13,6 +13,12 @@ npm から実際の JavaScript のプロジェクトを入れ、ビルドし、�
 HMR 付きの `astro dev`、動いている開発サーバーの iframe でのプレビューができます。
 Node.js 自身のコードを動かしているので、Astro 以外の Node のツールの多くもそのまま動きます。
 
+![OpenVessel: ブラウザのタブの中の Node.js の仮想マシン](docs/images/overview.svg)
+
+タブの中に住む、Node.js のための小さな仮想マシンだと考えてください。自分の OS（ファイルシステム・プロセス・シェルを持つ
+カーネル）と、自分のプログラム（Node.js・npm・Astro）と、決まった出入り口を持っています。部品ごとの説明は
+[しくみ](docs/how-it-works.ja.md) にあります。
+
 使いみちの例:
 
 - サイトを訪問者のブラウザの中でビルドして見せる、オンラインのエディタや CMS
@@ -100,7 +106,7 @@ await vessel.spawn('npm', ['run', 'dev'], { cwd: '/home/user/app' });
 | ホストの API | `src/host/` |
 | ネイティブだけのパッケージの互換パッケージ | `compat/`・`scripts/build-compat.mjs` |
 
-設計: [docs/DESIGN.md](docs/DESIGN.md)・[docs/NODE-PORT.md](docs/NODE-PORT.md)。
+もっと詳しく: [しくみ](docs/how-it-works.ja.md)・[互換性](docs/compatibility.ja.md)・設計のメモ [docs/DESIGN.md](docs/DESIGN.md)・[docs/NODE-PORT.md](docs/NODE-PORT.md)。
 
 ## 開発
 
