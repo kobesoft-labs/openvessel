@@ -13,6 +13,12 @@ It was built for [Astro](https://astro.build) sites (Astro 7, 6 and 5): `npm ins
 `astro dev` with hot module replacement, and a preview of the running dev server in an iframe.
 Because it runs Node.js's own code, most other Node tools work too.
 
+![OpenVessel: a Node.js virtual machine inside a browser tab](docs/images/overview.svg)
+
+Think of it as a small virtual machine for Node.js that lives in the tab: its own operating system
+(a kernel with a file system, processes and a shell), its own programs (Node.js, npm, Astro), and
+controlled ways in and out. [How it works](docs/how-it-works.md) explains each piece.
+
 Typical uses:
 
 - an online editor or CMS that builds and previews a site in the visitor's browser,
@@ -112,7 +118,7 @@ headers each of the three origins needs.
 | Host API | `src/host/` |
 | Compat packages for native-only npm packages | `compat/`, `scripts/build-compat.mjs` |
 
-Design notes: [docs/DESIGN.md](docs/DESIGN.md), [docs/NODE-PORT.md](docs/NODE-PORT.md) (Japanese).
+More: [How it works](docs/how-it-works.md) · [Compatibility](docs/compatibility.md) · design notes [docs/DESIGN.md](docs/DESIGN.md), [docs/NODE-PORT.md](docs/NODE-PORT.md) (Japanese).
 
 ## Development
 

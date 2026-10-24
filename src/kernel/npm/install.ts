@@ -3,6 +3,7 @@
 import * as path from '../../shared/path.ts';
 import type { VFS } from '../vfs.ts';
 import { isDir } from '../vfs.ts';
+import { RUNTIME_BASE } from '../base.ts';
 import type { LockHints } from './lockfile.ts';
 import type { PackageVersion, Packument, Registry } from './registry.ts';
 import * as semver from './semver.ts';
@@ -40,7 +41,7 @@ interface CompatEntry {
 }
 let compatIndex: Promise<Record<string, CompatEntry>> | null = null;
 function compatOrigin(): string | null {
-  return typeof location !== 'undefined' ? location.origin : null;
+  return RUNTIME_BASE || null;
 }
 function loadCompat(): Promise<Record<string, CompatEntry>> {
   const origin = compatOrigin();

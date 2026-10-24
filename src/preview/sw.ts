@@ -4,7 +4,9 @@
 
 const sw = globalThis as unknown as ServiceWorkerGlobalScope;
 
-const OWN = new Set(['/__ov/relay.html', '/__ov/relay.js', '/__ov/sw.js', '/__ov/inject.js']);
+// The preview may be served under a path (e.g. /demo/preview/): its own files are under the scope.
+const SCOPE = new URL(sw.registration.scope).pathname;
+const OWN = new Set(['relay.html', 'relay.js', 'sw.js', 'inject.js'].map((f) => `${SCOPE}__ov/${f}`));
 
 let kernel: MessagePort | null = null;
 let defaultPort = 0;
@@ -102,7 +104,7 @@ function portFor(clientId: string | null | undefined): number {
   return defaultPort;
 }
 
-const INJECT = '<script src="/__ov/inject.js"></script>';
+const INJECT = `<script src="${SCOPE}__ov/inject.js"></script>`;
 
 function injectHtml(html: string): string {
   const m = /<head[^>]*>/i.exec(html);
@@ -168,6 +170,14 @@ async function forward(req: Request, port: number, isNavigation: boolean): Promi
   return new Response(nullBody ? null : body, { status, statusText: h.statusText, headers: out });
 }
 
+async function withIsolation(req: Request): Promise<Response> {
+  const res = await fetch(req);
+  if (res.type === 'opaque' || res.type === 'opaqueredirect' || res.status === 0) return res;
+  const headers = new Headers(res.headers);
+  for (const [n, v] of Object.entries(isolationHeaders())) if (!headers.has(n)) headers.set(n, v);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
 function isolationHeaders(): Record<string, string> {
   return { 'cross-origin-embedder-policy': 'credentialless', 'cross-origin-resource-policy': 'cross-origin', 'cross-origin-opener-policy': 'same-origin' };
 }
@@ -222,8 +232,12 @@ sw.addEventListener('fetch', (ev) => {
     );
     return;
   }
-  if (OWN.has(url.pathname)) return;
-  if (url.pathname === '/__ov/open') {
+  // own files, with the isolation headers a static host may not set (GitHub Pages)
+  if (OWN.has(url.pathname)) {
+    ev.respondWith(withIsolation(req));
+    return;
+  }
+  if (url.pathname === `${SCOPE}__ov/open`) {
     const port = Number(url.searchParams.get('port')) || defaultPort;
     const p = url.searchParams.get('path') || '/';
     if (ev.resultingClientId) clientPorts.set(ev.resultingClientId, port);

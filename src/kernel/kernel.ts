@@ -3,9 +3,9 @@
 import { KernelError, kerr } from '../shared/errno.ts';
 import * as path from '../shared/path.ts';
 import { createChannelBuffer, SyncServer } from '../shared/syncchan.ts';
-import { O_RDONLY, O_RDWR, O_WRONLY, OpenFile, Tty, createPipe } from './io.ts';
+import { O_RDONLY, O_RDWR, O_WRONLY, OpenFile, Tty, createPipe, openFifo } from './io.ts';
 import { type ExitStatus, type NodeThread, Proc, exitCodeOf, signalName, signalNumber } from './proc.ts';
-import { S_IFMT, S_IFREG, VFS, isDir } from './vfs.ts';
+import { S_IFIFO, S_IFMT, S_IFREG, VFS, isDir, isLink } from './vfs.ts';
 
 export type Program = (ctx: ProgramContext) => Promise<number>;
 
@@ -424,13 +424,32 @@ export class Kernel {
   // ---------------------------------------------------------------------------
   // file helpers used by programs and syscalls
 
+  /**
+   * The fd of process `pid` that `abs` names when it is /proc/self/fd/N, /proc/<pid>/fd/N or
+   * /dev/fd/N, or a symlink to one (/dev/stdin, /dev/stdout, /dev/stderr); null otherwise.
+   */
+  procFdOf(abs: string, pid: number): number | null {
+    if (!abs.startsWith('/dev/') && !abs.startsWith('/proc/')) return null;
+    for (let i = 0; i < 40; i++) {
+      const fd = fdPathOf(abs, pid);
+      if (fd !== null) return fd;
+      const n = this.vfs.tryLookup(abs, false);
+      if (!n || !isLink(n)) return null;
+      abs = path.resolve(path.dirname(abs), n.target!);
+    }
+    return null;
+  }
+
   openFile(proc: { cwd: string; umask?: number }, p: string, flags: number, mode = 0o666): OpenFile {
     const abs = this.resolvePath(proc.cwd, p);
-    if (abs.startsWith('/proc/self/fd/') || abs.startsWith('/dev/fd/')) {
-      const fd = Number(abs.split('/').pop());
+    const procFd = this.procFdOf(abs, (proc as Proc).pid);
+    if (procFd !== null) {
       const owner = proc as Proc;
-      if (owner.fds?.has(fd)) return owner.fds.get(fd)!.ref();
-      throw kerr('ENOENT');
+      const f = owner.fds?.get(procFd);
+      if (!f) throw kerr('ENOENT');
+      // a file is opened anew (its own offset, as Linux reopens it); pipes, sockets and ttys are shared
+      if (f.kind === 'file' && f.opts.node && f.opts.vfs) return new OpenFile('file', flags, { vfs: f.opts.vfs, node: f.opts.node, path: f.opts.path });
+      return f.ref();
     }
     if (abs === '/dev/tty') {
       const tty = (proc as Proc).tty;
@@ -454,9 +473,17 @@ export class Kernel {
       if (isDir(node) && (flags & 3) !== O_RDONLY) throw kerr('EISDIR');
       if (flags & O_TRUNC && (flags & 3) !== O_RDONLY && !node.device) this.vfs.truncateNode(node, 0, abs);
     }
+    if ((node.mode & S_IFMT) === S_IFIFO) return openFifo(node, flags);
     if (node.device) return new OpenFile('file', flags, { vfs: this.vfs, node, path: abs });
     return new OpenFile(isDir(node) ? 'dir' : 'file', flags, { vfs: this.vfs, node, path: abs });
   }
+}
+
+/** N for /proc/self/fd/N, /proc/<pid>/fd/N (of this pid) and /dev/fd/N; null for other paths. */
+export function fdPathOf(abs: string, pid: number): number | null {
+  const m = /^\/(?:proc\/(self|\d+)|dev)\/fd\/(\d+)$/.exec(abs);
+  if (!m || (m[1] !== undefined && m[1] !== 'self' && Number(m[1]) !== pid)) return null;
+  return Number(m[2]);
 }
 
 export class ExitSignal {

@@ -161,6 +161,12 @@ export class Pipe {
   /** Called when there is new data or EOF (for push-style readers). */
   onReadable = new Set<() => void>();
   onBroken?: () => void;
+  /**
+   * A FIFO's pipe before both ends have been opened: reads wait for a writer and writes are kept
+   * for a reader (Linux blocks open(2) instead; the ends here open at once).
+   */
+  awaitingWriter = false;
+  awaitingReader = false;
 
   constructor(public id: number) {}
 
@@ -183,7 +189,7 @@ export class Pipe {
   }
 
   write(data: Uint8Array): number {
-    if (this.readers === 0) {
+    if (this.readers === 0 && !this.awaitingReader) {
       this.onBroken?.();
       throw kerr('EPIPE');
     }
@@ -208,7 +214,7 @@ export class Pipe {
     return data.length;
   }
 
-  private notify() {
+  notify() {
     for (const fn of [...this.onReadable]) fn();
   }
 
@@ -262,7 +268,7 @@ export class Pipe {
       if (this.size === 0) this.flushWaiting();
       return d;
     }
-    if (this.writers === 0) return null;
+    if (this.writers === 0 && !this.awaitingWriter) return null;
     return undefined;
   }
 
@@ -297,6 +303,40 @@ export class Pipe {
 }
 
 let nextPipeId = 1;
+
+/** open(2) of a FIFO: an end of the pipe its inode shares while any end is open. */
+export function openFifo(node: { fifo?: unknown }, flags: number): OpenFile {
+  let pipe = node.fifo as Pipe | undefined;
+  if (!pipe) {
+    pipe = new Pipe(nextPipeId++);
+    pipe.awaitingReader = pipe.awaitingWriter = true;
+    node.fifo = pipe;
+  }
+  const p = pipe;
+  const acc = flags & O_ACCMODE;
+  // the pipe goes when no end is open, unless a writer came first: its bytes wait for a reader
+  const release = () => {
+    if (p.readers === 0 && p.writers === 0 && !p.awaitingReader && node.fifo === p) node.fifo = undefined;
+  };
+  const reader = acc !== O_WRONLY;
+  const writer = acc !== O_RDONLY;
+  if (reader) {
+    p.readers++;
+    p.awaitingReader = false;
+  }
+  if (writer) {
+    p.writers++;
+    p.awaitingWriter = false;
+  }
+  const f = new OpenFile('pipe', flags, { reader: reader ? p.readEnd() : undefined, writer: writer ? p.writeEnd() : undefined });
+  f.onClose = () => {
+    if (reader) p.closeReader();
+    if (writer) p.closeWriter();
+    release();
+  };
+  if (writer) p.notify();
+  return f;
+}
 
 export function createPipe(): { pipe: Pipe; r: OpenFile; w: OpenFile } {
   const pipe = new Pipe(nextPipeId++);

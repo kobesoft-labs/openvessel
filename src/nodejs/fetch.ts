@@ -35,7 +35,7 @@ async function proxyFetch(url: string, req: Request, body: ArrayBuffer | null): 
   const done = loop.startReq('FetchRequest');
   let res: Response;
   try {
-    res = await nativeFetch(`${S.runtimeOrigin}/__ov/net?url=${encodeURIComponent(url)}`, {
+    res = await nativeFetch(`${S.runtimeBase}/__ov/net?url=${encodeURIComponent(url)}`, {
       method: req.method === 'GET' || req.method === 'HEAD' ? req.method : 'POST',
       headers,
       body: req.method === 'GET' || req.method === 'HEAD' ? undefined : body,

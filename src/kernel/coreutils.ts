@@ -257,6 +257,25 @@ const mkdir: Program = async (ctx) => {
   return st;
 };
 
+const mkfifo: Program = async (ctx) => {
+  const { opts, args } = getopt(ctx.argv.slice(1), 'm');
+  if (!args.length) {
+    ctx.err('mkfifo: missing operand\n');
+    return 1;
+  }
+  const mode = opts.has('m') ? parseInt(opts.get('m')!, 8) : 0o666 & ~ctx.proc.umask;
+  let st = 0;
+  for (const a of args) {
+    try {
+      ctx.vfs.mknodFifo(ctx.resolve(a), mode);
+    } catch (e) {
+      ctx.err(`mkfifo: cannot create fifo '${a}': ${errMsg(e)}\n`);
+      st = 1;
+    }
+  }
+  return st;
+};
+
 const rm: Program = async (ctx) => {
   const { flags, args } = getopt(ctx.argv.slice(1), '', { recursive: 'r', force: 'f' });
   const recursive = flags.has('r') || flags.has('R');
@@ -1748,7 +1767,7 @@ const sha256sum = hashProgram('SHA-256');
 
 export function installCoreutils(kernel: Kernel) {
   const progs: Record<string, Program> = {
-    ls, cat, mkdir, rm, rmdir, cp, mv, touch, ln, chmod, head, tail, wc, grep, egrep: grep, fgrep: grep, find, sort, uniq, cut, tr, sed, xargs, tee, env, which, basename, dirname, realpath, readlink, stat, du, df, free, date, sleep, uname, ps, kill, seq, yes, mktemp, base64, diff, clear, nproc, id, hostname, whoami, tty, stty, nohup, nice, less, more: less, file, rev, nl, timeout, time: timeProg, truncate: truncateProg,
+    ls, cat, mkdir, mkfifo, rm, rmdir, cp, mv, touch, ln, chmod, head, tail, wc, grep, egrep: grep, fgrep: grep, find, sort, uniq, cut, tr, sed, xargs, tee, env, which, basename, dirname, realpath, readlink, stat, du, df, free, date, sleep, uname, ps, kill, seq, yes, mktemp, base64, diff, clear, nproc, id, hostname, whoami, tty, stty, nohup, nice, less, more: less, file, rev, nl, timeout, time: timeProg, truncate: truncateProg,
     sha256sum, sha1sum: hashProgram('SHA-1'), sha512sum: hashProgram('SHA-512'), md5sum: hashProgram('MD5'),
     echo: shellBuiltinProgram('echo'), printf: shellBuiltinProgram('printf'), test: shellBuiltinProgram('test'), '[': shellBuiltinProgram('['), true: shellBuiltinProgram('true'), false: shellBuiltinProgram('false'), pwd: shellBuiltinProgram('pwd'),
     chown: async () => 0, sync: async () => 0, true_: async () => 0,
