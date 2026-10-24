@@ -67,7 +67,11 @@ export function pathString(p: unknown): string {
 }
 
 export function fillStats(arr: Float64Array | BigInt64Array, offset: number, st: StatData) {
-  const ns = (ms: number) => [Math.floor(ms / 1000), Math.round((ms % 1000) * 1e6)];
+  // seconds rounded down and a non-negative nanosecond part, also before 1970
+  const ns = (ms: number) => {
+    const s = Math.floor(ms / 1000);
+    return [s, Math.round((ms - s * 1000) * 1e6)];
+  };
   const [as, an] = ns(st.atimeMs);
   const [ms, mn] = ns(st.mtimeMs);
   const [cs, cn] = ns(st.ctimeMs);
@@ -82,6 +86,36 @@ export function encodeOut(s: string, encoding: unknown): string | Uint8Array {
   if (encoding === 'buffer') return lib('buffer').Buffer.from(s);
   if (encoding === undefined || encoding === null || encoding === 'utf8' || encoding === 'utf-8') return s;
   return decode(encode(s, Enc.UTF8), encodingOf(encoding));
+}
+
+/** A C++-style error (THROW_ERR_*): the class and a code, the message as is. */
+function nodeError(C: ErrorConstructor, code: string, message: string): Error {
+  const e = new C(message) as Error & { code: string };
+  e.code = code;
+  return e;
+}
+
+/** GetValidatedFd() in node_file.cc: an int32 >= 0, or ERR_INVALID_ARG_TYPE / ERR_OUT_OF_RANGE. */
+export function validatedFd(v: unknown): number {
+  if (typeof v !== 'number') {
+    const { codes } = lib('internal/errors');
+    throw new codes.ERR_INVALID_ARG_TYPE('fd', 'number', v);
+  }
+  const outOfRange = v < 0 || v > 0x7fffffff;
+  if (outOfRange || !Number.isSafeInteger(v)) {
+    if (outOfRange && Number.isFinite(v)) throw nodeError(RangeError, 'ERR_OUT_OF_RANGE', `The value of "fd" is out of range. It must be >= 0 && <= 2147483647. Received ${v}`);
+    throw nodeError(RangeError, 'ERR_OUT_OF_RANGE', `The value of "fd" is out of range. It must be an integer. Received ${v}`);
+  }
+  return v;
+}
+
+/** GetValidMode() in node_file.cc: the mode of access() (0..7, default F_OK) and copyFile() (0..7, default 0). */
+function validatedMode(v: unknown): number {
+  if (v === undefined || v === null) return 0;
+  const { codes } = lib('internal/errors');
+  if (typeof v !== 'number') throw new codes.ERR_INVALID_ARG_TYPE('mode', 'integer', v);
+  if (!Number.isInteger(v) || v < 0 || v > 7) throw new codes.ERR_OUT_OF_RANGE('mode', 'an integer >= 0 && <= 7', v);
+  return v;
 }
 
 export function createFs() {
@@ -130,7 +164,9 @@ export function createFs() {
       }
       done();
       if (typeof r.oncomplete === 'function') {
+        // FSReqCallback::Resolve passes the value only when it isn't undefined
         if (err) loop.scope(r.oncomplete, r, err);
+        else if (result === undefined) loop.scope(r.oncomplete, r, null);
         else loop.scope(r.oncomplete, r, null, result);
       }
     });
@@ -163,7 +199,7 @@ export function createFs() {
     if (req === kUsePromises) return p;
     const r = req as FSReqCallback;
     p.then(
-      (v) => typeof r.oncomplete === 'function' && loop.scope(r.oncomplete, r, null, v),
+      (v) => typeof r.oncomplete === 'function' && (v === undefined ? loop.scope(r.oncomplete, r, null) : loop.scope(r.oncomplete, r, null, v)),
       (e) => typeof r.oncomplete === 'function' && loop.scope(r.oncomplete, r, e),
     );
     return undefined;
@@ -172,6 +208,7 @@ export function createFs() {
   const st = (p: unknown, l: boolean) => sys<StatData>('stat', { p: pathString(p), l });
   const fst = (fd: number) => sys<StatData>('fstat', { fd });
 
+  // sync calls and FSReqCallback fill the shared stat array (FillGlobalStatsArray); promises get their own
   function statResult(data: StatData, bigint: boolean, sync: boolean) {
     if (sync) return fillStats(bigint ? bigintStatValues : statValues, 0, data);
     return fillStats(bigint ? new BigInt64Array(18) : new Float64Array(18), 0, data);
@@ -304,7 +341,10 @@ export function createFs() {
     FSReqCallback,
     FileHandle,
     StatWatcher,
-    access: (path: unknown, mode: number, req?: unknown) => run(req, 'access', path, undefined, () => void sys('access', { p: pathString(path), mode })),
+    access(path: unknown, mode: unknown, req?: unknown) {
+      const m = validatedMode(mode);
+      return run(req, 'access', path, undefined, () => void sys('access', { p: pathString(path), mode: m }));
+    },
     existsSync(path: unknown) {
       try {
         st(path, false);
@@ -316,9 +356,9 @@ export function createFs() {
     open: (path: unknown, flags: number, mode: number, req?: unknown) => run(req, 'open', path, undefined, () => sys<number>('open', { p: pathString(path), flags, mode })),
     openFileHandle: (path: unknown, flags: number, mode: number, req?: unknown) =>
       run(req, 'open', path, undefined, () => new FileHandle(sys<number>('open', { p: pathString(path), flags, mode }))),
-    close: (fd: number, req?: unknown) => run(req, 'close', undefined, undefined, () => void sys('close', { fd })),
+    close: (fd: number, req?: unknown) => (validatedFd(fd), run(req, 'close', undefined, undefined, () => void sys('close', { fd }))),
     read: (fd: number, buffer: Uint8Array, offset: number, length: number, position: unknown, req?: unknown) =>
-      req !== undefined && length > 0 && isStreamFd(fd)
+      validatedFd(fd) >= 0 && req !== undefined && length > 0 && isStreamFd(fd)
         ? runAsync(req, 'read', () =>
             readOnce(fd, length).then((d) => {
               buffer.set(d, offset);
@@ -332,7 +372,7 @@ export function createFs() {
         return d.length;
       }),
     readBuffers: (fd: number, buffers: Uint8Array[], position: unknown, req?: unknown) =>
-      run(req, 'read', undefined, undefined, () => {
+      validatedFd(fd) >= 0 && run(req, 'read', undefined, undefined, () => {
         let total = 0;
         let pos = typeof position === 'number' && position >= 0 ? position : null;
         for (const buf of buffers) {
@@ -345,11 +385,15 @@ export function createFs() {
         return total;
       }),
     readFileUtf8(path: unknown, flags: number) {
+      let opened = -1;
       try {
-        if (typeof path === 'number') {
+        // other flags than O_RDONLY (e.g. 'a+', which creates the file) go through open()
+        if (typeof path !== 'number' && flags) opened = sys<number>('open', { p: pathString(path), flags, mode: 0o666 });
+        const fd = opened >= 0 ? opened : path;
+        if (typeof fd === 'number') {
           const parts: Uint8Array[] = [];
           for (;;) {
-            const d = readBytes(path, 1 << 20, null);
+            const d = readBytes(fd, 1 << 20, null);
             if (!d.length) break;
             parts.push(d.slice());
           }
@@ -363,11 +407,12 @@ export function createFs() {
           }
           return decode(all, Enc.UTF8);
         }
-        void flags;
         const data = sys<Uint8Array>('readFile', { p: pathString(path) });
         return decode(data, Enc.UTF8);
       } catch (e) {
         throw uvError(e, 'open', path);
+      } finally {
+        if (opened >= 0) sys('close', { fd: opened });
       }
     },
     writeFileUtf8(path: unknown, data: string, flags: number, mode: number) {
@@ -384,11 +429,13 @@ export function createFs() {
       }
     },
     writeBuffer(fd: number, buffer: ArrayBufferView, offset: number, length: number, position: unknown, req?: unknown, ctx?: unknown) {
+      validatedFd(fd);
       const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset + offset, length);
       if (req === undefined) return syncWithCtx(ctx, 'write', () => writeBytes(fd, bytes, position));
       return run(req, 'write', undefined, undefined, () => writeBytes(fd, bytes.slice(), position));
     },
     writeBuffers(fd: number, buffers: ArrayBufferView[], position: unknown, req?: unknown) {
+      validatedFd(fd);
       const parts = buffers.map((x) => new Uint8Array(x.buffer, x.byteOffset, x.byteLength));
       let n = 0;
       for (const p of parts) n += p.length;
@@ -401,14 +448,15 @@ export function createFs() {
       return run(req, 'write', undefined, undefined, () => writeBytes(fd, all, position));
     },
     writeString(fd: number, str: string, position: unknown, encoding: unknown, req?: unknown, ctx?: unknown) {
+      validatedFd(fd);
       const bytes = encode(String(str), encodingOf(encoding ?? 'utf8'));
       if (req === undefined) return syncWithCtx(ctx, 'write', () => writeBytes(fd, bytes, position));
       return run(req, 'write', undefined, undefined, () => writeBytes(fd, bytes, position));
     },
-    fdatasync: (fd: number, req?: unknown) => run(req, 'fdatasync', undefined, undefined, () => void fst(fd)),
-    fsync: (fd: number, req?: unknown) => run(req, 'fsync', undefined, undefined, () => void fst(fd)),
+    fdatasync: (fd: number, req?: unknown) => (validatedFd(fd), run(req, 'fdatasync', undefined, undefined, () => void fst(fd))),
+    fsync: (fd: number, req?: unknown) => (validatedFd(fd), run(req, 'fsync', undefined, undefined, () => void fst(fd))),
     rename: (from: unknown, to: unknown, req?: unknown) => run(req, 'rename', from, to, () => void sys('rename', { from: pathString(from), to: pathString(to) })),
-    ftruncate: (fd: number, len: number, req?: unknown) => run(req, 'ftruncate', undefined, undefined, () => void sys('ftruncate', { fd, len: Number(len) })),
+    ftruncate: (fd: number, len: number, req?: unknown) => (validatedFd(fd), run(req, 'ftruncate', undefined, undefined, () => void sys('ftruncate', { fd, len: Number(len) }))),
     rmdir: (path: unknown, req?: unknown) => run(req, 'rmdir', path, undefined, () => void sys('rmdir', { p: pathString(path) })),
     mkdir: (path: unknown, mode: number, recursive: boolean, req?: unknown) =>
       run(req, 'mkdir', path, undefined, () => {
@@ -440,7 +488,7 @@ export function createFs() {
           throw uvError(e, 'stat', path);
         }
       }
-      return run(req, 'stat', path, undefined, () => statResult(st(path, false), bigint, req === undefined));
+      return run(req, 'stat', path, undefined, () => statResult(st(path, false), bigint, req !== kUsePromises));
     },
     lstat(path: unknown, bigint: boolean, req?: unknown, throwIfNoEntry = true) {
       if (req === undefined && !throwIfNoEntry) {
@@ -451,9 +499,10 @@ export function createFs() {
           throw uvError(e, 'lstat', path);
         }
       }
-      return run(req, 'lstat', path, undefined, () => statResult(st(path, true), bigint, req === undefined));
+      return run(req, 'lstat', path, undefined, () => statResult(st(path, true), bigint, req !== kUsePromises));
     },
     fstat(fd: number, bigint: boolean, req?: unknown, shouldNotThrow = false) {
+      validatedFd(fd);
       if (req === undefined && shouldNotThrow) {
         try {
           return statResult(fst(fd), bigint, true);
@@ -461,7 +510,7 @@ export function createFs() {
           return undefined;
         }
       }
-      return run(req, 'fstat', undefined, undefined, () => statResult(fst(fd), bigint, req === undefined));
+      return run(req, 'fstat', undefined, undefined, () => statResult(fst(fd), bigint, req !== kUsePromises));
     },
     statfs(path: unknown, bigint: boolean, req?: unknown) {
       return run(req, 'statfs', path, undefined, () => {
@@ -476,16 +525,18 @@ export function createFs() {
     readlink: (path: unknown, encoding: unknown, req?: unknown) => run(req, 'readlink', path, undefined, () => encodeOut(sys<string>('readlink', { p: pathString(path) }), encoding)),
     unlink: (path: unknown, req?: unknown) => run(req, 'unlink', path, undefined, () => void sys('unlink', { p: pathString(path) })),
     realpath: (path: unknown, encoding: unknown, req?: unknown) => run(req, 'realpath', path, undefined, () => encodeOut(sys<string>('realpath', { p: pathString(path) }), encoding)),
-    copyFile: (from: unknown, to: unknown, mode: number, req?: unknown) =>
-      run(req, 'copyfile', from, to, () => void sys('copyFile', { from: pathString(from), to: pathString(to), excl: !!(mode & 1) })),
+    copyFile(from: unknown, to: unknown, mode: unknown, req?: unknown) {
+      const m = validatedMode(mode);
+      return run(req, 'copyfile', from, to, () => void sys('copyFile', { from: pathString(from), to: pathString(to), excl: !!(m & 1) }));
+    },
     chmod: (path: unknown, mode: number, req?: unknown) => run(req, 'chmod', path, undefined, () => void sys('chmod', { p: pathString(path), mode })),
-    fchmod: (fd: number, mode: number, req?: unknown) => run(req, 'fchmod', undefined, undefined, () => void sys('fchmod', { fd, mode })),
+    fchmod: (fd: number, mode: number, req?: unknown) => (validatedFd(fd), run(req, 'fchmod', undefined, undefined, () => void sys('fchmod', { fd, mode }))),
     chown: (path: unknown, _u: number, _g: number, req?: unknown) => run(req, 'chown', path, undefined, () => void st(path, false)),
-    fchown: (fd: number, _u: number, _g: number, req?: unknown) => run(req, 'fchown', undefined, undefined, () => void fst(fd)),
+    fchown: (fd: number, _u: number, _g: number, req?: unknown) => (validatedFd(fd), run(req, 'fchown', undefined, undefined, () => void fst(fd))),
     lchown: (path: unknown, _u: number, _g: number, req?: unknown) => run(req, 'lchown', path, undefined, () => void st(path, true)),
     utimes: (path: unknown, atime: number, mtime: number, req?: unknown) =>
       run(req, 'utime', path, undefined, () => void sys('utimes', { p: pathString(path), atime: atime * 1000, mtime: mtime * 1000 })),
-    futimes: (fd: number, atime: number, mtime: number, req?: unknown) => run(req, 'futime', undefined, undefined, () => void sys('futimes', { fd, atime: atime * 1000, mtime: mtime * 1000 })),
+    futimes: (fd: number, atime: number, mtime: number, req?: unknown) => (validatedFd(fd), run(req, 'futime', undefined, undefined, () => void sys('futimes', { fd, atime: atime * 1000, mtime: mtime * 1000 }))),
     lutimes: (path: unknown, atime: number, mtime: number, req?: unknown) =>
       run(req, 'lutime', path, undefined, () => void sys('utimes', { p: pathString(path), atime: atime * 1000, mtime: mtime * 1000, l: true })),
     mkdtemp: (prefix: unknown, encoding: unknown, req?: unknown) => run(req, 'mkdtemp', `${pathString(prefix)}XXXXXX`, undefined, () => encodeOut(sys<string>('mkdtemp', { prefix: pathString(prefix) }), encoding)),

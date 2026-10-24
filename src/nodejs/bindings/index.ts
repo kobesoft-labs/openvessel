@@ -59,6 +59,7 @@ export const factories: Record<string, BindingFactory> = {
   builtins: () => S.builtinsBinding,
   cares_wrap: createCaresWrap,
   config: createConfig,
+  constants: createConstants,
   contextify: createContextify,
   credentials: createCredentials,
   crypto: createCrypto,
@@ -138,6 +139,18 @@ export function getLinkedBinding(name: string): never {
   const e = new Error(`No such binding: ${name}`) as Error & { code: string };
   e.code = 'ERR_INVALID_MODULE';
   throw e;
+}
+
+/** node_constants.cc: the os/fs/crypto/zlib/trace groups (and os's nested ones) have a null prototype. */
+function createConstants() {
+  const b = fromShape('constants');
+  const nullProto = (o: unknown) => {
+    if (!o || typeof o !== 'object') return;
+    Object.setPrototypeOf(o, null);
+    for (const v of Object.values(o)) if (v && typeof v === 'object' && !ArrayBuffer.isView(v)) nullProto(v);
+  };
+  for (const k of ['os', 'fs', 'crypto', 'zlib', 'trace']) nullProto(b[k]);
+  return b;
 }
 
 function createOptions() {
