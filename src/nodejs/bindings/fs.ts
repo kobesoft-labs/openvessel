@@ -6,6 +6,7 @@ import { SysError, sys } from '../../node/sys.ts';
 import * as loop from '../loop.ts';
 import { S, lib } from '../state.ts';
 import { Enc, decode, encode, encodingOf } from './buffer.ts';
+import { registerHostObject } from './messaging.ts';
 import { fromShape } from './shape.ts';
 import { readOnce } from './stream.ts';
 import { HandleWrap } from './stream.ts';
@@ -337,6 +338,40 @@ export function createFs() {
     }
   }
 
+  // Environment::AddUnmanagedFd/RemoveUnmanagedFd: a worker thread (trackUnmanagedFds) closes the
+  // fds it opened with fs.open when it exits
+  const unmanaged =
+    !S.isMainThread && S.init.trackUnmanagedFds
+      ? (() => {
+          const fds = new Set<number>();
+          const warn = (msg: string) => S.process?.emitWarning?.(msg);
+          S.atThreadExit.push(() => {
+            for (const fd of fds) {
+              try {
+                sys('close', { fd });
+              } catch {}
+            }
+          });
+          return {
+            add(fd: number) {
+              if (fds.has(fd)) warn(`File descriptor ${fd} opened in unmanaged mode twice`);
+              fds.add(fd);
+            },
+            remove(fd: number) {
+              if (!fds.delete(fd)) warn(`File descriptor ${fd} closed but not opened in unmanaged mode`);
+            },
+          };
+        })()
+      : null;
+
+  // a FileHandle moves to another thread of the process as its fd (the fd table is per process)
+  registerHostObject(FileHandle.prototype, {
+    name: 'fs:FileHandle',
+    mode: 1 /* kTransferable */,
+    transfer: (h: FileHandle) => ({ fd: h.releaseFD() }),
+    revive: (d: { fd: number }) => new FileHandle(d.fd),
+  });
+
   Object.assign(b, {
     FSReqCallback,
     FileHandle,
@@ -353,10 +388,21 @@ export function createFs() {
         return false;
       }
     },
-    open: (path: unknown, flags: number, mode: number, req?: unknown) => run(req, 'open', path, undefined, () => sys<number>('open', { p: pathString(path), flags, mode })),
+    open: (path: unknown, flags: number, mode: number, req?: unknown) =>
+      run(req, 'open', path, undefined, () => {
+        const fd = sys<number>('open', { p: pathString(path), flags, mode });
+        unmanaged?.add(fd);
+        return fd;
+      }),
     openFileHandle: (path: unknown, flags: number, mode: number, req?: unknown) =>
       run(req, 'open', path, undefined, () => new FileHandle(sys<number>('open', { p: pathString(path), flags, mode }))),
-    close: (fd: number, req?: unknown) => (validatedFd(fd), run(req, 'close', undefined, undefined, () => void sys('close', { fd }))),
+    close: (fd: number, req?: unknown) => (
+      validatedFd(fd),
+      run(req, 'close', undefined, undefined, () => {
+        unmanaged?.remove(fd);
+        sys('close', { fd });
+      })
+    ),
     read: (fd: number, buffer: Uint8Array, offset: number, length: number, position: unknown, req?: unknown) =>
       validatedFd(fd) >= 0 && req !== undefined && length > 0 && isStreamFd(fd)
         ? runAsync(req, 'read', () =>

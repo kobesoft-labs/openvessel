@@ -20,6 +20,18 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
   const readers = new Map<string, { active: boolean }>(); // `${pid}:${fd}`
   const reservedTids = new Set<number>();
   let nextTid = 100000;
+  const BASE_FDS = 30;
+  const FDS_PER_THREAD = 8;
+  /** Node's threadId: per process, 1, 2, … (the main thread is 0) */
+  const nodeThreadIds = new WeakMap<Proc, number>();
+  /** threads waiting to hear that a thread is gone (MessagePorts whose other end lives there) */
+  const threadWatchers = new Map<string, NodeThread[]>();
+  const threadGone = (proc: Proc, tid: number) => {
+    const key = `${proc.pid}:${tid}`;
+    const ws = threadWatchers.get(key);
+    threadWatchers.delete(key);
+    for (const w of ws ?? []) if (proc.threads.get(w.tid) === w) w.worker.postMessage({ t: 'thread-gone', tid });
+  };
 
   const abs = (proc: Proc, p: string) => {
     if (typeof p !== 'string' || p === '') throw kerr('ENOENT');
@@ -557,11 +569,27 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       case 'threadReserve': {
         const tid = nextTid++;
         reservedTids.add(tid);
-        return tid;
+        if (!a.nodeId) return tid;
+        const threadId = (nodeThreadIds.get(proc) ?? 0) + 1;
+        nodeThreadIds.set(proc, threadId);
+        return { tid, threadId };
+      }
+      case 'watchThread': {
+        // tell the caller when thread a.tid of this process is gone (now, if it already is)
+        if (!proc.threads.has(a.tid)) {
+          thread.worker.postMessage({ t: 'thread-gone', tid: a.tid });
+          return null;
+        }
+        const key = `${proc.pid}:${a.tid}`;
+        const ws = threadWatchers.get(key) ?? [];
+        if (!ws.includes(thread)) ws.push(thread);
+        threadWatchers.set(key, ws);
+        return null;
       }
       case 'threadExit': {
         const t = proc.threads.get(thread.tid);
         proc.threads.delete(thread.tid);
+        threadGone(proc, thread.tid);
         setTimeout(() => t?.worker.terminate(), 0);
         if (t?.parentTid !== undefined) proc.threads.get(t.parentTid)?.worker.postMessage({ t: 'thread-exit', tid: thread.tid, code: a.code ?? 0 });
         return null;
@@ -718,6 +746,12 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       case 'threadSpawn': {
         const tid = msg.tid;
         reservedTids.delete(tid);
+        // a Node thread holds descriptors of its own (its loop's, its ports'): with a small
+        // RLIMIT_NOFILE (ulimit -n) only so many fit, and the next one fails to initialize
+        if (proc.threads.size * FDS_PER_THREAD + BASE_FDS > proc.nofile) {
+          thread.worker.postMessage({ t: 'thread-exit', tid, code: 1, initFailed: 'EMFILE' });
+          return;
+        }
         const t = kernel.startThread(
           proc,
           {
@@ -733,6 +767,11 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
             envData: msg.envData,
             port: msg.port,
             name: msg.name,
+            threadId: msg.threadId,
+            resourceLimits: msg.resourceLimits,
+            envRings: msg.envRings,
+            trackUnmanagedFds: msg.trackUnmanagedFds,
+            sharedEnv: msg.sharedEnv,
           },
           [msg.port, ...(msg.transfer ?? [])],
           thread.tid,
@@ -746,6 +785,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         if (t) {
           t.worker.terminate();
           proc.threads.delete(msg.tid);
+          threadGone(proc, msg.tid);
           thread.worker.postMessage({ t: 'thread-exit', tid: msg.tid, code: 1, terminated: true });
         }
         return;

@@ -92,7 +92,17 @@ export function createProcessMethods() {
       e.code = 'ERR_DLOPEN_FAILED';
       throw e;
     },
-    reallyExit: (code: number) => loop.reallyExit(code),
+    reallyExit(code: number) {
+      // Environment::Exit with --trace-exit
+      if (S.optionValues['--trace-exit']) {
+        const who = S.isMainThread ? `node:${S.init.pid}` : `node:${S.init.pid}, thread:${S.init.threadId ?? S.init.tid}`;
+        const frames = String(new Error().stack ?? '')
+          .split('\n')
+          .filter((l) => /^\s+at /.test(l) && !/\/runtime\/|node-process\.js/.test(l));
+        writeFd(2, `(${who}) WARNING: Exited the environment with code ${code}\n${frames.join('\n')}\n`);
+      }
+      loop.reallyExit(code);
+    },
     execve() {
       const e = new Error('process.execve is not supported in OpenVessel') as Error & { code: string };
       e.code = 'ERR_FEATURE_UNAVAILABLE_ON_PLATFORM';
@@ -100,12 +110,13 @@ export function createProcessMethods() {
     },
     patchProcessObject(process: any) {
       const init = S.init;
-      let title = (init.argv[0] ?? 'node').split('/').pop() || 'node';
+      // process-wide state: --title sets it; a worker thread can't change it (or debugPort)
+      let title = (S.optionValues['--title'] as string) || (init.argv[0] ?? 'node').split('/').pop() || 'node';
       Object.defineProperty(process, 'title', {
         __proto__: null,
         get: () => title,
         set: (v: unknown) => {
-          title = String(v);
+          if (S.isMainThread) title = String(v);
         },
         enumerable: true,
         configurable: true,
@@ -120,7 +131,7 @@ export function createProcessMethods() {
         __proto__: null,
         get: () => debugPort,
         set: (v: number) => {
-          debugPort = v;
+          if (S.isMainThread) debugPort = v;
         },
         enumerable: true,
         configurable: true,
@@ -247,8 +258,28 @@ export function createSymbols() {
   return b;
 }
 
+/** The hooks lib registered with setupHooks (init/before/after/destroy/promise_resolve). */
+let nativeHooks: { init?: (asyncId: number, type: string, triggerAsyncId: number, resource: object) => void } | null = null;
+let asyncWrap: any = null;
+
+/** AsyncWrap::AsyncWrap → EmitAsyncInit for a resource created on the native side (a handle). Returns its async id. */
+export function emitAsyncInit(resource: object, type: string): number {
+  const b = asyncWrap;
+  if (!b) return -1;
+  const C = b.constants;
+  const ids = b.async_id_fields as Float64Array;
+  const id = ++ids[C.kAsyncIdCounter];
+  const def = ids[C.kDefaultTriggerAsyncId];
+  const trigger = def >= 0 ? def : ids[C.kExecutionAsyncId];
+  if ((b.async_hook_fields as Uint32Array)[C.kInit] > 0 && typeof nativeHooks?.init === 'function') {
+    nativeHooks.init(id, type, trigger, resource);
+  }
+  return id;
+}
+
 export function createAsyncWrap() {
   const b = fromShape('async_wrap');
+  asyncWrap = b;
   // like Environment::AsyncHooks: lib keeps the JS array itself (and fills it before calling
   // pushAsyncContext), the native side has its own list for resources pushed from C++
   const resources: unknown[] = [];
@@ -264,7 +295,9 @@ export function createAsyncWrap() {
   ids[C.kAsyncIdCounter] = 1;
   ids[C.kDefaultTriggerAsyncId] = -1;
   return Object.assign(b, {
-    setupHooks: () => {},
+    setupHooks: (hooks: typeof nativeHooks) => {
+      nativeHooks = hooks;
+    },
     setCallbackTrampoline: () => {},
     pushAsyncContext(asyncId: number, triggerId: number, resource: unknown) {
       const f = b.async_hook_fields as Uint32Array;

@@ -321,7 +321,8 @@ export function triggerUncaughtException(err: unknown, fromPromise: boolean) {
   const fe = S.process?._fatalException;
   if (inFatal || typeof fe !== 'function') {
     printFatal(err);
-    reallyExit(7);
+    // kInvalidFatalExceptionMonkeyPatching when process._fatalException was replaced
+    reallyExit(inFatal || !S.process ? 7 : 6);
   }
   inFatal = true;
   let handled = false;

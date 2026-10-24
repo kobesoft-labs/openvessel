@@ -63,6 +63,8 @@ export class Proc {
   env: Record<string, string>;
   cwd: string;
   umask = 0o022;
+  /** RLIMIT_NOFILE (ulimit -n), inherited by children */
+  nofile = 1024;
   fds = new Map<number, OpenFile>();
   tty?: Tty;
   title: string;

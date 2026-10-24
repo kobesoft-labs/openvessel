@@ -204,16 +204,42 @@ function fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> 
 }
 
 let MessageEventClass: any = null;
+let fastInit = false;
 function messageEventClass() {
   if (MessageEventClass) return MessageEventClass;
   const { Event } = lib('internal/event_target');
+  const { inspect } = lib('internal/util/inspect');
+  const MessagePort = S.internalBinding('messaging').MessagePort;
+  const str = (v: unknown) => (v !== null && typeof v === 'object' ? inspect(v) : String(v));
+  const prefix = 'MessageEvent constructor: ';
+  const isPort = (v: unknown) => v instanceof MessagePort;
   MessageEventClass = class MessageEvent extends Event {
     #data: unknown;
     #origin: string;
     #lastEventId: string;
     #source: unknown;
     #ports: readonly unknown[];
-    constructor(type: string, init: { data?: unknown; origin?: string; lastEventId?: string; source?: unknown; ports?: unknown[] } = {}) {
+    constructor(type: string, init: { data?: unknown; origin?: string; lastEventId?: string; source?: unknown; ports?: unknown[] } | null = {}) {
+      if (!fastInit) {
+        // undici's webidl conversion of MessageEventInit
+        if (arguments.length === 0) throw new TypeError(`${prefix}1 argument required, but only 0 present.`);
+        init ??= {};
+        const source = init.source ?? null;
+        if (source !== null && !isPort(source)) throw new TypeError(`${prefix}Expected eventInitDict.source ("${str(source)}") to be an instance of MessagePort.`);
+        let ports: unknown[] = [];
+        if (init.ports !== undefined) {
+          const p = init.ports as any;
+          if (p === null || typeof p[Symbol.iterator] !== 'function') throw new TypeError(`${prefix}eventInitDict.ports (${str(p)}) is not iterable.`);
+          ports = [...p];
+          ports.forEach((x, i) => {
+            if (!isPort(x)) throw new TypeError(`${prefix}Expected eventInitDict.ports[${i}] ("${str(x)}") to be an instance of MessagePort.`);
+          });
+        }
+        const origin = init.origin === undefined ? '' : `${init.origin}`;
+        const lastEventId = init.lastEventId === undefined ? '' : `${init.lastEventId}`;
+        init = { ...init, origin, lastEventId, source, ports };
+      }
+      init ??= {};
       super(type, init);
       this.#data = init.data ?? null;
       this.#origin = init.origin ?? '';
@@ -240,6 +266,17 @@ function messageEventClass() {
   return MessageEventClass;
 }
 
+/** For lib's own events: skips the webidl conversion. */
+function createFastMessageEvent(type: string, init: object) {
+  const C = messageEventClass();
+  fastInit = true;
+  try {
+    return new C(type, init);
+  } finally {
+    fastInit = false;
+  }
+}
+
 Object.defineProperty(g, '__ovUndici', {
   value: {
     fetch,
@@ -252,7 +289,7 @@ Object.defineProperty(g, '__ovUndici', {
     get MessageEvent() {
       return messageEventClass();
     },
-    createFastMessageEvent: (type: string, init: object) => new (messageEventClass())(type, init),
+    createFastMessageEvent,
   },
   configurable: true,
   enumerable: false,
