@@ -151,6 +151,8 @@ async function runOv(tests) {
         await new Promise((r) => setTimeout(r, 2000));
       }
     }
+    // no preview iframe for the tests' servers (its GET would be an extra client)
+    await session.page.evaluate(() => (window.ovNoAutoPreview = true));
     await session.page.evaluate(() => window.ov.network.setPolicy({ mode: 'allow-all' }));
     if (flag('--port')) await session.page.evaluate(() => window.ov.exec('mkdir -p /etc/openvessel && echo port > /etc/openvessel/node'));
     await mount(session.page, files);
@@ -160,15 +162,16 @@ async function runOv(tests) {
   const t0 = Date.now();
   try {
     const queue = [...tests];
-    const worker = async () => {
+    // each worker its own test/.tmp.<id> (test/common/tmpdir.js), so parallel tests don't wipe each other's files
+    const worker = async (_, id) => {
       for (let t; (t = queue.shift()); ) {
         let r;
         try {
           r = await session.page.evaluate(
-            async ({ file, ms }) => {
+            async ({ file, ms, id }) => {
               const ov = window.ov;
               const t0 = performance.now();
-              const p = await ov.spawn('node', [`test/parallel/${file}`], { cwd: '/node' });
+              const p = await ov.spawn('node', [`test/parallel/${file}`], { cwd: '/node', env: { TEST_THREAD_ID: String(id + 1) } });
               let timedOut = false;
               const timer = setTimeout(() => {
                 timedOut = true;
@@ -178,7 +181,7 @@ async function runOv(tests) {
               clearTimeout(timer);
               return { code, timedOut: timedOut || code === -1, out: p.collected.slice(-20000), ms: Math.round(performance.now() - t0) };
             },
-            { file: t.file, ms: PER_TEST_MS },
+            { file: t.file, ms: PER_TEST_MS, id },
             { timeout: PER_TEST_MS + 15000 },
           );
         } catch (e) {
