@@ -4,6 +4,7 @@
 
 import { post, sys } from '../../node/sys.ts';
 import * as loop from '../loop.ts';
+import { shareEnv } from '../env.ts';
 import { workerOptionErrors } from '../options.ts';
 import { S } from '../state.ts';
 import { NodeMessagePort } from './messaging.ts';
@@ -16,8 +17,8 @@ let exitHandlerInstalled = false;
 function installExitHandler() {
   if (exitHandlerInstalled) return;
   exitHandlerInstalled = true;
-  S.kernelHandlers.set('thread-exit', (msg: { tid: number; code: number }) => {
-    workers.get(msg.tid)?._exited(msg.code);
+  S.kernelHandlers.set('thread-exit', (msg: { tid: number; code: number; initFailed?: string }) => {
+    workers.get(msg.tid)?._exited(msg.code, msg.initFailed);
   });
 }
 
@@ -51,7 +52,8 @@ class WorkerImpl extends HandleWrap {
   #tid: number;
   #child: { port: MessagePort; rings: [SharedArrayBuffer, SharedArrayBuffer] };
   #url: string | null;
-  #env: Record<string, string> | null;
+  /** null: a copy of process.env; undefined: SHARE_ENV */
+  #env: Record<string, string> | null | undefined;
   #execArgv: string[] | undefined;
   #limits: Float64Array;
   #trackFds: boolean;
@@ -104,6 +106,7 @@ class WorkerImpl extends HandleWrap {
     this.#running = true;
     this.setActive(true);
     const env = this.#env ?? { ...S.process.env };
+    const sharedEnv = this.#env === undefined ? shareEnv() : undefined;
     post(
       {
         t: 'threadSpawn',
@@ -120,6 +123,7 @@ class WorkerImpl extends HandleWrap {
         name: this.threadName,
         resourceLimits: [...this.#limits],
         trackUnmanagedFds: this.#trackFds,
+        sharedEnv,
       },
       [this.#child.port],
     );
@@ -130,13 +134,14 @@ class WorkerImpl extends HandleWrap {
   }
 
   /** @internal */
-  _exited(code: number) {
+  _exited(code: number, initFailed?: string) {
     if (this.#exited) return;
     this.#exited = true;
     this.#running = false;
     workers.delete(this.#tid);
     this.setActive(false);
-    if (typeof this.onexit === 'function') loop.scope(this.onexit, this, code);
+    // Worker::Run: a thread that couldn't start reports ERR_WORKER_INIT_FAILED with the reason
+    if (typeof this.onexit === 'function') loop.scope(this.onexit, this, code, ...(initFailed ? ['ERR_WORKER_INIT_FAILED', initFailed] : []));
     // the handle closes after the 'exit' event (Worker::OnThreadStopped → Close)
     this.#refAtClose = super.hasRef();
     this.close(() => {

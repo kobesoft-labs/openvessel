@@ -57,7 +57,7 @@ function apply(values: Record<string, unknown>, arg: string, next: string | unde
     }
     if (!info) {
       // V8 flags are passed through to V8 in Node; here they are accepted and ignored
-      if (/^--(max-old-space-size|max-semi-space-size|stack-size|expose-gc|harmony|js-|allow-natives-syntax|max-http-header-size)/.test(name) || name.startsWith('--v8-') || name.startsWith('--no-')) return consumed;
+      if (/^--(max-old-space-size|max-semi-space-size|stack-size|expose-gc|harmony|js-|allow-natives-syntax|max-http-header-size|enable-sharedarraybuffer-per-context)/.test(name) || name.startsWith('--v8-') || name.startsWith('--no-')) return consumed;
       return `bad option: ${arg}`;
     }
     if (fromEnv && info.envVarSettings === proc.envSettings.kDisallowedInEnvvar) return `${name} is not allowed in NODE_OPTIONS`;

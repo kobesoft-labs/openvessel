@@ -9,6 +9,7 @@
 // registered with registerHostObject) are replaced by references into a side list that the
 // receiving side turns back into objects.
 
+import { sys } from '../../node/sys.ts';
 import * as loop from '../loop.ts';
 import { S } from '../state.ts';
 import { fromShape } from './shape.ts';
@@ -29,6 +30,33 @@ const copyArray = <T>(a: readonly T[]): T[] => {
 
 const kToken = Symbol('construct');
 const CLOSE = '__ovMessagePortClosed';
+/** "this end now lives in kernel thread <tid>": the other end asks the kernel to hear when it's gone. */
+const OWNER = '__ovMessagePortOwner';
+
+// A port whose thread is terminated never says goodbye; Node's MessagePortData teardown closes the
+// other end then. Here a port that arrives in a thread tells the other end its thread, and that
+// end closes when the kernel reports the thread gone ('thread-gone').
+const watching = new Map<number, Set<NodeMessagePort>>();
+let goneHandlerInstalled = false;
+function watchThread(tid: number, port: NodeMessagePort) {
+  if (!goneHandlerInstalled) {
+    goneHandlerInstalled = true;
+    S.kernelHandlers.set('thread-gone', (msg: { tid: number }) => {
+      const ports = watching.get(msg.tid);
+      watching.delete(msg.tid);
+      for (const p of ports ?? []) NodeMessagePort.threadGone(p, msg.tid);
+    });
+  }
+  let set = watching.get(tid);
+  if (!set) {
+    set = new Set();
+    watching.set(tid, set);
+  }
+  set.add(port);
+  try {
+    sys('watchThread', { tid });
+  } catch {}
+}
 /** Envelope key: every message between our ports carries a sequence number (0 = not mirrored). */
 const ENV = '__ovMsg';
 /** A reference to entry i of the envelope's host list. */
@@ -158,6 +186,8 @@ interface Envelope {
   h?: HostRec[];
   /** rings of moved ports: [host index, send, recv] */
   r?: [number, SharedArrayBuffer, SharedArrayBuffer][];
+  /** carries KeyObjects (like JS transferables, they only deserialize in the main context) */
+  k?: 1;
 }
 
 /** Reads a transfer list the way GetTransferList/ReadIterable do. */
@@ -446,25 +476,29 @@ function serialize(value: unknown, list: unknown[], source: NodeMessagePort | nu
   }
   const env: Envelope = { [ENV]: 0, d };
   if (h || hasKeys) env.h = h ?? [];
+  if (hasKeys) env.k = 1;
   if (rings) env.r = rings;
   return { env, transfer, ports, arrayBuffers };
 }
 
 /** Message::Deserialize: host objects first, then the value, then [kDeserialize] in order. */
-function deserialize(env: Envelope): { data: unknown; ports: NodeMessagePort[] | undefined } {
+function deserialize(env: Envelope, foreign = false): { data: unknown; ports: object[] | undefined } {
   const h = env.h;
   if (!h) return { data: env.d, ports: undefined };
   const S_ = S.perIsolateSymbols;
   const objs: object[] = [];
-  const ports: NodeMessagePort[] = [];
+  const ports: object[] = [];
   for (let i = 0; i < h.length; i++) {
     const rec = h[i];
     if (rec.k === 'port') {
       const p = NodeMessagePort.wrap(rec.p);
+      NodeMessagePort.announce(p);
       const r = env.r?.find((x) => x[0] === i);
       if (r) NodeMessagePort.adoptRings(p, r[1], r[2]);
-      objs.push(p);
-      ports.push(p);
+      // ports that arrive in a vm context belong to it too
+      const o = foreign ? NodeMessagePort.moveToContext(p) : p;
+      objs.push(o);
+      ports.push(o);
     } else if (rec.k === 'b') {
       objs.push(hostSpec(rec.name).revive(rec.data));
     } else {
@@ -554,6 +588,9 @@ export class NodeMessagePort {
   #inflight = 0;
   #asyncId = -1;
   #ready = false;
+  /** the kernel thread the other end lives in, once it said so */
+  #peerTid = -1;
+  #facade: object | null = null;
   /** moved to a vm context (moveMessagePortToContext) */
   #foreign = false;
 
@@ -564,6 +601,8 @@ export class NodeMessagePort {
       wrappers.set(native, this);
       native.onmessage = (e: MessageEvent) => this.#onNative(e);
       native.onmessageerror = () => this.#emitError(dataCloneError('Message could not be deserialized'));
+      // the other end went away without a close message (its thread was terminated)
+      native.addEventListener('close', () => this.#peerClosed());
     } else if (bcName !== undefined) {
       this.#bc = bcName;
       let g = bcGroups.get(bcName);
@@ -614,8 +653,20 @@ export class NodeMessagePort {
     return [a, b];
   }
 
-  static moveToContext(p: NodeMessagePort) {
-    p.#foreign = true;
+  /** moveMessagePortToContext: the port as an object of the vm context — not an EventTarget, not
+   *  even an Object of this realm; messages go to its onmessage/onmessageerror like C++ ports of a
+   *  context without Node's lib. */
+  static moveToContext(p: NodeMessagePort): object {
+    if (!p.#facade) {
+      p.#foreign = true;
+      const f = Object.create(facadeProto());
+      facadePorts.set(f, p);
+      p.#facade = f;
+      // no lib oninit in that context: the handle stays ref'd
+      p.#handle.refed = true;
+      loop.scheduleAliveCheck();
+    }
+    return p.#facade!;
   }
 
   /** The parent side of a worker thread's env port, the native end for the thread and the rings it adopts. */
@@ -627,6 +678,15 @@ export class NodeMessagePort {
     port.#sendRing = toChild;
     port.#recvRing = toParent;
     return { port, child: ch.port2, rings: [toParent.sab, toChild.sab] };
+  }
+
+  /** Tells the other end which thread this end lives in now. */
+  static announce(p: NodeMessagePort) {
+    if (!p.#closing && p.#port && S.init) p.#port.postMessage({ [OWNER]: S.init.tid });
+  }
+
+  static threadGone(p: NodeMessagePort, tid: number) {
+    if (p.#peerTid === tid) p.#peerClosed();
   }
 
   static isDetached(p: NodeMessagePort) {
@@ -648,6 +708,11 @@ export class NodeMessagePort {
     const d = e.data;
     if (d && typeof d === 'object' && d[CLOSE] === true) {
       this.#peerClosed();
+      return;
+    }
+    if (d && typeof d === 'object' && typeof d[OWNER] === 'number') {
+      this.#peerTid = d[OWNER];
+      watchThread(d[OWNER], this);
       return;
     }
     if (this.#inflight > 0) this.#inflight--;
@@ -704,23 +769,23 @@ export class NodeMessagePort {
   }
 
   #emit(env: Envelope) {
-    let msg: { data: unknown; ports: NodeMessagePort[] | undefined };
-    if (this.#foreign && env.h?.some((r) => r.k === 'js')) {
+    let msg: { data: unknown; ports: object[] | undefined };
+    if (this.#foreign && (env.k || env.h?.some((r) => r.k === 'js'))) {
       // JSTransferable::Data::Deserialize only works in the main context
       this.#emitError(nodeError(Error, 'ERR_MESSAGE_TARGET_CONTEXT_UNAVAILABLE', 'A message object could not be deserialized successfully in the target vm.Context'));
       return;
     }
     try {
-      msg = deserialize(env);
+      msg = deserialize(env, this.#foreign);
     } catch (e) {
       this.#emitError(e);
       return;
     }
-    loop.scope(S.perContextExports.emitMessage, this, msg.data, msg.ports, 'message');
+    loop.scope(S.perContextExports.emitMessage, this.#facade ?? this, msg.data, msg.ports, 'message');
   }
 
   #emitError(err: unknown) {
-    loop.scope(S.perContextExports.emitMessage, this, err, undefined, 'messageerror');
+    loop.scope(S.perContextExports.emitMessage, this.#facade ?? this, err, undefined, 'messageerror');
   }
 
   /** Discards ring records up to seq (they were delivered asynchronously). */
@@ -889,6 +954,7 @@ export class NodeMessagePort {
   #shutdown() {
     if (this.#shut) return;
     this.#shut = true;
+    this.#peerTid = -1;
     this.#closeWhenDrained = false;
     this.#queue = [];
     this.#handle.active = false;
@@ -946,6 +1012,33 @@ export class NodeMessagePort {
   }
 }
 
+const facadePorts = new WeakMap<object, NodeMessagePort>();
+let facadeProtoObj: object | null = null;
+/** The prototype of a port moved to a vm context: the C++ template's methods, on a null chain. */
+function facadeProto(): object {
+  if (facadeProtoObj) return facadeProtoObj;
+  const portOf = (f: unknown) => {
+    const p = facadePorts.get(f as object);
+    if (!p) throw nodeError(TypeError, 'ERR_INVALID_THIS', 'Value of "this" must be of type MessagePort');
+    return p;
+  };
+  const proto = Object.create(null);
+  const ctor = function MessagePort() {
+    throw nodeError(TypeError, 'ERR_CONSTRUCT_CALL_INVALID', 'Constructor cannot be called');
+  };
+  ctor.prototype = proto;
+  Object.defineProperties(proto, {
+    constructor: { value: ctor, writable: true, configurable: true },
+    postMessage: { value: function postMessage(this: unknown, v: unknown, t?: unknown) { return portOf(this).postMessage(v, t); }, writable: true, configurable: true },
+    start: { value: function start(this: unknown) { portOf(this).start(); }, writable: true, configurable: true },
+    close: { value: function close(this: unknown) { portOf(this).close(); }, writable: true, configurable: true },
+    ref: { value: function ref(this: unknown) { portOf(this).ref(); }, writable: true, configurable: true },
+    unref: { value: function unref(this: unknown) { portOf(this).unref(); }, writable: true, configurable: true },
+    hasRef: { value: function hasRef(this: unknown) { return portOf(this).hasRef(); }, writable: true, configurable: true },
+  });
+  return (facadeProtoObj = proto);
+}
+
 /** The public constructor: like a C++ FunctionTemplate, it can't be called from JS at all. */
 const MessagePort = function MessagePort() {
   throw nodeError(TypeError, 'ERR_CONSTRUCT_CALL_INVALID', 'Constructor cannot be called');
@@ -979,8 +1072,7 @@ export function createMessaging() {
       moveMessagePortToContext(port: NodeMessagePort) {
         if (!(port instanceof NodeMessagePort)) throw nodeError(TypeError, 'ERR_INVALID_ARG_TYPE', 'The "port" argument must be a MessagePort instance');
         if (NodeMessagePort.isDetached(port)) throw nodeError(Error, 'ERR_CLOSED_MESSAGE_PORT', 'Cannot send data on closed MessagePort');
-        NodeMessagePort.moveToContext(port);
-        return port;
+        return NodeMessagePort.moveToContext(port);
       },
       setDeserializerCreateObjectFunction(fn: (info: string) => object) {
         createObject = fn;

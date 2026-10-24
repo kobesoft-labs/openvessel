@@ -27,7 +27,7 @@ export function bufferSourceBytes(v: unknown): Uint8Array | null {
 
 /** TextDecoder rejects views on a SharedArrayBuffer in some browsers; copy those. */
 export function decodable(b: Uint8Array): Uint8Array {
-  return typeof SharedArrayBuffer === 'function' && b.buffer instanceof SharedArrayBuffer ? b.slice() : b;
+  return Object.prototype.toString.call(b.buffer) === '[object SharedArrayBuffer]' ? new Uint8Array(b) : b;
 }
 
 // -----------------------------------------------------------------------------

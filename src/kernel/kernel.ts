@@ -185,6 +185,7 @@ export class Kernel {
     const pgid = opts.pgid === 0 ? pid : (opts.pgid ?? parent?.pgid ?? pid);
     const proc = new Proc({ pid, ppid: opts.ppid ?? 0, pgid, argv: plan.argv, env, cwd });
     proc.tty = opts.tty ?? parent?.tty;
+    if (parent) proc.nofile = parent.nofile;
     const stdio = opts.stdio ?? [];
     for (let i = 0; i < stdio.length; i++) {
       const f = stdio[i];

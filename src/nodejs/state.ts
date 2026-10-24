@@ -26,6 +26,8 @@ export interface InitMsg {
   /** rings of the env port for receiveMessageOnPort/drain: [send, recv] from the thread's side */
   envRings?: [SharedArrayBuffer, SharedArrayBuffer];
   trackUnmanagedFds?: boolean;
+  /** SHARE_ENV: process.env in shared memory (env.ts) */
+  sharedEnv?: SharedArrayBuffer;
   /** maxYoungGenerationSizeMb, maxOldGenerationSizeMb, codeRangeSizeMb, stackSizeMb */
   resourceLimits?: number[];
 }

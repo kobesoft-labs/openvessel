@@ -11,6 +11,7 @@ import { lineOneOffset } from './bindings/contextify.ts';
 import { moduleUrlForServed } from './bindings/module_wrap.ts';
 import { fromShape } from './bindings/shape.ts';
 import * as loop from './loop.ts';
+import { createEnvProxy } from './env.ts';
 import { parseCommandLine } from './options.ts';
 import { S, type InitMsg } from './state.ts';
 import './typescript.ts';
@@ -132,35 +133,6 @@ loop.setFatalPrinter((err: unknown) => {
 // -----------------------------------------------------------------------------
 // process object (node_process_object.cc)
 
-function createEnvProxy(initial: Record<string, string>) {
-  const store: Record<string, string> = Object.create(null);
-  for (const [k, v] of Object.entries(initial)) store[k] = String(v);
-  return new Proxy(store, {
-    set(t, k, v) {
-      if (typeof k === 'symbol') {
-        const e = new TypeError('Cannot convert a Symbol value to a string');
-        throw e;
-      }
-      t[k] = String(v);
-      return true;
-    },
-    defineProperty(t, k, d) {
-      if (typeof k === 'symbol') return false;
-      if ('get' in d || 'set' in d || d.configurable !== true || d.writable !== true || d.enumerable !== true) {
-        const e = new TypeError(`'process.env' only accepts a configurable, writable, and enumerable data descriptor`) as TypeError & { code: string };
-        e.code = 'ERR_INVALID_OBJECT_DEFINE_PROPERTY';
-        throw e;
-      }
-      t[k] = String(d.value);
-      return true;
-    },
-    deleteProperty(t, k) {
-      if (typeof k === 'string') delete t[k];
-      return true;
-    },
-  });
-}
-
 function createProcessObject(init: InitMsg) {
   function process() {}
   const proc: any = Object.create(process.prototype);
@@ -170,7 +142,7 @@ function createProcessObject(init: InitMsg) {
   proc.platform = 'linux';
   proc.release = { ...nodeData.release };
   proc._rawDebug = (...a: unknown[]) => writeFd(2, a.join(' ') + '\n');
-  proc.env = createEnvProxy(init.env);
+  proc.env = createEnvProxy(init.env, init.sharedEnv);
   proc[S.privateSymbols.exit_info_private_symbol] = new Int32Array(3);
   return proc;
 }
