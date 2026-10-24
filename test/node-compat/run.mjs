@@ -137,6 +137,15 @@ async function runOv(tests) {
   const files = [['package.json', join(nodeRoot, 'package.json')], ...collect(join(nodeRoot, 'test/common'), nodeRoot, []), ...collect(join(nodeRoot, 'test/fixtures'), nodeRoot, []), ...tests.map((t) => [`test/parallel/${t.file}`, join(parallel, t.file)])];
   const srv = await startServer();
   let session;
+  // a crashed browser takes down every test running in it: one relaunch for all of them
+  let generation = 0;
+  let booting = null;
+  const reboot = (gen) => {
+    if (gen !== generation) return booting ?? Promise.resolve();
+    generation++;
+    booting = boot().finally(() => (booting = null));
+    return booting;
+  };
   const boot = async () => {
     try {
       await session?.browser.close();
@@ -159,11 +168,16 @@ async function runOv(tests) {
   let done = 0;
   const t0 = Date.now();
   try {
-    const queue = [...tests];
+    // documented limits last: some of them (out-of-memory) crash the browser
+    const limits = loadLimits();
+    const queue = [...tests.filter((t) => !limits[t.file]), ...tests.filter((t) => limits[t.file])];
+    const crashed = new Set();
     // each worker gets its own tmpdir (test/common/tmpdir.js: .tmp.<TEST_THREAD_ID>), as Node's test runner does
     const worker = async (_, id) => {
       for (let t; (t = queue.shift()); ) {
         let r;
+        if (booting) await booting;
+        const gen = generation;
         try {
           r = await session.page.evaluate(
             async ({ file, ms, id }) => {
@@ -184,7 +198,13 @@ async function runOv(tests) {
           );
         } catch (e) {
           r = { code: -2, timedOut: true, out: `harness: ${e.message}`, ms: PER_TEST_MS };
-          await boot();
+          await reboot(gen);
+          // the crash may have been another test's: run this one again (once)
+          if (!crashed.has(t.file)) {
+            crashed.add(t.file);
+            queue.push(t);
+            continue;
+          }
         }
         const skipped = /^1\.\.0 # Skipped/m.test(r.out);
         res[t.file] = { mod: t.mod, pass: r.code === 0 && !skipped, skipped, code: r.code, timedOut: r.timedOut, ms: r.ms, error: r.code === 0 ? '' : r.timedOut ? 'TIMEOUT' : firstError(r.out) };
