@@ -1,6 +1,6 @@
 # OpenVessel
 
-[English](README.md)
+[English](README.md) · **[デモ](https://kobesoft-labs.github.io/openvessel-demo/)** — Node.js がタブの中で動き、Astro のサイトをその場で編集できます
 
 ## OpenVessel とは
 

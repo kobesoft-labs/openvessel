@@ -1,6 +1,6 @@
 # OpenVessel
 
-[日本語](README.ja.md)
+[日本語](README.ja.md) · **[Live demo](https://kobesoft-labs.github.io/openvessel-demo/)** — edit an Astro site with Node.js running in the tab
 
 ## What is OpenVessel?
 
