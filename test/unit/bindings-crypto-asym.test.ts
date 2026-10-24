@@ -446,5 +446,5 @@ test('createNativeKeyObjectClass', () => {
   h.init(0, Buffer.from('k'));
   assert.ok(new KeyObject(h));
   assert.throws(() => new KeyObject({}));
-  assert.deepEqual(b.getCurves(), ['secp256k1', 'secp384r1', 'secp521r1', 'prime256v1']);
+  assert.deepEqual(b.getCurves(), ['secp224r1', 'secp256k1', 'secp384r1', 'secp521r1', 'prime256v1']);
 });

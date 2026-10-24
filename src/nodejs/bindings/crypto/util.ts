@@ -44,6 +44,7 @@ const DEFAULTS: Record<string, [ErrCtor, string]> = {
   ERR_INVALID_ARG_TYPE: [TypeError, 'Invalid argument type'],
   ERR_INVALID_ARG_VALUE: [TypeError, 'Invalid argument value'],
   ERR_MISSING_ARGS: [TypeError, 'Missing arguments'],
+  ERR_MISSING_PASSPHRASE: [TypeError, 'Passphrase required for encrypted key'],
   ERR_OUT_OF_RANGE: [RangeError, 'Out of range'],
   ERR_OSSL_EVP_INVALID_DIGEST: [Error, 'Invalid digest used'],
 };
@@ -129,7 +130,19 @@ const nativeGetRandomValues: (u: Uint8Array) => unknown = globalThis.crypto.getR
 
 /** ncrypto::CSPRNG */
 export function fillRandom(u: Uint8Array) {
-  for (let i = 0; i < u.length; i += 65536) nativeGetRandomValues(u.subarray(i, Math.min(u.length, i + 65536)));
+  // the browser refuses views of a SharedArrayBuffer: fill a private chunk and copy it over
+  const shared = !(u.buffer instanceof ArrayBuffer);
+  const tmp = shared ? new Uint8Array(Math.min(u.length, 65536)) : null;
+  for (let i = 0; i < u.length; i += 65536) {
+    const part = u.subarray(i, Math.min(u.length, i + 65536));
+    if (!tmp) {
+      nativeGetRandomValues(part);
+      continue;
+    }
+    const t = tmp.subarray(0, part.length);
+    nativeGetRandomValues(t);
+    part.set(t);
+  }
 }
 
 // -----------------------------------------------------------------------------

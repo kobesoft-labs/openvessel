@@ -3,13 +3,16 @@
 
 import { p256, p384, p521 } from '@noble/curves/nist.js';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
+import { ecdsa, weierstrass } from '@noble/curves/abstract/weierstrass.js';
+import { sha224 } from '@noble/hashes/sha2.js';
 import { ed25519, x25519 } from '@noble/curves/ed25519.js';
 import { ed448, x448 } from '@noble/curves/ed448.js';
 import { Enc, decode, encode } from '../buffer.ts';
 import * as der from './asn1.ts';
 import { ALGOS, getDigest, pbkdf2, type DigestAlgo } from './digests.ts';
-import { bigIntToBytes, bitLength, bytesToBigInt } from './random.ts';
+import { bigIntToBytes, bitLength, bytesToBigInt, modPow } from './random.ts';
 import { completeRsa, digestOid, type RsaKey } from './rsa.ts';
+import { dhFromPrivate, type DhKey, type DsaKey } from './dsa.ts';
 import { md5 } from '@noble/hashes/legacy.js';
 import { CipherBase, findCipher } from './cipher.ts';
 import { concat, cryptoError, err, fillRandom, osslError } from './util.ts';
@@ -26,9 +29,26 @@ export interface Curve {
   impl: typeof p256;
   /** field element bytes */
   size: number;
+  /** no JWK "crv" for this curve (ExportJWKEcKey) */
+  noJwk?: boolean;
 }
 
+// secp224r1 (P-224) is not in @noble/curves' presets
+const p224 = ecdsa(
+  weierstrass({
+    p: BigInt('0xffffffffffffffffffffffffffffffff000000000000000000000001'),
+    a: BigInt('0xfffffffffffffffffffffffffffffffefffffffffffffffffffffffe'),
+    b: BigInt('0xb4050a850c04b3abf54132565044b0b7d7bfd8ba270b39432355ffb4'),
+    Gx: BigInt('0xb70e0cbd6bb4bf7f321390b94a03c1d356c21122343280d6115c1d21'),
+    Gy: BigInt('0xbd376388b5f723fb4c22dfe6cd4375a05a07476444d5819985007e34'),
+    n: BigInt('0xffffffffffffffffffffffffffff16a2e0b8f03e13dd29455c5c2a3d'),
+    h: 1n,
+  }),
+  sha224,
+);
+
 export const CURVES: Curve[] = [
+  { name: 'secp224r1', oid: '1.3.132.0.33', jwk: 'P-224', impl: p224 as unknown as typeof p256, size: 28, noJwk: true },
   { name: 'prime256v1', oid: '1.2.840.10045.3.1.7', jwk: 'P-256', impl: p256, size: 32 },
   { name: 'secp384r1', oid: '1.3.132.0.34', jwk: 'P-384', impl: p384, size: 48 },
   { name: 'secp521r1', oid: '1.3.132.0.35', jwk: 'P-521', impl: p521, size: 66 },
@@ -66,16 +86,28 @@ export interface PssParams {
 export type Asym =
   | { kind: 'rsa'; rsa: RsaKey }
   | { kind: 'rsa-pss'; rsa: RsaKey; pss: PssParams | null }
-  | { kind: 'ec'; curve: Curve; pub: Uint8Array; d?: bigint }
+  | { kind: 'ec'; curve: Curve; pub: Uint8Array; d?: bigint; explicit?: boolean }
+  | { kind: 'dsa'; dsa: DsaKey }
+  | { kind: 'dh'; dh: DhKey }
   | { kind: OkpKind; pub: Uint8Array; priv?: Uint8Array };
 
-export const hasPrivate = (a: Asym) => ('rsa' in a ? a.rsa.d !== undefined : 'curve' in a ? a.d !== undefined : (a as any).priv !== undefined);
+export function hasPrivate(a: Asym): boolean {
+  if ('rsa' in a) return a.rsa.d !== undefined;
+  if (a.kind === 'ec') return a.d !== undefined;
+  if (a.kind === 'dsa') return a.dsa.x !== undefined;
+  if (a.kind === 'dh') return a.dh.x !== undefined;
+  return (a as any).priv !== undefined;
+}
 
 const OID = {
   rsa: '1.2.840.113549.1.1.1',
   rsaPss: '1.2.840.113549.1.1.10',
   mgf1: '1.2.840.113549.1.1.8',
   ec: '1.2.840.10045.2.1',
+  primeField: '1.2.840.10045.1.1',
+  dsa: '1.2.840.10040.4.1',
+  dh: '1.2.840.113549.1.3.1',
+  dhx: '1.2.840.10046.2.1',
   pbes2: '1.2.840.113549.1.5.13',
   pbkdf2: '1.2.840.113549.1.5.12',
   hmacWithSHA1: '1.2.840.113549.2.7',
@@ -89,7 +121,17 @@ const PBE_CIPHERS: Record<string, string> = {
   '2.16.840.1.101.3.4.1.2': 'aes-128-cbc',
   '2.16.840.1.101.3.4.1.22': 'aes-192-cbc',
   '2.16.840.1.101.3.4.1.42': 'aes-256-cbc',
+  '2.16.840.1.101.3.4.1.1': 'aes-128-ecb',
+  '2.16.840.1.101.3.4.1.21': 'aes-192-ecb',
+  '2.16.840.1.101.3.4.1.41': 'aes-256-ecb',
+  '2.16.840.1.101.3.4.1.3': 'aes-128-ofb',
+  '2.16.840.1.101.3.4.1.23': 'aes-192-ofb',
+  '2.16.840.1.101.3.4.1.43': 'aes-256-ofb',
+  '2.16.840.1.101.3.4.1.4': 'aes-128-cfb',
+  '2.16.840.1.101.3.4.1.24': 'aes-192-cfb',
+  '2.16.840.1.101.3.4.1.44': 'aes-256-cfb',
   '1.2.840.113549.3.7': 'des-ede3-cbc',
+  '1.3.14.3.2.7': 'des-cbc',
 };
 
 // -----------------------------------------------------------------------------
@@ -162,7 +204,13 @@ function algId(a: Asym): Uint8Array {
     case 'rsa-pss':
       return a.pss ? der.seq(der.oid(OID.rsaPss), pssParamsDer(a.pss)) : der.seq(der.oid(OID.rsaPss));
     case 'ec':
-      return der.seq(der.oid(OID.ec), der.oid(a.curve.oid));
+      return der.seq(der.oid(OID.ec), a.explicit ? ecParamsDer(a.curve) : der.oid(a.curve.oid));
+    case 'dsa':
+      return der.seq(der.oid(OID.dsa), der.seq(der.int(a.dsa.p), der.int(a.dsa.q), der.int(a.dsa.g)));
+    case 'dh':
+      return a.dh.q !== undefined
+        ? der.seq(der.oid(OID.dhx), der.seq(der.int(a.dh.p), der.int(a.dh.g), der.int(a.dh.q)))
+        : der.seq(der.oid(OID.dh), der.seq(der.int(a.dh.p), der.int(a.dh.g)));
     default:
       return der.seq(der.oid(OKP[a.kind].oid));
   }
@@ -176,9 +224,44 @@ export function rsaPrivateDer(k: RsaKey) {
   return der.seq(der.int(0), der.int(k.n), der.int(k.e), der.int(k.d!), der.int(k.p!), der.int(k.q!), der.int(k.dp!), der.int(k.dq!), der.int(k.qi!));
 }
 
+/** ECParameters (RFC 3279) for paramEncoding 'explicit': prime field, a, b, base point, order, cofactor. */
+function ecParamsDer(curve: Curve): Uint8Array {
+  const c = curve.impl.Point.CURVE();
+  const fe = (n: bigint) => der.octets(bigBytes(n, curve.size));
+  const base = curve.impl.Point.BASE.toBytes(false);
+  return der.seq(der.int(1), der.seq(der.oid(OID.primeField), der.int(c.p)), der.seq(fe(c.a), fe(c.b)), der.octets(base), der.int(c.n), der.int(c.h ?? 1n));
+}
+
+/** The named curve whose parameters an explicit ECParameters spells out. */
+function curveFromParams(n: der.Node): Curve | undefined {
+  const [, field, curveSeq, base, order] = der.children(der.expect(n, 0x30));
+  const [fieldOid, prime] = der.children(der.expect(field, 0x30));
+  if (der.readOid(fieldOid) !== OID.primeField) return undefined;
+  const p = der.readInt(prime);
+  const [a, b] = der.children(der.expect(curveSeq, 0x30)).map((x) => bytesToBigInt(der.expect(x, 0x04).body));
+  const nOrder = der.readInt(order);
+  const g = der.expect(base, 0x04).body;
+  return CURVES.find((cv) => {
+    const c = cv.impl.Point.CURVE();
+    if (c.p !== p || c.a !== a || c.b !== b || c.n !== nOrder) return false;
+    try {
+      return cv.impl.Point.fromBytes(hybridToUncompressed(g)).equals(cv.impl.Point.BASE);
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** The curve named or spelled out by ECParameters / ECPKParameters. */
+function curveOfParams(params: der.Node | undefined): { curve?: Curve; explicit: boolean } {
+  if (params?.tag === 0x06) return { curve: curveByName(der.readOid(params)), explicit: false };
+  if (params?.tag === 0x30) return { curve: curveFromParams(params), explicit: true };
+  return { explicit: false };
+}
+
 function ecPrivateDer(a: Extract<Asym, { kind: 'ec' }>, withParams: boolean) {
   const parts = [der.int(1), der.octets(bigBytes(a.d!, Math.ceil(bitLength(curveOrder(a.curve)) / 8)))];
-  if (withParams) parts.push(der.ctx(0, der.oid(a.curve.oid)));
+  if (withParams) parts.push(der.ctx(0, a.explicit ? ecParamsDer(a.curve) : der.oid(a.curve.oid)));
   parts.push(der.ctx(1, der.bitString(a.pub)));
   return der.seq(...parts);
 }
@@ -186,6 +269,8 @@ function ecPrivateDer(a: Extract<Asym, { kind: 'ec' }>, withParams: boolean) {
 export function spki(a: Asym): Uint8Array {
   let key: Uint8Array;
   if ('rsa' in a) key = rsaPublicDer(a.rsa);
+  else if (a.kind === 'dsa') key = der.int(a.dsa.y);
+  else if (a.kind === 'dh') key = der.int(a.dh.y);
   else key = a.pub;
   return der.seq(algId(a), der.bitString(key));
 }
@@ -194,6 +279,8 @@ export function pkcs8(a: Asym): Uint8Array {
   let inner: Uint8Array;
   if ('rsa' in a) inner = rsaPrivateDer(a.rsa);
   else if (a.kind === 'ec') inner = ecPrivateDer(a, false);
+  else if (a.kind === 'dsa') inner = der.int(a.dsa.x!);
+  else if (a.kind === 'dh') inner = der.int(a.dh.x!);
   else inner = der.octets((a as any).priv);
   return der.seq(der.int(0), algId(a), der.octets(inner));
 }
@@ -246,15 +333,39 @@ export function isRsaPrivateDer(b: Uint8Array): boolean {
   }
 }
 
-function readEcPrivate(b: Uint8Array, curve?: Curve): Asym {
+function readEcPrivate(b: Uint8Array, curve?: Curve, explicit = false): Asym {
   const parts = der.children(der.expect(der.parse(b), 0x30));
   const d = bytesToBigInt(der.expect(parts[1], 0x04).body);
   for (const p of parts.slice(2)) {
-    if (p.tag === 0xa0) curve = curveByName(der.readOid(der.read(p.body)));
+    if (p.tag === 0xa0) ({ curve, explicit } = curveOfParams(der.read(p.body)));
   }
   if (!curve) throw keyErr.unsupported();
-  return ecFromPrivate(curve, d);
+  const a = ecFromPrivate(curve, d) as Extract<Asym, { kind: 'ec' }>;
+  if (explicit) a.explicit = true;
+  return a;
 }
+
+function dsaParams(params: der.Node | undefined) {
+  const [p, q, g] = der.children(der.expect(params, 0x30)).map((x) => der.readInt(x));
+  if (g === undefined) throw keyErr.unsupported();
+  return { p, q, g };
+}
+
+function dhParams(oid: string, params: der.Node | undefined): { p: bigint; g: bigint; q?: bigint } {
+  const f = der.children(der.expect(params, 0x30)).map((x) => (x.tag === 0x02 ? der.readInt(x) : undefined));
+  if (f[0] === undefined || f[1] === undefined) throw keyErr.unsupported();
+  // PKCS#3: p, g[, privateValueLength]; X9.42: p, g, q, ...
+  return oid === OID.dhx ? { p: f[0], g: f[1], q: f[2] } : { p: f[0], g: f[1] };
+}
+
+/** Traditional "DSA PRIVATE KEY": SEQUENCE { 0, p, q, g, y, x } */
+function readDsaPrivate(b: Uint8Array): Asym {
+  const f = der.children(der.expect(der.parse(b), 0x30)).map((x) => der.readInt(x));
+  if (f.length < 6) throw new der.DerError('short');
+  const [, p, q, g, y, x] = f;
+  return { kind: 'dsa', dsa: { p, q, g, y, x } };
+}
+
 
 function algorithm(alg: der.Node): { oid: string; params?: der.Node } {
   const [o, params] = der.children(der.expect(alg, 0x30));
@@ -268,11 +379,15 @@ export function readSpki(b: Uint8Array): Asym {
   if (oid === OID.rsa) return { kind: 'rsa', rsa: readRsaPublic(key) };
   if (oid === OID.rsaPss) return { kind: 'rsa-pss', rsa: readRsaPublic(key), pss: readPssParams(params) };
   if (oid === OID.ec) {
-    const curve = params && params.tag === 0x06 ? curveByName(der.readOid(params)) : undefined;
+    const { curve, explicit } = curveOfParams(params);
     if (!curve) throw keyErr.unsupported();
     ecPoint(curve, key);
-    return { kind: 'ec', curve, pub: curve.impl.Point.fromBytes(hybridToUncompressed(key)).toBytes(false) };
+    const a: Asym = { kind: 'ec', curve, pub: curve.impl.Point.fromBytes(hybridToUncompressed(key)).toBytes(false) };
+    if (explicit) a.explicit = true;
+    return a;
   }
+  if (oid === OID.dsa) return { kind: 'dsa', dsa: { ...dsaParams(params), y: der.readInt(der.parse(key)) } };
+  if (oid === OID.dh || oid === OID.dhx) return { kind: 'dh', dh: { ...dhParams(oid, params), y: der.readInt(der.parse(key)) } };
   for (const info of Object.values(OKP)) {
     if (info.oid === oid) {
       if (key.length !== info.len) throw keyErr.unsupported();
@@ -289,8 +404,17 @@ export function readPkcs8(b: Uint8Array): Asym {
   if (oid === OID.rsa) return { kind: 'rsa', rsa: readRsaPrivate(inner) };
   if (oid === OID.rsaPss) return { kind: 'rsa-pss', rsa: readRsaPrivate(inner), pss: readPssParams(params) };
   if (oid === OID.ec) {
-    const curve = params && params.tag === 0x06 ? curveByName(der.readOid(params)) : undefined;
-    return readEcPrivate(inner, curve);
+    const { curve, explicit } = curveOfParams(params);
+    return readEcPrivate(inner, curve, explicit);
+  }
+  if (oid === OID.dsa) {
+    const { p, q, g } = dsaParams(params);
+    const x = der.readInt(der.parse(inner));
+    return { kind: 'dsa', dsa: { p, q, g, y: modPow(g, x, p), x } };
+  }
+  if (oid === OID.dh || oid === OID.dhx) {
+    const { p, g, q } = dhParams(oid, params);
+    return { kind: 'dh', dh: dhFromPrivate(p, g, der.readInt(der.parse(inner)), q) };
   }
   for (const info of Object.values(OKP)) {
     if (info.oid === oid) {
@@ -345,8 +469,9 @@ function decryptPkcs8(b: Uint8Array, pass: Uint8Array): Uint8Array {
   }
   const encAlg = algorithm(enc);
   const cipher = PBE_CIPHERS[encAlg.oid];
-  if (!cipher || !encAlg.params) throw keyErr.unsupported();
-  const iv = der.expect(encAlg.params, 0x04).body;
+  if (!cipher) throw keyErr.unsupported();
+  const ivLength = findCipher(cipher)!.ivLength ?? 0;
+  const iv = ivLength ? der.expect(encAlg.params, 0x04).body : new Uint8Array(0);
   const keyLen = findCipher(cipher)!.keyLength;
   const key = pbkdf2(prf, pass, salt, iter, keyLen);
   return runCipher(cipher, false, key, iv, der.expect(data, 0x04).body);
@@ -364,7 +489,7 @@ function encryptPkcs8(plain: Uint8Array, cipher: string, pass: Uint8Array): Uint
   const key = pbkdf2(getDigest('sha256')!, pass, salt, iter, info.keyLength);
   const ct = runCipher(info.name, true, key, iv, plain);
   const kdf = der.seq(der.oid(OID.pbkdf2), der.seq(der.octets(salt), der.int(iter), der.seq(der.oid(OID.hmacWithSHA256), der.nul())));
-  const enc = der.seq(der.oid(oid), der.octets(iv));
+  const enc = iv.length ? der.seq(der.oid(oid), der.octets(iv)) : der.seq(der.oid(oid));
   return der.seq(der.seq(der.oid(OID.pbes2), der.seq(kdf, enc)), der.octets(ct));
 }
 
@@ -417,14 +542,14 @@ function privateFromDer(b: Uint8Array, type: number | undefined, pass: Uint8Arra
   return wrapDecode(() => {
     const top = der.children(der.expect(der.parse(b), 0x30));
     if (top.length === 2 && top[0].tag === 0x30) {
-      if (!pass) throw keyErr.interrupted();
+      if (!pass) throw err('ERR_MISSING_PASSPHRASE', 'Passphrase required for encrypted key');
       return readPkcs8(decryptPkcs8(b, pass));
     }
     return readPkcs8(b);
   }, keyErr.fieldMissing);
 }
 
-const PRIVATE_LABELS = ['PRIVATE KEY', 'ENCRYPTED PRIVATE KEY', 'RSA PRIVATE KEY', 'EC PRIVATE KEY'];
+const PRIVATE_LABELS = ['PRIVATE KEY', 'ENCRYPTED PRIVATE KEY', 'RSA PRIVATE KEY', 'EC PRIVATE KEY', 'DSA PRIVATE KEY'];
 const PUBLIC_LABELS = ['PUBLIC KEY', 'RSA PUBLIC KEY', 'CERTIFICATE'];
 
 function privateFromPem(text: string, pass: Uint8Array | undefined): Asym {
@@ -442,6 +567,8 @@ function privateFromPem(text: string, pass: Uint8Array | undefined): Asym {
         return { kind: 'rsa', rsa: readRsaPrivate(body) } as Asym;
       case 'EC PRIVATE KEY':
         return readEcPrivate(body);
+      case 'DSA PRIVATE KEY':
+        return readDsaPrivate(body);
       case 'ENCRYPTED PRIVATE KEY':
         if (!pass) throw keyErr.interrupted();
         return readPkcs8(decryptPkcs8(body, pass));
@@ -566,6 +693,7 @@ export function exportJwk(a: Asym, isPrivate: boolean, target: any, handleRsaPss
   }
   if (a.kind === 'ec') {
     const s = a.curve.size;
+    if (a.curve.noJwk) throw err('ERR_CRYPTO_JWK_UNSUPPORTED_CURVE', `Unsupported JWK EC curve: ${a.curve.name}.`);
     target.kty = 'EC';
     target.x = b64url(a.pub.subarray(1, 1 + s));
     target.y = b64url(a.pub.subarray(1 + s));
@@ -573,7 +701,7 @@ export function exportJwk(a: Asym, isPrivate: boolean, target: any, handleRsaPss
     if (isPrivate) target.d = b64url(bigIntToBytes(a.d!, Math.ceil(bitLength(curveOrder(a.curve)) / 8)));
     return;
   }
-  if (a.kind === 'rsa-pss') throw err('ERR_CRYPTO_JWK_UNSUPPORTED_KEY_TYPE');
+  if (a.kind === 'rsa-pss' || a.kind === 'dsa' || a.kind === 'dh') throw err('ERR_CRYPTO_JWK_UNSUPPORTED_KEY_TYPE');
   target.crv = OKP[a.kind].jwk;
   if (isPrivate) target.d = b64url((a as any).priv);
   target.x = b64url(a.pub);
@@ -639,6 +767,11 @@ export function keyDetail(a: Asym, target: any) {
   }
   if (a.kind === 'ec') {
     target.namedCurve = a.curve.name;
+    return;
+  }
+  if (a.kind === 'dsa') {
+    target.modulusLength = bitLength(a.dsa.p);
+    target.divisorLength = bitLength(a.dsa.q);
     return;
   }
   throw err('ERR_CRYPTO_INVALID_KEYTYPE');
