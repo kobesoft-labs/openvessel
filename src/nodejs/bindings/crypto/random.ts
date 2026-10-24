@@ -1,6 +1,7 @@
 // crypto_random.cc: RandomBytesJob, RandomPrimeJob, CheckPrimeJob, plus the BigInt helpers they need.
 
-import { cryptoError, err, fillRandom, jobClass, toArrayBuffer, view } from './util.ts';
+import { S } from '../../state.ts';
+import { cryptoError, err, fillRandom, jobClass, osslError, toArrayBuffer, view } from './util.ts';
 
 // new RandomBytesJob(mode, buffer, offset, size)
 export const RandomBytesJob = jobClass('RandomBytesJob', (_async, buffer: unknown, offset: number, size: number) => {
@@ -183,7 +184,12 @@ export const RandomPrimeJob = jobClass('RandomPrimeJob', (_async, size: number, 
 
 // new CheckPrimeJob(mode, candidate, checks) → boolean
 export const CheckPrimeJob = jobClass('CheckPrimeJob', (async, candidate: unknown, checks: number) => {
-  const n = bytesToBigInt(view(candidate));
+  const bytes = view(candidate);
+  let lead = 0;
+  while (lead < bytes.length && bytes[lead] === 0) lead++;
+  // bn_expand: at most INT_MAX / (4 * BN_BITS2) 64-bit words
+  if (bytes.length - lead > 8388607 * 8) throw osslError('03000072', 'bignum routines', 'bignum too long', 'ERR_OSSL_BN_BIGNUM_TOO_LONG');
+  const n = bytesToBigInt(bytes);
   void async;
   return () => isProbablePrime(n, checks);
 });
@@ -192,6 +198,25 @@ export function secureBuffer(len: number) {
   return new Uint8Array(len);
 }
 
+// The secure heap (--secure-heap): OpenSSL keeps private BIGNUMs there. Nothing here is locked
+// memory, but the accounting is kept so secureHeapUsed() reports the arena like CRYPTO_secure_used.
+let secureUsed = 0;
+
+function secureHeapSize(): number {
+  return Number(S.optionValues['--secure-heap'] ?? 0) || 0;
+}
+
+/** Accounts for a private value of `bytes` bytes held in the secure heap (rounded like sh_malloc). */
+export function secureAlloc(bytes: number) {
+  const total = secureHeapSize();
+  if (!total) return;
+  const min = Math.max(1, Number(S.optionValues['--secure-heap-min'] ?? 2) || 2);
+  let size = min;
+  while (size < bytes) size *= 2;
+  if (secureUsed + size <= total) secureUsed += size;
+}
+
 export function secureHeapUsed() {
-  return undefined;
+  if (!secureHeapSize()) return undefined;
+  return BigInt(secureUsed);
 }

@@ -3,8 +3,8 @@ const b = require('internal/test/binding').internalBinding('crypto');
 const fs = require('fs');
 const supported = (n) => {
   const l = n.toLowerCase();
-  if (/ocb|xts|aria|camellia|sm4|des3-wrap|cms3deswrap/.test(l)) return false;
-  return /^(aes|id-aes|chacha20|des-ede|des3)/.test(l);
+  if (/xts|aria|camellia|sm4/.test(l)) return false;
+  return /^(aes|id-aes|chacha20|des-ede|des3|id-smime-alg-cms3deswrap)/.test(l);
 };
 const ciphers = b.getCiphers().filter(supported);
 const table = {};

@@ -1,7 +1,7 @@
 // crypto_dh.cc: DiffieHellman and DiffieHellmanGroup (finite-field DH on BigInt).
 
 import { DH_GROUPS } from './tables.ts';
-import { bigIntToBytes, bitLength, bytesToBigInt, generatePrime, isProbablePrime, modPow } from './random.ts';
+import { bigIntToBytes, bitLength, bytesToBigInt, generatePrime, isProbablePrime, modPow, secureAlloc } from './random.ts';
 import { err, fillRandom, isAnyBufferSource, osslError, toBuffer, view } from './util.ts';
 
 const dhErr = {
@@ -55,6 +55,7 @@ class DHBase {
       const bytes = new Uint8Array(Math.ceil(bitLength(this.p) / 8) + 8);
       fillRandom(bytes);
       this.priv = (bytesToBigInt(bytes) % (this.p - 3n)) + 2n;
+      secureAlloc(bytes.length);
     }
     this.pub = modPow(this.g, this.priv, this.p);
     return toBuffer(bigIntToBytes(this.pub));

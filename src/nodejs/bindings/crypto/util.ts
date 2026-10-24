@@ -44,6 +44,7 @@ const DEFAULTS: Record<string, [ErrCtor, string]> = {
   ERR_INVALID_ARG_TYPE: [TypeError, 'Invalid argument type'],
   ERR_INVALID_ARG_VALUE: [TypeError, 'Invalid argument value'],
   ERR_MISSING_ARGS: [TypeError, 'Missing arguments'],
+  ERR_MISSING_PASSPHRASE: [TypeError, 'Passphrase required for encrypted key'],
   ERR_OUT_OF_RANGE: [RangeError, 'Out of range'],
   ERR_OSSL_EVP_INVALID_DIGEST: [Error, 'Invalid digest used'],
 };
@@ -129,7 +130,19 @@ const nativeGetRandomValues: (u: Uint8Array) => unknown = globalThis.crypto.getR
 
 /** ncrypto::CSPRNG */
 export function fillRandom(u: Uint8Array) {
-  for (let i = 0; i < u.length; i += 65536) nativeGetRandomValues(u.subarray(i, Math.min(u.length, i + 65536)));
+  // the browser refuses views of a SharedArrayBuffer: fill a private chunk and copy it over
+  const shared = !(u.buffer instanceof ArrayBuffer);
+  const tmp = shared ? new Uint8Array(Math.min(u.length, 65536)) : null;
+  for (let i = 0; i < u.length; i += 65536) {
+    const part = u.subarray(i, Math.min(u.length, i + 65536));
+    if (!tmp) {
+      nativeGetRandomValues(part);
+      continue;
+    }
+    const t = tmp.subarray(0, part.length);
+    nativeGetRandomValues(t);
+    part.set(t);
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -219,13 +232,26 @@ type Work = () => unknown;
  * job error. Async jobs copy their inputs in `configure` (Node's ToCopy) when `async` is true.
  */
 export function jobClass(name: string, configure: (async: boolean, ...args: any[]) => Work): any {
+  // the AsyncWrap provider, e.g. PBKDF2Job → PBKDF2REQUEST
+  const provider = name.replace(/Job$/, '').toUpperCase() + 'REQUEST';
   const C = class {
     #mode: number;
     #work: Work;
+    #asyncId = 0;
+    #triggerId = 0;
     ondone?: (err: unknown, result: unknown) => void;
     constructor(mode: number, ...args: any[]) {
       this.#mode = mode;
       this.#work = configure(mode === kCryptoJobAsync, ...args);
+      if (mode === kCryptoJobAsync) {
+        // AsyncWrap: an async id and the init hook (domains and async_hooks see the request)
+        const hooks = asyncHooks();
+        if (hooks) {
+          this.#asyncId = hooks.newAsyncId();
+          this.#triggerId = hooks.getDefaultTriggerAsyncId();
+          hooks.emitInit(this.#asyncId, provider, this.#triggerId, this);
+        }
+      }
     }
     run() {
       const work = this.#work;
@@ -247,13 +273,33 @@ export function jobClass(name: string, configure: (async: boolean, ...args: any[
           result = undefined;
         }
         done();
+        const hooks = this.#asyncId ? asyncHooks() : null;
+        if (hooks) hooks.emitBefore(this.#asyncId, this.#triggerId, this);
         if (typeof this.ondone === 'function') scope(this.ondone, this, error, result);
+        if (hooks) {
+          // a handled uncaught exception has already emitted the after hooks
+          if (hooks.executionAsyncId() === this.#asyncId) hooks.emitAfter(this.#asyncId);
+          hooks.emitDestroy(this.#asyncId);
+        }
       });
       return undefined;
     }
   };
   Object.defineProperty(C, 'name', { value: name });
   return C;
+}
+
+let asyncHooksModule: any;
+function asyncHooks(): any {
+  if (asyncHooksModule === undefined) {
+    if (!S.requireBuiltin) return null; // before the bootstrap
+    try {
+      asyncHooksModule = S.requireBuiltin('internal/async_hooks');
+    } catch {
+      asyncHooksModule = null;
+    }
+  }
+  return asyncHooksModule;
 }
 
 /** CryptoErrorStore with DERIVING_BITS_FAILED. */

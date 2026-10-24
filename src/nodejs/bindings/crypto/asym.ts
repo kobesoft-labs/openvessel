@@ -21,7 +21,10 @@ import {
   okpFromPrivate,
   parsePrivate,
   parsePublicOrPrivate,
+  pkcs8,
   randomScalar,
+  readPkcs8,
+  readSpki,
   spki,
   writePrivate,
   writePublic,
@@ -35,6 +38,9 @@ import { bigIntToBytes, bitLength, bytesToBigInt } from './random.ts';
 import { decodeInput, err, fillRandom, isAnyBufferSource, jobClass, osslError, stringOrBuffer, toArrayBuffer, toBuffer, view } from './util.ts';
 import * as der from './asn1.ts';
 import { findCipher } from './cipher.ts';
+import { DH_GROUPS } from './tables.ts';
+import { dhFromPrivate, dhPrivate, dhSecret, dsaOrderBytes, dsaSign, dsaVerify, generateDsa } from './dsa.ts';
+import { generatePrime } from './random.ts';
 
 const asymOf = (d: KeyData) => (d as Extract<KeyData, { type: 1 | 2 }>).asym;
 
@@ -78,6 +84,8 @@ function asBuffer(v: string | Uint8Array) {
 
 function sameKey(a: Asym, b: Asym): boolean {
   if (a.kind !== b.kind) return false;
+  // EVP_PKEY_eq compares the group, not how its parameters are encoded
+  if (a.kind === 'ec' && b.kind === 'ec') return a.curve === b.curve && equalArrays(a.pub, b.pub);
   return equalArrays(spki(a), spki(b));
 }
 
@@ -131,6 +139,8 @@ registerAsymOps({
     }
   },
   equals: (a, b) => sameKey(asymOf(a), asymOf(b)),
+  toDer: (data) => (data.type === 2 ? pkcs8(asymOf(data)) : spki(asymOf(data))),
+  fromDer: (type, bytes) => ({ type, asym: type === 2 ? readPkcs8(bytes) : readSpki(bytes) }),
 });
 
 // -----------------------------------------------------------------------------
@@ -150,6 +160,10 @@ function pssSetup(a: Asym, algo: DigestAlgo, saltLength: number | undefined, sig
   let mgf = algo;
   let salt = saltLength ?? (signing ? rsa.RSA_PSS_SALTLEN_AUTO_DIGEST_MAX : rsa.RSA_PSS_SALTLEN_AUTO);
   if (a.kind === 'rsa-pss' && a.pss) {
+    // the key's minimum salt length is checked when the padding is set up, before the digest
+    if (saltLength !== undefined && saltLength >= 0 && saltLength < a.pss.saltLength) {
+      throw osslError('1C8000AC', 'Provider routines', 'pss saltlen too small', 'ERR_OSSL_PSS_SALTLEN_TOO_SMALL');
+    }
     if (algo !== a.pss.hash) throw osslError('1C8000AE', 'Provider routines', 'digest not allowed', 'ERR_OSSL_DIGEST_NOT_ALLOWED');
     mgf = a.pss.mgf1;
     if (saltLength === undefined) salt = a.pss.saltLength;
@@ -177,10 +191,14 @@ function signDigest(a: Asym, algo: DigestAlgo, hash: Uint8Array, padding: number
     const sk = bigIntToBytes(a.d!, Math.ceil(bitLength(curveOrder(a.curve)) / 8));
     return a.curve.impl.sign(hash, sk, { prehash: false, lowS: false, format: 'der' });
   }
+  if (a.kind === 'dsa') {
+    if (a.dsa.x === undefined) throw notSupportedForKeyType();
+    return dsaSign(a.dsa, hash);
+  }
   throw notSupportedForKeyType();
 }
 
-function verifyDigest(a: Asym, algo: DigestAlgo, hash: Uint8Array, sig: Uint8Array, padding: number | undefined, saltLength: number | undefined): boolean {
+export function verifyDigest(a: Asym, algo: DigestAlgo, hash: Uint8Array, sig: Uint8Array, padding: number | undefined, saltLength: number | undefined): boolean {
   if ('rsa' in a) {
     const pad = padding ?? (a.kind === 'rsa-pss' ? RSA_PKCS1_PSS_PADDING : RSA_PKCS1_PADDING);
     if (pad === RSA_PKCS1_PSS_PADDING) {
@@ -202,12 +220,17 @@ function verifyDigest(a: Asym, algo: DigestAlgo, hash: Uint8Array, sig: Uint8Arr
       return false;
     }
   }
+  if (a.kind === 'dsa') return dsaVerify(a.dsa, hash, sig);
   return false;
 }
 
 function orderBytes(a: Asym): number {
+  if (a.kind === 'dsa') return dsaOrderBytes(a.dsa);
   return a.kind === 'ec' ? Math.ceil(bitLength(curveOrder(a.curve)) / 8) : 0;
 }
+
+/** Keys whose signatures are (r, s) pairs and so take the dsaEncoding option. */
+const isDsaLike = (a: Asym) => a.kind === 'ec' || a.kind === 'dsa';
 
 /** DER ECDSA-Sig-Value → r||s */
 function derToP1363(a: Asym, sig: Uint8Array): Uint8Array {
@@ -275,7 +298,7 @@ export class Sign extends SignBase {
     if (isEdKind(a.kind)) throw err('ERR_CRYPTO_UNSUPPORTED_OPERATION');
     const [algo, hash] = this.finish();
     let sig = signDigest(a, algo, hash, args[4], args[5]);
-    if (args[6] === kSigEncP1363 && a.kind === 'ec') sig = derToP1363(a, sig);
+    if (args[6] === kSigEncP1363 && isDsaLike(a)) sig = derToP1363(a, sig);
     return toBuffer(sig.slice());
   }
 }
@@ -286,7 +309,7 @@ export class Verify extends SignBase {
     const a = asymOf(anyKeyArg(args, 0));
     if (isEdKind(a.kind)) throw err('ERR_CRYPTO_UNSUPPORTED_OPERATION');
     let sig: Uint8Array | null = view(args[4]);
-    if (args[7] === kSigEncP1363 && a.kind === 'ec') {
+    if (args[7] === kSigEncP1363 && isDsaLike(a)) {
       sig = p1363ToDer(a, sig);
       if (!sig) throw err('ERR_CRYPTO_OPERATION_FAILED', 'Malformed signature');
     }
@@ -312,7 +335,7 @@ export const SignJob = jobClass('SignJob', (async, signMode: number, ...rest: an
   let signature: Uint8Array | null = null;
   if (signMode === 1) {
     signature = view(rest[9]).slice();
-    if (dsaEnc === kSigEncP1363 && a.kind === 'ec') signature = p1363ToDer(a, signature);
+    if (dsaEnc === kSigEncP1363 && isDsaLike(a)) signature = p1363ToDer(a, signature);
   }
   return () => {
     if (isXKind(a.kind)) throw notSupportedForKeyType();
@@ -327,7 +350,7 @@ export const SignJob = jobClass('SignJob', (async, signMode: number, ...rest: an
     const digest = hash.final();
     if (signMode === 0) {
       let sig = signDigest(a, md, digest, padding, saltLength);
-      if (dsaEnc === kSigEncP1363 && a.kind === 'ec') sig = derToP1363(a, sig);
+      if (dsaEnc === kSigEncP1363 && isDsaLike(a)) sig = derToP1363(a, sig);
       return toArrayBuffer(sig);
     }
     return !!signature && verifyDigest(a, md, digest, signature, padding, saltLength);
@@ -373,12 +396,54 @@ export const NidKeyPairGenJob = jobClass('NidKeyPairGenJob', (_async, id: number
 });
 
 // new EcKeyPairGenJob(mode, namedCurve, paramEncoding, ...encoding)
+const OPENSSL_EC_EXPLICIT_CURVE = 0;
 export const EcKeyPairGenJob = jobClass('EcKeyPairGenJob', (_async, namedCurve: string, paramEncoding: number, ...enc: any[]) => {
   const curve = curveByName(namedCurve);
   if (!curve) throw err('ERR_CRYPTO_INVALID_CURVE');
-  if (paramEncoding !== 1) throw err('ERR_CRYPTO_UNSUPPORTED_OPERATION', 'Explicit EC parameters are not supported in OpenVessel');
   const encode = keyPairEncoder(enc);
-  return () => encode(ecFromPrivate(curve, randomScalar(curve)));
+  return () => {
+    const a = ecFromPrivate(curve, randomScalar(curve)) as Extract<Asym, { kind: 'ec' }>;
+    if (paramEncoding === OPENSSL_EC_EXPLICIT_CURVE) a.explicit = true;
+    return encode(a);
+  };
+});
+
+// new DsaKeyPairGenJob(mode, modulusLength, divisorLength, ...encoding)
+export const DsaKeyPairGenJob = jobClass('DsaKeyPairGenJob', (_async, modulusLength: number, divisorLength: number, ...enc: any[]) => {
+  const encode = keyPairEncoder(enc);
+  return () => encode({ kind: 'dsa', dsa: generateDsa(modulusLength, divisorLength) });
+});
+
+const DH_GROUP_PRIMES = new Map(Object.entries(DH_GROUPS).map(([name, hex]) => [name, BigInt('0x' + hex)]));
+
+// new DhKeyPairGenJob(mode, group, ...encoding) or (mode, prime | primeLength, generator, ...encoding)
+export const DhKeyPairGenJob = jobClass('DhKeyPairGenJob', (_async, ...args: any[]) => {
+  let params: () => { p: bigint; g: bigint };
+  if (typeof args[0] === 'string') {
+    const p = DH_GROUP_PRIMES.get(args.shift());
+    if (!p) throw err('ERR_CRYPTO_UNKNOWN_DH_GROUP');
+    params = () => ({ p, g: 2n });
+  } else {
+    const [primeOrLength, generator] = args.splice(0, 2);
+    const g = BigInt(generator);
+    if (typeof primeOrLength === 'number') {
+      const bits = primeOrLength;
+      params = () => {
+        // DH_generate_parameters_ex: a safe prime suited to the generator
+        if (bits < 512) throw osslError('1C8000A9', 'Provider routines', 'modulus too small', 'ERR_OSSL_MODULUS_TOO_SMALL');
+        const [add, rem] = g === 2n ? [24n, 23n] : g === 5n ? [60n, 59n] : [12n, 11n];
+        return { p: generatePrime(bits, true, add, rem), g };
+      };
+    } else {
+      const p = bytesToBigInt(view(primeOrLength));
+      params = () => ({ p, g });
+    }
+  }
+  const encode = keyPairEncoder(args);
+  return () => {
+    const { p, g } = params();
+    return encode({ kind: 'dh', dh: dhFromPrivate(p, g, dhPrivate(p)) });
+  };
 });
 
 // new RsaKeyPairGenJob(mode, variant, bits, exponent, [hash, mgf1Hash, saltLength,] ...encoding)
@@ -509,8 +574,13 @@ export function statelessDH(privHandle: unknown, pubHandle: unknown) {
   const a = asymOf(keyDataOf(privHandle)!);
   const b = asymOf(keyDataOf(pubHandle)!);
   const fail = () => osslError('1C800066', 'Provider routines', 'failed during derivation', 'ERR_OSSL_FAILED_DURING_DERIVATION');
+  const mismatch = () => osslError('1C8000CB', 'Provider routines', 'mismatching domain parameters', 'ERR_OSSL_MISMATCHING_DOMAIN_PARAMETERS');
+  if (a.kind === 'dh' && b.kind === 'dh') {
+    if (a.dh.p !== b.dh.p || a.dh.g !== b.dh.g) throw mismatch();
+    return toBuffer(dhSecret(a.dh, b.dh.y));
+  }
   if (a.kind === 'ec' && b.kind === 'ec') {
-    if (a.curve !== b.curve) throw osslError('03000079', 'digital envelope routines', 'different parameters', 'ERR_OSSL_EVP_DIFFERENT_PARAMETERS');
+    if (a.curve !== b.curve) throw mismatch();
     const shared = ecPoint(a.curve, b.pub).multiply(a.d!).toBytes(false);
     return toBuffer(shared.slice(1, 1 + a.curve.size));
   }
@@ -546,11 +616,12 @@ function oaepParams(args: any[]) {
 }
 
 function publicEncrypt(...args: any[]) {
-  const k = rsaKeyOf(anyKeyArg(args, 0));
+  const key = anyKeyArg(args, 0);
+  const { algo, label } = oaepParams(args);
+  const k = rsaKeyOf(key);
   const data = view(args[4]);
   const padding = args[5] >>> 0;
   if (padding === RSA_PKCS1_OAEP_PADDING) {
-    const { algo, label } = oaepParams(args);
     return toBuffer(rsa.oaepEncrypt(k, algo, label, data));
   }
   if (padding === RSA_PKCS1_PADDING) return toBuffer(rsa.rawPublic(k, rsa.pkcs1Pad(k, data, 2)));
@@ -563,12 +634,12 @@ function publicEncrypt(...args: any[]) {
 
 function privateDecrypt(...args: any[]) {
   const data = anyKeyArg(args, 0);
+  const { algo, label } = oaepParams(args);
   if (data.type !== 2) throw notSupportedForKeyType();
   const k = rsaKeyOf(data);
   const ct = view(args[4]);
   const padding = args[5] >>> 0;
   if (padding === RSA_PKCS1_OAEP_PADDING) {
-    const { algo, label } = oaepParams(args);
     return toBuffer(rsa.oaepDecrypt(k, algo, label, ct));
   }
   if (padding === RSA_PKCS1_PADDING) {
@@ -610,13 +681,15 @@ function publicDecrypt(...args: any[]) {
 
 export const asymmetric: Record<string, unknown> = {
   // the subset of OpenSSL's curve list implemented here, in OpenSSL's order
-  getCurves: () => ['secp256k1', 'secp384r1', 'secp521r1', 'prime256v1'],
+  getCurves: () => ['secp224r1', 'secp256k1', 'secp384r1', 'secp521r1', 'prime256v1'],
   Sign,
   Verify,
   SignJob,
   NidKeyPairGenJob,
   EcKeyPairGenJob,
   RsaKeyPairGenJob,
+  DsaKeyPairGenJob,
+  DhKeyPairGenJob,
   ECDH,
   ECDHConvertKey,
   statelessDH,
