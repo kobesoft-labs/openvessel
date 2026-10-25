@@ -40,7 +40,8 @@ export interface SpawnOptions {
 
 type Listener = (ev: any) => void;
 
-export class VesselProcess {
+/** A process started with {@link OpenVessel.spawn}. */
+export class Process {
   readonly output: ReadableStream<string>;
   readonly exit: Promise<number>;
   private ctrl!: ReadableStreamDefaultController<string>;
@@ -91,7 +92,7 @@ export class OpenVessel {
   private nextId = 1;
   private calls = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>();
   private listeners = new Map<string, Set<Listener>>();
-  private procs = new Map<number, VesselProcess>();
+  private procs = new Map<number, Process>();
   private earlyOutput = new Map<number, { data: Uint8Array[]; exit?: number }>();
   private runtimeFrame!: HTMLIFrameElement;
   private relayFrame: HTMLIFrameElement | null = null;
@@ -282,9 +283,9 @@ export class OpenVessel {
   // ---------------------------------------------------------------------------
   // processes
 
-  async spawn(command: string, args: string[] = [], opts: SpawnOptions = {}): Promise<VesselProcess> {
+  async spawn(command: string, args: string[] = [], opts: SpawnOptions = {}): Promise<Process> {
     const { pid } = await this._call('spawn', { argv: [command, ...args], cwd: opts.cwd, env: opts.env, terminal: opts.terminal });
-    const p = new VesselProcess(this, pid);
+    const p = new Process(this, pid);
     this.procs.set(pid, p);
     const early = this.earlyOutput.get(pid);
     if (early) {
@@ -464,5 +465,8 @@ function builtinDialog(req: PermissionRequest, locale: 'ja' | 'en'): Promise<Per
     else run();
   });
 }
+
+/** @deprecated Renamed to {@link Process}. */
+export { Process as VesselProcess };
 
 export default OpenVessel;

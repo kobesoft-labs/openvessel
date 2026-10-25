@@ -3,6 +3,11 @@
 OpenVessel follows [Semantic Versioning](https://semver.org). Each release states the Node.js
 version it ports; see [docs/NODE-VERSION.md](docs/NODE-VERSION.md) for how that version is tracked.
 
+## 1.1.0 — 2026-10-25 · Node.js v22.23.4
+
+- The class returned by `spawn()` is now `Process` (was `VesselProcess`). Only the entry point keeps the
+  product name; every type reachable from it has a neutral name. `VesselProcess` stays as a deprecated alias.
+
 ## 1.0.0 — 2026-10-25 · Node.js v22.23.4
 
 First stable release.
