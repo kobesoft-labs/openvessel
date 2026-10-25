@@ -49,6 +49,7 @@ OpenVessel はクリーンルームで作っています（ほかのブラウザ
 
 | | |
 |---|---|
+| 版 | 1.0.0 — [変更履歴](CHANGELOG.md)・[リリース手順](docs/RELEASING.md)（OpenVessel 独自の semver。移植している Node.js の版は、各リリースのタイトルに入れます） |
 | Node.js | v22.23.4（`src/node/version.ts`） |
 | Node 自身の試験 | 対象モジュールの 1271 本のうち、ブラウザで通せる 1237 本すべて（100%）が通る。残り 34 本は理由つきで対象外。[docs/compatibility.ja.md](docs/compatibility.ja.md) |
 | Astro のサイト | 実際のサイト 147 本の中で 131 本がビルドできる（Astro 5・6・7）。[docs/compatibility.ja.md](docs/compatibility.ja.md) |

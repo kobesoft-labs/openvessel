@@ -1,12 +1,35 @@
 {
   "name": "openvessel",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "A browser-only Node.js-like environment for building and previewing Astro sites. Clean-room, no real ports.",
+  "homepage": "https://github.com/kobesoft-labs/openvessel#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kobesoft-labs/openvessel.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kobesoft-labs/openvessel/issues"
+  },
+  "keywords": [
+    "nodejs",
+    "browser",
+    "webassembly",
+    "astro",
+    "sandbox",
+    "playground"
+  ],
+  "openvessel": {
+    "node": "22.23.4"
+  },
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/host/index.js",
+  "types": "./dist/types/host/index.d.ts",
   "exports": {
-    ".": "./dist/host/index.js"
+    ".": {
+      "types": "./dist/types/host/index.d.ts",
+      "default": "./dist/host/index.js"
+    }
   },
   "files": [
     "dist"
@@ -16,7 +39,8 @@
     "dev": "node scripts/build.mjs --watch & node scripts/serve.mjs",
     "serve": "node scripts/serve.mjs",
     "test": "node scripts/test.mjs",
-    "typecheck": "tsc --noEmit -p ."
+    "typecheck": "tsc --noEmit -p .",
+    "build:types": "node scripts/build-types.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
