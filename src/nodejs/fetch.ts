@@ -73,10 +73,26 @@ function browserInit(init?: RequestInit): RequestInit | undefined {
   return out;
 }
 
+// The browser's clone() and the static factories make objects of the browser's class, not the
+// subclass, so `instanceof Response` (Astro's endpoint check) failed for them.
+const asNode = <T extends object>(o: T, proto: object): T => Object.setPrototypeOf(o, proto);
+
 /** Response as Node exposes it: accepts a body that is one of lib's ReadableStreams. */
 const NodeResponse = class Response extends NativeResponse {
   constructor(body?: BodyInit | null, init?: ResponseInit) {
     super(browserBody(body), init);
+  }
+  static error() {
+    return asNode(NativeResponse.error(), NodeResponse.prototype);
+  }
+  static json(data: unknown, init?: ResponseInit) {
+    return asNode(NativeResponse.json(data, init), NodeResponse.prototype);
+  }
+  static redirect(url: string | URL, status?: number) {
+    return asNode(NativeResponse.redirect(url, status), NodeResponse.prototype);
+  }
+  clone() {
+    return asNode(super.clone(), NodeResponse.prototype);
   }
 } as typeof Response;
 
@@ -84,6 +100,9 @@ const NodeResponse = class Response extends NativeResponse {
 const NodeRequest = class Request extends NativeRequest {
   constructor(input: RequestInfo | URL, init?: RequestInit) {
     super(input, browserInit(init));
+  }
+  clone() {
+    return asNode(super.clone(), NodeRequest.prototype);
   }
 } as typeof Request;
 
@@ -240,7 +259,7 @@ const BODY_HEADERS = ['content-encoding', 'content-language', 'content-location'
 async function route(req: Request, redirects: number): Promise<Response> {
   const url = new NativeURL(req.url);
   // a Response of the global class (lib's Response is NodeResponse), as instanceof checks expect
-  if (url.protocol === 'data:' || url.protocol === 'blob:') return Object.setPrototypeOf(await nativeFetch(req), NodeResponse.prototype);
+  if (url.protocol === 'data:' || url.protocol === 'blob:') return asNode(await nativeFetch(req), NodeResponse.prototype);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') throw fetchFailed(`unsupported URL scheme ${url.protocol}`, 'ERR_INVALID_URL');
   if (BAD_PORTS.has(Number(url.port))) throw fetchFailed('bad port');
   const body = req.method === 'GET' || req.method === 'HEAD' ? null : new Uint8Array(await req.arrayBuffer());

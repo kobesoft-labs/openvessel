@@ -3,7 +3,7 @@
 OpenVessel follows [Semantic Versioning](https://semver.org). Each release states the Node.js
 version it ports; see [docs/NODE-VERSION.md](docs/NODE-VERSION.md) for how that version is tracked.
 
-## 1.2.0 — (unreleased) · Node.js v22.23.4
+## 1.2.0 — 2026-10-26 · Node.js v22.23.4
 
 ### Node.js runtime
 
@@ -19,6 +19,9 @@ version it ports; see [docs/NODE-VERSION.md](docs/NODE-VERSION.md) for how that 
   `before`/`after` and `destroy` for them.
 - `fetch` to a virtual port uses the scheme's default port and goes through `tls` for `https:`, with
   undici's headers, redirects and decoding; `fetch` returns the global `Response` class.
+- `Response#clone()`, `Request#clone()`, `Response.json()`, `Response.error()` and `Response.redirect()`
+  return instances of the global classes, so `instanceof Response` holds for them as in Node (an Astro
+  endpoint that returned a cloned `Response` failed with `EndpointDidNotReturnAResponse`).
 - An HTTPS server inside the runtime no longer hangs (a server's TLSWrap takes over the socket's reads).
 - `import.meta.dirname` and `import.meta.filename` for `file:` modules; `os.release()`/`os.version()` in
   `uname` order; llhttp reports 9.4.3, as `process.versions` says.

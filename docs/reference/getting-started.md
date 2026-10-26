@@ -31,7 +31,7 @@ The package is published as a tarball attached to every
 it is not on the npm registry. Install it from the release URL or from a downloaded copy:
 
 ```bash
-npm install https://github.com/kobesoft-labs/openvessel/releases/download/v1.1.1/openvessel-1.1.1.tgz
+npm install https://github.com/kobesoft-labs/openvessel/releases/download/v1.2.0/openvessel-1.2.0.tgz
 ```
 
 The package is an ES module with one entry point. The relevant `package.json` fields are:

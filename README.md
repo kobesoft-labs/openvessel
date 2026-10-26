@@ -48,7 +48,7 @@ in-browser runtimes. It is open source under the [Apache License 2.0](LICENSE).
 
 ## Status
 
-- Version: 1.1.1. See the [Changelog](CHANGELOG.md) and [releasing](docs/RELEASING.md). OpenVessel uses its
+- Version: 1.2.0. See the [Changelog](CHANGELOG.md) and [releasing](docs/RELEASING.md). OpenVessel uses its
   own semver; the ported Node.js version is in every release title.
 - Node.js: v22.23.4 (`src/node/version.ts`).
 - Node's own test suite: 1237 of 1237 (100%) of the tests a browser can pass, across 1271 tests of the

@@ -74,6 +74,16 @@ const scenarios = [
     expected: '200 true localhost /x node\n200 true http://localhost:8080/f ok /f\nfetch failed ECONNREFUSED\n',
   },
   {
+    // clones and the static factories are instances of the global classes (Astro checks an endpoint's
+    // result with instanceof Response)
+    name: 'fetch-classes',
+    files: {
+      'c.mjs': "const r = new Response('x', { status: 404 });\nconst q = new Request('http://a.test/', { method: 'POST', body: 'b' });\nconst d = await fetch('data:,hi');\nconsole.log([r.clone(), Response.json({ a: 1 }), Response.error(), Response.redirect('http://a.test/', 302), d, d.clone()].map((x) => x instanceof Response && x.constructor === Response).join(' '));\nconsole.log(q.clone() instanceof Request, await r.clone().text(), await Response.json({ a: 1 }).text(), await q.clone().text());\n",
+    },
+    cmd: 'node c.mjs',
+    expected: 'true true true true true true\ntrue x {"a":1} b\n',
+  },
+  {
     // (PIPEWRAP: process.stderr, which net's Socket._destroy() looks at, is a pipe)
     name: 'async-hooks',
     files: {
