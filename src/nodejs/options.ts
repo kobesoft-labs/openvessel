@@ -1,6 +1,7 @@
 // Node's command-line parser (node_options.cc), driven by the option table dumped from real Node.
 
 import proc from '../node/data/process.json';
+import v8Options from './data/v8-options.json';
 
 const T = proc.types as Record<string, number>;
 const INFO = new Map<string, { type: number; envVarSettings: number; defaultIsTrue: boolean }>(proc.optionInfo.options as any);
@@ -14,6 +15,45 @@ export interface ParsedCommandLine {
   values: Record<string, unknown>;
   /** Set when the command line is invalid: each line printed as `node: <error>`, exit code 9. */
   error?: string;
+  /** What V8 printed about a flag it rejected (before `error`, as is). */
+  v8Error?: string;
+}
+
+/** `node --v8-options`: V8's help text (dumped from real Node). */
+export const v8Help: string = v8Options.text;
+
+let v8Flags: Map<string, string> | null = null;
+/** The type of a V8 flag (bool, int, string…), from V8's own list. */
+function v8FlagType(name: string): string | undefined {
+  if (!v8Flags) {
+    v8Flags = new Map();
+    for (const m of v8Help.matchAll(/^ {2}(--\S+) .*\n {8}type: (\S+)/gm)) v8Flags.set(m[1], m[2]);
+  }
+  return v8Flags.get(name);
+}
+
+/**
+ * V8's FlagList::SetFlagsFromCommandLine for an argument Node passes on: null if V8 takes it, else
+ * what V8 prints. Node passes the argument alone, so a flag that needs a value has it after '='.
+ */
+function v8Check(arg: string, name: string, value: string | undefined): string | null | undefined {
+  let type = v8FlagType(name);
+  let negated = false;
+  if (!type && name.startsWith('--no-')) {
+    type = v8FlagType('--' + name.slice(5));
+    negated = true;
+  }
+  if (!type) return undefined;
+  const bool = type === 'bool' || type === 'maybe_bool';
+  let ok: boolean;
+  if (bool) ok = value === undefined;
+  else if (negated || value === undefined) ok = false;
+  else if (type === 'int') ok = /^[-+]?\d+$/.test(value);
+  else if (type === 'uint' || type === 'uint64' || type === 'size_t') ok = /^\+?\d+$/.test(value);
+  else if (type === 'float') ok = value.trim() !== '' && !Number.isNaN(Number(value));
+  else ok = true;
+  if (ok) return null;
+  return `Error: illegal value for flag ${arg} of type ${type}\n${bool ? 'To set or unset a boolean flag, use --flag or --no-flag.\n' : ''}Try --help for options\n`;
 }
 
 export function defaultOptionValues(): Record<string, unknown> {
@@ -28,6 +68,8 @@ function expand(arg: string, next: string | undefined): { names: string[]; value
     name = arg.slice(0, eq);
     value = arg.slice(eq + 1);
   }
+  // Node normalizes '_' to '-' in option names (--stack_trace_limit, --expose_gc)
+  if (name.startsWith('--')) name = '--' + name.slice(2).replaceAll('_', '-');
   // aliases like "--inspect=" (only with a value) or "--print <arg>" (only followed by an argument)
   if (value !== undefined && ALIASES.has(name + '=')) return { names: ALIASES.get(name + '=')!, value, consumedNext: false };
   if (ALIASES.has(name + ' <arg>') && next !== undefined && !next.startsWith('-') && value === undefined) {
@@ -42,12 +84,14 @@ function expand(arg: string, next: string | undefined): { names: string[]; value
   return { names: [name], value, consumedNext: false };
 }
 
-/** Applies one option. Returns how many following args it consumed, or an error string. */
-function apply(values: Record<string, unknown>, arg: string, next: string | undefined, fromEnv: boolean): number | string {
+/** Applies one option. Returns how many following args it consumed, or an error. */
+function apply(values: Record<string, unknown>, arg: string, next: string | undefined, fromEnv: boolean): number | string | { v8: string; error: string } {
   const { names, value } = expand(arg, next);
   let consumed = 0;
   for (let i = 0; i < names.length; i++) {
     let name = names[i];
+    // an alias that ends option parsing (--prof-process → --prof-process --)
+    if (name === '--') continue;
     let negated = false;
     let info = INFO.get(name);
     if (!info && name.startsWith('--no-') && INFO.has('--' + name.slice(5))) {
@@ -56,11 +100,19 @@ function apply(values: Record<string, unknown>, arg: string, next: string | unde
       info = INFO.get(name);
     }
     if (!info) {
-      // V8 flags are passed through to V8 in Node; here they are accepted and ignored
-      if (/^--(max-old-space-size|max-semi-space-size|stack-size|expose-gc|harmony|js-|allow-natives-syntax|max-http-header-size|enable-sharedarraybuffer-per-context)/.test(name) || name.startsWith('--v8-') || name.startsWith('--no-')) return consumed;
-      return `bad option: ${arg}`;
+      // Node hands what it doesn't know to V8, which takes its own flags (they have no effect
+      // here) and rejects the rest; NODE_OPTIONS takes only the options in Node's table
+      if (fromEnv) return `${name} is not allowed in NODE_OPTIONS`;
+      const v8 = v8Check(arg, name, value);
+      if (v8 === null) return consumed;
+      return v8 ? { v8, error: `bad option: ${arg}` } : `bad option: ${arg}`;
     }
     if (fromEnv && info.envVarSettings === proc.envSettings.kDisallowedInEnvvar) return `${name} is not allowed in NODE_OPTIONS`;
+    // options V8 reads too: V8 checks the value
+    if (info.type === T.kV8Option || name === '--stack-trace-limit') {
+      const v8 = v8Check(arg, negated ? '--no-' + name.slice(2) : name, isLastValue(names, i, value));
+      if (v8) return { v8, error: `bad option: ${arg}` };
+    }
     const isLast = i === names.length - 1;
     switch (info.type) {
       case T.kNoOp:
@@ -69,7 +121,6 @@ function apply(values: Record<string, unknown>, arg: string, next: string | unde
       case T.kBoolean:
         values[name] = !negated;
         if (('--no-' + name.slice(2)) in values) values['--no-' + name.slice(2)] = negated;
-        if (!negated) for (const t of IMPLICATIONS.get(name) ?? []) values[t] = true;
         break;
       default: {
         let v = isLast ? value : undefined;
@@ -84,9 +135,12 @@ function apply(values: Record<string, unknown>, arg: string, next: string | unde
         else values[name] = v;
       }
     }
+    if (!negated && info.type !== T.kNoOp && info.type !== T.kV8Option) for (const t of IMPLICATIONS.get(name) ?? []) values[t] = true;
   }
   return consumed;
 }
+
+const isLastValue = (names: string[], i: number, value: string | undefined) => (i === names.length - 1 ? value : undefined);
 
 function splitNodeOptions(s: string): string[] {
   const out: string[] = [];
@@ -130,6 +184,7 @@ export function parseCommandLine(argv: string[], nodeOptions = ''): ParsedComman
   for (let i = 0; i < envArgs.length; i++) {
     const r = apply(values, envArgs[i], envArgs[i + 1], true);
     if (typeof r === 'string') return { execArgv, argv: rest, values, error: r };
+    if (typeof r === 'object') return { execArgv, argv: rest, values, error: r.error, v8Error: r.v8 };
     i += r;
   }
   let i = 1;
@@ -143,12 +198,18 @@ export function parseCommandLine(argv: string[], nodeOptions = ''): ParsedComman
     const next = argv[i + 1];
     const r = apply(values, a, takesValue(a) ? next : undefined, false);
     if (typeof r === 'string') return { execArgv, argv: rest, values, error: r };
+    if (typeof r === 'object') return { execArgv, argv: rest, values, error: r.error, v8Error: r.v8 };
     execArgv.push(a);
     if (r) execArgv.push(argv[i + 1]);
     i += r;
+    // an alias that expands to "... --": the rest are arguments
+    if (expand(a, undefined).names.includes('--')) {
+      i++;
+      break;
+    }
   }
   rest.push(...argv.slice(i));
-  const errors = checkOptions(values);
+  const errors = checkOptions(values, rest);
   if (errors.length) return { execArgv, argv: rest, values, error: errors.join('\n') };
   return { execArgv, argv: rest, values };
 }
@@ -157,13 +218,34 @@ export function parseCommandLine(argv: string[], nodeOptions = ''): ParsedComman
  * node_options.cc Implies(): options that switch others on when given (not part of the dumped
  * option table). A later option on the command line still overrides them.
  */
-const IMPLICATIONS = new Map<string, string[]>([['--experimental-transform-types', ['--experimental-strip-types', '--enable-source-maps']]]);
+const IMPLICATIONS = new Map<string, string[]>([
+  ['--inspect-brk', ['--inspect']],
+  ['--inspect-brk-node', ['--inspect']],
+  ['--inspect-wait', ['--inspect']],
+  ['--env-file', ['[has_env_file_string]']],
+  ['--env-file-if-exists', ['[has_env_file_string]']],
+  ['--trace-env-js-stack', ['--trace-env']],
+  ['--trace-env-native-stack', ['--trace-env']],
+  ['--watch-path', ['--watch']],
+  ['--eval', ['[has_eval_string]']],
+  ['--experimental-strip-types', ['--experimental-detect-module']],
+  ['--experimental-transform-types', ['--experimental-strip-types', '--experimental-detect-module', '--enable-source-maps']],
+  ['--report-signal', ['--report-on-signal']],
+  ['--node-memory-debug', ['--debug-arraybuffer-allocations', '--verify-base-objects']],
+]);
 
 const isPowerOf2 = (n: number) => n > 0 && (n & (n - 1)) === 0;
 
-/** PerProcessOptions::CheckOptions (the checks that apply in a browser). */
-function checkOptions(values: Record<string, unknown>): string[] {
+/** PerProcessOptions::CheckOptions and EnvironmentOptions::CheckOptions (the checks that apply in a browser). */
+function checkOptions(values: Record<string, unknown>, argv: string[]): string[] {
   const errors: string[] = [];
+  if (values['--watch']) {
+    if (values['--check']) errors.push('either --watch or --check can be used, not both');
+    else if (values['[has_eval_string]']) errors.push('either --watch or --eval can be used, not both');
+    else if (values['--interactive']) errors.push('either --watch or --interactive can be used, not both');
+    else if (values['--test-force-exit']) errors.push('either --watch or --test-force-exit can be used, not both');
+    else if (!values['--test'] && !argv[1]) errors.push('--watch requires specifying a file');
+  }
   const heap = Number(values['--secure-heap'] ?? 0);
   const heapMin = Number(values['--secure-heap-min'] ?? 2);
   if (heap && !isPowerOf2(heap)) errors.push('--secure-heap must be a power of 2');
@@ -186,6 +268,7 @@ export function workerOptionErrors(args: string[] | string, fromEnv: boolean): s
     if (PER_PROCESS.has(a.split('=')[0])) return [a];
     const r = apply(values, a, takesValue(a) ? list[i + 1] : undefined, fromEnv);
     if (typeof r === 'string') return [r.startsWith('bad option: ') ? a : r];
+    if (typeof r === 'object') return [a];
     i += r;
   }
   return null;
