@@ -3,12 +3,13 @@
 import * as path from '../../shared/path.ts';
 import { O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY, type OpenFile, createPipe } from '../io.ts';
 import { ExitSignal, type Kernel, ProgramContext } from '../kernel.ts';
-import { exitCodeOf } from '../proc.ts';
+import { type Proc, SIGNALS, exitCodeOf } from '../proc.ts';
 import { isDir } from '../vfs.ts';
 import { evalArith } from './arith.ts';
-import { type Node, type Redir, type Word, type WordPart, ShellSyntaxError, isName, parse } from './parse.ts';
-import { hasGlobChars, matchPattern, patternToRegexSource, removeMatch, replaceMatch, unescapePattern } from './pattern.ts';
-import { builtinTest } from './test.ts';
+import { applySymbolicMode, symbolicUmask } from './mode.ts';
+import { type Node, Parser, type Redir, type Word, type WordPart, ShellSyntaxError, isName, parse } from './parse.ts';
+import { eregToRegexSource, hasGlobChars, matchPattern, patternToRegexSource, removeMatch, replaceMatch, unescapePattern } from './pattern.ts';
+import { BINARY_OPS, UNARY_OPS, builtinTest } from './test.ts';
 import { formatPrintf } from './printf.ts';
 
 class BreakSig {
@@ -20,6 +21,14 @@ class ContinueSig {
 class ReturnSig {
   constructor(public code: number) {}
 }
+/** ^C in an interactive shell: abandons the command line being run. */
+class InterruptSig {}
+
+/** Background jobs waiting for their process to start: the process runs the job in a copy of the shell. */
+const pendingJobs = new WeakMap<Proc, (ctx: ProgramContext) => Promise<number>>();
+
+/** Signals that end a shell by default (the rest are ignored or handled by the kernel). */
+const FATAL_SIGNALS = new Set(['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGTERM', 'SIGUSR1', 'SIGUSR2', 'SIGALRM', 'SIGPIPE', 'SIGABRT']);
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -52,20 +61,44 @@ export class Shell {
   positional: string[] = [];
   arg0 = 'sh';
   status = 0;
+  /** $!: pid of the last background job. */
   lastBg = 0;
+  /** Background jobs by pid: their exit status, kept until `wait` collects it. */
   bgJobs = new Map<number, Promise<number>>();
   opts: ShellOptions = { errexit: false, xtrace: false, nounset: false, pipefail: false, noglob: false, interactive: false };
   fds = new Map<number, OpenFile>();
   locals: Map<string, string | undefined>[] = [];
+  /** trap actions by condition (EXIT, ERR, INT, TERM…); '' ignores the signal. */
   traps = new Map<string, string>();
+  /** Signals received for which a trap is set, run at the next command boundary. */
+  private pendingTraps: string[] = [];
+  private trapWaiters: (() => void)[] = [];
+  private inTrap = false;
+  /** Indexed arrays (only BASH_REMATCH is one). */
+  arrays = new Map<string, string[]>();
+  /** This shell is its process (not an in-process subshell): exec and signal traps act on the process. */
+  ownsProc = false;
+  /** $$: the pid of the shell, also in subshells and background jobs. */
+  shellPid: number;
+  /** The file mode creation mask; an in-process subshell has its own copy. */
+  umask: number;
+  /** Run the next external simple command in this process (exec), as the last command of a job. */
+  execLast = false;
   cwd: string;
   depth = 0;
   /** errexit suppressed (inside conditions). */
   private noErrexit = 0;
   history: string[] = [];
 
-  constructor(public ctx: ProgramContext) {
+  /** `init` false: an empty shell that clone() fills in. */
+  constructor(
+    public ctx: ProgramContext,
+    init = true,
+  ) {
     this.cwd = ctx.cwd;
+    this.shellPid = ctx.proc.pid;
+    this.umask = ctx.proc.umask;
+    if (!init) return;
     for (const [k, v] of Object.entries(ctx.env)) {
       this.vars.set(k, v);
       this.exported.add(k);
@@ -84,7 +117,7 @@ export class Shell {
 
   /** Creates a subshell copy (shares nothing mutable with the parent). */
   clone(): Shell {
-    const s: Shell = Object.create(Shell.prototype);
+    const s = new Shell(this.ctx, false);
     s.ctx = this.ctx;
     s.vars = new Map(this.vars);
     s.exported = new Set(this.exported);
@@ -100,12 +133,29 @@ export class Shell {
     s.fds = new Map();
     for (const [fd, f] of this.fds) s.fds.set(fd, f.ref());
     s.locals = [];
-    s.traps = new Map();
+    // a subshell resets the traps, except that ignored signals stay ignored
+    for (const [k, v] of this.traps) if (v === '' && k !== 'EXIT' && k !== 'ERR') s.traps.set(k, v);
+    s.arrays = new Map(this.arrays);
+    s.opts_allexport = this.opts_allexport;
+    s.shellPid = this.shellPid;
+    s.umask = this.umask;
+    s.pipelinePgid = this.pipelinePgid;
+    s.onSpawn = this.onSpawn;
+    s.onSigint = this.onSigint;
     s.cwd = this.cwd;
     s.depth = this.depth;
     s.noErrexit = this.noErrexit;
-    s.history = [];
     return s;
+  }
+
+  /** The child shell of a background job, in its own process. */
+  private adoptProcess(ctx: ProgramContext) {
+    this.ctx = ctx;
+    this.releaseFds();
+    for (const [fd, f] of ctx.proc.fds) this.fds.set(fd, f.ref());
+    ctx.proc.umask = this.umask;
+    this.ownsProc = true;
+    this.installSignalHandler();
   }
 
   releaseFds() {
@@ -121,7 +171,7 @@ export class Shell {
       case '?':
         return String(this.status);
       case '$':
-        return String(this.ctx.proc.pid);
+        return String(this.shellPid);
       case '!':
         return this.lastBg ? String(this.lastBg) : '';
       case '#':
@@ -139,6 +189,8 @@ export class Shell {
         return String(Math.floor((Date.now() - this.ctx.proc.startedAt) / 1000));
       case 'PWD':
         return this.cwd;
+      case 'BASHPID':
+        return String(this.ctx.proc.pid);
     }
     if (/^[0-9]+$/.test(name)) return this.positional[Number(name) - 1];
     return this.vars.get(name);
@@ -203,24 +255,186 @@ export class Shell {
   // ---------------------------------------------------------------------------
   // running
 
+  /**
+   * Parses and runs `src` one complete command (line) at a time. An error that abandons a command
+   * (assigning a readonly variable, a bad $(( )) …) skips the rest of that line and goes on with
+   * the next, as bash does; a syntax error stops with status 2.
+   */
   async runSource(src: string, name = this.arg0): Promise<number> {
-    let ast: Node;
+    const parser = new Parser(src, this.aliases);
+    let st = 0;
+    for (;;) {
+      let node: Node | null;
+      try {
+        node = parser.parseNext();
+      } catch (e: any) {
+        if (!(e instanceof ShellSyntaxError)) throw e;
+        this.err(`${name}: ${e.message}\n`);
+        this.status = 2;
+        return 2;
+      }
+      if (!node) return st;
+      try {
+        st = await this.exec(node);
+      } catch (e) {
+        if (!(e instanceof ShellError)) throw e;
+        this.err(`sh: ${e.message}\n`);
+        this.status = st = e.code;
+        if (this.opts.errexit && this.noErrexit === 0) throw new ExitSignal(st);
+      }
+    }
+  }
+
+  /**
+   * Runs `body` as a subshell in `sub` (a clone): `exit`, errors and stray `return`/`break` end
+   * the subshell only, then its EXIT trap runs and its fds are released.
+   */
+  private static async isolated(sub: Shell, body: () => Promise<number>): Promise<number> {
+    let code: number;
     try {
-      ast = parse(src);
-    } catch (e: any) {
-      this.err(`${name}: ${e.message}\n`);
-      return 2;
+      code = await body();
+    } catch (e) {
+      if (e instanceof ExitSignal) code = e.code;
+      else if (e instanceof ReturnSig) code = e.code;
+      else if (e instanceof BreakSig || e instanceof ContinueSig) code = 0;
+      else if (e instanceof ShellError) {
+        try {
+          sub.err(`sh: ${e.message}\n`);
+        } catch {}
+        code = e.code;
+      } else {
+        sub.releaseFds();
+        throw e;
+      }
     }
     try {
-      return await this.exec(ast);
+      return await sub.runExitTrap(code);
+    } finally {
+      sub.releaseFds();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // traps
+
+  /** Runs the EXIT trap (once) and returns the shell's exit status: `code`, or the trap's `exit`. */
+  async runExitTrap(code: number): Promise<number> {
+    const action = this.traps.get('EXIT');
+    this.traps.delete('EXIT');
+    if (!action) return code;
+    this.status = code;
+    try {
+      await this.runSource(action, 'trap');
     } catch (e) {
-      if (e instanceof ReturnSig) return e.code;
+      if (e instanceof ExitSignal) return e.code;
+      if (e instanceof ReturnSig || e instanceof BreakSig || e instanceof ContinueSig || e instanceof InterruptSig) return code;
       throw e;
     }
+    return code;
+  }
+
+  /** Runs the traps of the signals that arrived since the last command, keeping $?. */
+  private async runPendingTraps() {
+    if (this.inTrap) return;
+    this.inTrap = true;
+    try {
+      while (this.pendingTraps.length) {
+        const sig = this.pendingTraps.shift()!;
+        const action = this.traps.get(sig);
+        if (!action) continue;
+        const saved = this.status;
+        await this.runSource(action, 'trap');
+        this.status = saved;
+      }
+    } finally {
+      this.inTrap = false;
+    }
+  }
+
+  /** Resolves when a trapped signal arrives (`wait` returns early then). */
+  waitForTrap(): Promise<void> {
+    if (this.pendingTraps.length) return Promise.resolve();
+    return new Promise((r) => this.trapWaiters.push(r));
+  }
+
+  /** The signal whose trap is about to run (for wait's status). */
+  pendingTrapSignal(): string | undefined {
+    return this.pendingTraps[0];
+  }
+
+  /** The process's signal handler: trapped signals are queued, the rest take their default action. */
+  installSignalHandler() {
+    const proc = this.ctx.proc;
+    proc.onSignal = (sig) => {
+      const name = sig.replace(/^SIG/, '');
+      const action = this.traps.get(name);
+      if (action !== undefined) {
+        if (action !== '') {
+          this.pendingTraps.push(name);
+          const ws = this.trapWaiters;
+          this.trapWaiters = [];
+          for (const w of ws) w();
+        }
+        return true;
+      }
+      if (this.opts.interactive && (sig === 'SIGINT' || sig === 'SIGTSTP' || sig === 'SIGQUIT' || sig === 'SIGTERM' || sig === 'SIGWINCH')) {
+        // an interactive shell isn't stopped by these; ^C abandons the command line
+        if (sig === 'SIGINT') this.interrupted = true;
+        return true;
+      }
+      if (FATAL_SIGNALS.has(sig) && this.traps.has('EXIT')) {
+        // bash runs the EXIT trap before it dies of the signal
+        void this.dieOfSignal(sig);
+        return true;
+      }
+      return false;
+    };
+  }
+
+  private async dieOfSignal(sig: string) {
+    const proc = this.ctx.proc;
+    try {
+      await this.runExitTrap(128 + (SIGNALS[sig] ?? 15));
+    } catch {}
+    if (proc.state !== 'running') return;
+    proc.abort.abort(sig);
+    proc.finish({ code: null, signal: sig });
+  }
+
+  setUmask(mask: number) {
+    this.umask = mask;
+    // the process's own mask too (what its node threads and /proc see), unless this is a subshell
+    if (this.ownsProc) this.ctx.proc.umask = mask;
+  }
+
+  /** `set -o` / `[[ -o name ]]`: whether a shell option is on. */
+  optionIsSet(name: string): boolean {
+    switch (name) {
+      case 'errexit':
+        return this.opts.errexit;
+      case 'xtrace':
+        return this.opts.xtrace;
+      case 'nounset':
+        return this.opts.nounset;
+      case 'pipefail':
+        return this.opts.pipefail;
+      case 'noglob':
+        return this.opts.noglob;
+      case 'allexport':
+        return this.opts_allexport;
+      case 'interactive':
+        return this.opts.interactive;
+    }
+    return false;
   }
 
   async exec(node: Node): Promise<number> {
     if (this.ctx.signal.aborted) throw new ExitSignal(130);
+    if (this.pendingTraps.length) await this.runPendingTraps();
+    if (this.interrupted) {
+      this.interrupted = false;
+      throw new InterruptSig();
+    }
     let st: number;
     switch (node.t) {
       case 'simple':
@@ -269,14 +483,7 @@ export class Shell {
       case 'subshell': {
         st = await this.withRedirs(node.redirs, async () => {
           const sub = this.clone();
-          try {
-            return await sub.exec(node.body);
-          } catch (e) {
-            if (e instanceof ExitSignal) return e.code;
-            throw e;
-          } finally {
-            sub.releaseFds();
-          }
+          return Shell.isolated(sub, () => sub.exec(node.body));
         });
         break;
       }
@@ -341,13 +548,32 @@ export class Shell {
       case 'case':
         st = await this.withRedirs(node.redirs, async () => {
           const w = await this.expandSingle(node.word);
-          for (const item of node.items) {
-            for (const p of item.patterns) {
-              const pat = await this.expandPattern(p);
-              if (matchPattern(pat, w)) return item.body ? this.exec(item.body) : 0;
+          let s = 0;
+          let k = 0;
+          while (k < node.items.length) {
+            let hit = false;
+            for (const p of node.items[k].patterns) {
+              if (matchPattern(await this.expandPattern(p), w)) {
+                hit = true;
+                break;
+              }
             }
+            if (!hit) {
+              k++;
+              continue;
+            }
+            // ;& runs the next body too, without testing its patterns
+            for (;;) {
+              const item = node.items[k];
+              s = item.body ? await this.exec(item.body) : 0;
+              if (item.term !== ';&' || k === node.items.length - 1) break;
+              k++;
+            }
+            // ;;& goes on testing the clauses after it
+            if (node.items[k].term !== ';;&') return s;
+            k++;
           }
-          return 0;
+          return s;
         });
         break;
       case 'func':
@@ -359,6 +585,20 @@ export class Shell {
         break;
     }
     this.status = st;
+    if (st !== 0 && this.noErrexit === 0 && (node.t === 'simple' || node.t === 'pipeline' || node.t === 'subshell') && this.depth === 0 && this.traps.get('ERR') && !this.inTrap) {
+      // the ERR trap: where set -e would exit (not inside functions: there is no set -E)
+      this.inTrap = true;
+      try {
+        await this.runSource(this.traps.get('ERR')!, 'trap');
+      } finally {
+        this.inTrap = false;
+      }
+      this.status = st;
+    }
+    if (this.pendingTraps.length) {
+      await this.runPendingTraps();
+      this.status = st;
+    }
     if (st !== 0 && this.opts.errexit && this.noErrexit === 0 && node.t !== 'func') {
       throw new ExitSignal(st);
     }
@@ -374,28 +614,43 @@ export class Shell {
     }
   }
 
+  /**
+   * `cmd &`: the job runs in a new process (a copy of this shell, as fork does), so $! is a real
+   * pid that kill and wait can use. A simple command is exec'd in that process, so $! is the
+   * command's own pid. With job control (interactive) the job gets its own process group.
+   */
   private spawnAsync(node: Node) {
     const sub = this.clone();
-    // background jobs read from /dev/null unless redirected
-    if (!this.opts.interactive) {
-      // keep stdin
+    sub.releaseFds();
+    const maxFd = Math.max(2, ...this.fds.keys());
+    const stdio: (OpenFile | null)[] = [];
+    for (let i = 0; i <= maxFd; i++) stdio.push(this.fds.get(i) ?? null);
+    let proc: Proc;
+    try {
+      proc = this.kernel.spawn({
+        argv: [...this.ctx.proc.argv],
+        env: this.envForChild(),
+        cwd: this.cwd,
+        stdio,
+        ppid: this.ctx.proc.pid,
+        pgid: this.opts.interactive ? 0 : undefined,
+        searchPath: false,
+      });
+    } catch (e: any) {
+      this.err(`sh: fork: ${e.message}\n`);
+      this.status = 1;
+      return;
     }
-    const p = (async () => {
-      try {
-        return await sub.exec(node);
-      } catch (e) {
-        if (e instanceof ExitSignal) return e.code;
-        return 1;
-      } finally {
-        sub.releaseFds();
-      }
-    })();
-    const id = sub.lastBgPid ?? -Math.floor(Math.random() * 1e6);
-    this.lastBg = Math.abs(id);
-    this.bgJobs.set(this.lastBg, p);
-    p.then(() => this.bgJobs.delete(this.lastBg));
+    // the process starts on a microtask, after this
+    pendingJobs.set(proc, async (ctx) => {
+      sub.adoptProcess(ctx);
+      if (node.t === 'simple') sub.execLast = true;
+      return Shell.isolated(sub, () => sub.exec(node));
+    });
+    this.lastBg = proc.pid;
+    this.bgJobs.set(proc.pid, proc.exited.then(exitCodeOf));
+    if (this.opts.interactive) this.err(`[${this.bgJobs.size}] ${proc.pid}\n`);
   }
-  lastBgPid?: number;
 
   // ---------------------------------------------------------------------------
   // pipelines
@@ -407,7 +662,11 @@ export class Shell {
       return node.bang ? (s === 0 ? 1 : 0) : s;
     }
     const pipes = Array.from({ length: n - 1 }, () => createPipe());
+    // with job control (an interactive shell on a tty) the pipeline is one job: one process group,
+    // the terminal's foreground group while it runs, so ^C reaches every command of it
+    const tty = this.opts.interactive ? this.ctx.proc.tty : undefined;
     let pgid: number | undefined;
+    let sigint = false;
     const runs: Promise<number>[] = [];
     for (let i = 0; i < n; i++) {
       const sub = this.clone();
@@ -419,28 +678,27 @@ export class Shell {
         sub.fds.get(1)?.unref();
         sub.fds.set(1, pipes[i].w);
       }
-      sub.pipelinePgid = () => pgid;
-      sub.onSpawn = (pid) => {
-        if (pgid === undefined) pgid = pid;
-      };
-      runs.push(
-        (async () => {
-          try {
-            return await sub.exec(node.cmds[i]);
-          } catch (e) {
-            if (e instanceof ExitSignal) return e.code;
-            if (e instanceof ShellError) {
-              sub.err(`sh: ${e.message}\n`);
-              return 1;
-            }
-            throw e;
-          } finally {
-            sub.releaseFds();
-          }
-        })(),
-      );
+      if (tty) {
+        sub.pipelinePgid = () => pgid;
+        sub.onSpawn = (p) => {
+          if (pgid !== undefined) return;
+          pgid = p.pgid;
+          tty.foregroundPgid = pgid;
+        };
+        sub.onSigint = () => (sigint = true);
+      }
+      runs.push(Shell.isolated(sub, () => sub.exec(node.cmds[i])));
     }
-    const codes = await Promise.all(runs);
+    let codes: number[];
+    try {
+      codes = await Promise.all(runs);
+    } finally {
+      if (tty && pgid !== undefined) {
+        tty.foregroundPgid = this.ctx.proc.pgid;
+        tty.raw = false;
+        tty.echo = true;
+      }
+    }
     let s = codes[n - 1];
     if (this.opts.pipefail) {
       for (let i = n - 1; i >= 0; i--) if (codes[i] !== 0) {
@@ -449,22 +707,24 @@ export class Shell {
       }
     }
     if (node.bang) s = s === 0 ? 1 : 0;
+    if (sigint) throw new InterruptSig();
     return s;
   }
+  /** Set in the commands of a pipeline run with job control: the pipeline's process group. */
   pipelinePgid?: () => number | undefined;
-  onSpawn?: (pid: number) => void;
+  onSpawn?: (proc: Proc) => void;
+  /** A command of the pipeline died of ^C. */
+  onSigint?: () => void;
 
   // ---------------------------------------------------------------------------
   // simple commands
 
   private async execSimple(node: Extract<Node, { t: 'simple' }>): Promise<number> {
-    let words: string[] = [];
-    words = await this.expandWords(node.words);
-    if (words.length > 0 && this.aliases.has(words[0])) {
-      const a = this.aliases.get(words[0])!;
-      const expanded = await this.expandWords((parse(a) as any).words ?? []);
-      words = [...expanded, ...words.slice(1)];
-    }
+    let execTail = this.execLast;
+    this.execLast = false;
+    // $? of an assignment-only command: the last command substitution in it, else 0
+    this.lastSubstStatus = undefined;
+    const words = await this.expandWords(node.words);
     const assigns: [string, string][] = [];
     for (const a of node.assigns) {
       let v = await this.expandSingle(a.value, true);
@@ -480,8 +740,16 @@ export class Shell {
       if (node.redirs.length) return this.withRedirs(node.redirs, async () => 0);
       return this.lastSubstStatus ?? 0;
     }
-    const cmd = words[0];
-    const args = words.slice(1);
+    let cmd = words[0];
+    let args = words.slice(1);
+
+    // `exec cmd`: the command replaces the shell in its process (an in-process subshell, which has
+    // no process of its own, runs it and exits instead: see the exec builtin)
+    if (cmd === 'exec' && args.length && this.ownsProc && args[0] !== '--' && !this.funcs.has(args[0]) && !BUILTINS[args[0]]) {
+      cmd = args[0];
+      args = args.slice(1);
+      execTail = true;
+    }
 
     // `exec` with only redirections modifies the shell itself
     if (cmd === 'exec' && args.length === 0) {
@@ -570,11 +838,14 @@ export class Shell {
     }
     try {
       const env = this.envForChild(Object.fromEntries(assigns));
+      if (execTail) return await this.execImage(cmd, args, env, fds);
       const maxFd = Math.max(2, ...fds.keys());
       const stdio: (OpenFile | null)[] = [];
       for (let i = 0; i <= maxFd; i++) stdio.push(fds.get(i) ?? null);
       let proc;
       try {
+        // job control: an interactive shell starts each job in its own process group (a pipeline
+        // shares one); otherwise commands stay in the shell's group, so ^C reaches them
         const pg = this.pipelinePgid?.();
         proc = this.kernel.spawn({
           argv: [cmd, ...args],
@@ -582,21 +853,13 @@ export class Shell {
           cwd: this.cwd,
           stdio,
           ppid: this.ctx.proc.pid,
-          pgid: this.opts.interactive ? 0 : pg !== undefined ? pg : this.pipelinePgid ? 0 : undefined,
+          pgid: pg !== undefined ? pg : this.pipelinePgid || this.opts.interactive ? 0 : undefined,
         });
       } catch (e: any) {
-        if (e.code === 'ENOENT') {
-          this.err(`sh: ${cmd}: command not found\n`);
-          return 127;
-        }
-        if (e.code === 'EACCES') {
-          this.err(`sh: ${cmd}: Permission denied\n`);
-          return 126;
-        }
-        this.err(`sh: ${cmd}: ${e.message}\n`);
-        return 126;
+        return this.spawnError(cmd, e);
       }
-      this.onSpawn?.(proc.pid);
+      proc.umask = this.umask;
+      this.onSpawn?.(proc);
       const tty = this.ctx.proc.tty;
       const fg = this.opts.interactive && tty;
       if (fg) tty!.foregroundPgid = proc.pgid;
@@ -606,13 +869,65 @@ export class Shell {
         tty!.raw = false;
         tty!.echo = true;
       }
-      if (st.signal && this.opts.interactive && st.signal !== 'SIGINT' && st.signal !== 'SIGPIPE') this.err(`${st.signal}\n`);
+      if (st.signal && (this.opts.interactive || this.onSigint) && st.signal !== 'SIGINT' && st.signal !== 'SIGPIPE') this.err(`${st.signal}\n`);
+      if (st.signal === 'SIGINT') {
+        // like bash: a job killed by ^C abandons the command line (loops included)
+        if (this.opts.interactive) throw new InterruptSig();
+        this.onSigint?.();
+      }
       return exitCodeOf(st);
     } finally {
       if (fds !== this.fds) for (const f of fds.values()) f.unref();
     }
   }
   lastSubstStatus?: number;
+
+  private spawnError(cmd: string, e: any): number {
+    if (e.code === 'ENOENT') {
+      this.err(`sh: ${cmd}: command not found\n`);
+      return 127;
+    }
+    if (e.code === 'EACCES') {
+      this.err(`sh: ${cmd}: Permission denied\n`);
+      return 126;
+    }
+    this.err(`sh: ${cmd}: ${e.message}\n`);
+    return 126;
+  }
+
+  /**
+   * exec: replaces the program of this shell's process with the command (same pid and fds), then
+   * waits for it; the process ends with the command's status.
+   */
+  private async execImage(cmd: string, args: string[], env: Record<string, string>, fds: Map<number, OpenFile>): Promise<never | number> {
+    const proc = this.ctx.proc;
+    const old = proc.fds;
+    proc.fds = new Map();
+    for (const [k, f] of fds) proc.fds.set(k, f.ref());
+    const oldCwd = proc.cwd;
+    proc.cwd = this.cwd;
+    proc.umask = this.umask;
+    const onSignal = proc.onSignal;
+    proc.onSignal = undefined;
+    try {
+      this.kernel.execImage(proc, [cmd, ...args], env);
+    } catch (e: any) {
+      for (const f of proc.fds.values()) f.unref();
+      proc.fds = old;
+      proc.cwd = oldCwd;
+      proc.onSignal = onSignal;
+      const code = this.spawnError(cmd, e);
+      // a failed exec ends a non-interactive shell
+      if (this.opts.interactive) return code;
+      throw new ExitSignal(code);
+    }
+    for (const f of old.values()) f.unref();
+    // the shell's own references must not keep pipes open for the new program's readers
+    this.releaseFds();
+    // the shell is gone: nothing more of it runs, not even its EXIT trap
+    this.traps.clear();
+    throw new ExitSignal(exitCodeOf(await proc.exited));
+  }
 
   /** Runs `fn` with redirections applied to this shell's fds, then restores. */
   private async withRedirs(redirs: Redir[], fn: () => Promise<number>): Promise<number> {
@@ -716,7 +1031,7 @@ export class Shell {
 
   private open(target: string, flags: number): OpenFile {
     try {
-      return this.kernel.openFile({ cwd: this.cwd, fds: this.fds, tty: this.ctx.proc.tty, umask: this.ctx.proc.umask } as any, target, flags, 0o666);
+      return this.kernel.openFile({ cwd: this.cwd, fds: this.fds, tty: this.ctx.proc.tty, umask: this.umask } as any, target, flags, 0o666);
     } catch (e: any) {
       const msg = e.code === 'ENOENT' ? 'No such file or directory' : e.code === 'EISDIR' ? 'Is a directory' : e.code === 'EACCES' ? 'Permission denied' : e.message;
       throw new ShellError(`${target}: ${msg}`);
@@ -727,89 +1042,156 @@ export class Shell {
   // [[ ... ]]
 
   private async execDbracket(words: Word[]): Promise<number> {
-    // expand without splitting/globbing; keep operators
-    const toks: { s: string; pat: string; lit: boolean }[] = [];
-    for (const w of words) {
-      const lit = w.length === 1 && w[0].t === 'lit' ? w[0].v : null;
-      if (lit !== null && ['&&', '||', '!', '(', ')', '<', '>', '==', '=', '!=', '=~', '-eq', '-ne', '-lt', '-gt', '-le', '-ge', '-z', '-n', '-e', '-f', '-d', '-x', '-r', '-w', '-s', '-L', '-h', '-nt', '-ot'].includes(lit)) {
-        toks.push({ s: lit, pat: lit, lit: true });
-      } else {
-        toks.push({ s: await this.expandSingle(w), pat: await this.expandPattern(w), lit: false });
-      }
-    }
+    // operators are recognised only as unquoted words; operands are expanded when they are needed
+    // (no field splitting or globbing), so `&&` and `||` short-circuit like in bash
+    const toks = words.map((w) => ({ w, op: w.length === 1 && w[0].t === 'lit' ? w[0].v : null }));
+    const isOp = (k: number, ...ops: string[]) => toks[k]?.op !== null && toks[k]?.op !== undefined && ops.includes(toks[k].op!);
     let i = 0;
-    const orExpr = (): boolean => {
-      let v = andExpr();
-      while (toks[i]?.lit && toks[i].s === '||') {
+    const fail = (msg: string): never => {
+      throw new DbracketError(msg);
+    };
+    const orExpr = async (): Promise<boolean> => {
+      let v = await andExpr();
+      while (isOp(i, '||')) {
         i++;
-        const r = andExpr();
-        v = v || r;
+        if (v) {
+          await andExpr(true);
+          continue;
+        }
+        v = await andExpr();
       }
       return v;
     };
-    const andExpr = (): boolean => {
-      let v = notExpr();
-      while (toks[i]?.lit && toks[i].s === '&&') {
-        i++;
-        const r = notExpr();
-        v = v && r;
+    // `skip`: parse without evaluating (the side of && / || that isn't taken)
+    let skipping = 0;
+    const andExpr = async (skip = false): Promise<boolean> => {
+      if (skip) skipping++;
+      try {
+        let v = await notExpr();
+        while (isOp(i, '&&')) {
+          i++;
+          if (!v) {
+            skipping++;
+            try {
+              await notExpr();
+            } finally {
+              skipping--;
+            }
+            continue;
+          }
+          v = await notExpr();
+        }
+        return v;
+      } finally {
+        if (skip) skipping--;
       }
-      return v;
     };
-    const notExpr = (): boolean => {
-      if (toks[i]?.lit && toks[i].s === '!') {
+    const notExpr = async (): Promise<boolean> => {
+      if (isOp(i, '!')) {
         i++;
-        return !notExpr();
+        return !(await notExpr());
       }
-      if (toks[i]?.lit && toks[i].s === '(') {
+      if (isOp(i, '(')) {
         i++;
-        const v = orExpr();
+        const v = await orExpr();
+        if (!isOp(i, ')')) fail("expected `)'");
         i++;
         return v;
       }
       return primary();
     };
-    const primary = (): boolean => {
-      const a = toks[i];
-      const b = toks[i + 1];
-      if (b && b.lit && ['==', '=', '!=', '=~', '<', '>', '-eq', '-ne', '-lt', '-gt', '-le', '-ge', '-nt', '-ot'].includes(b.s) && toks[i + 2]) {
-        const c = toks[i + 2];
+    const str = async (k: number) => (skipping ? '' : this.expandSingle(toks[k].w));
+    const arith = async (k: number) => {
+      if (skipping) return 0n;
+      const e = await str(k);
+      try {
+        return evalArith(e, (n) => this.getVar(n), (n, val) => this.setVar(n, val));
+      } catch (err: any) {
+        throw new ShellError(`${e}: ${err.message}`);
+      }
+    };
+    const primary = async (): Promise<boolean> => {
+      if (i >= toks.length) fail('unexpected end of expression');
+      const bop = toks[i + 1]?.op;
+      if (i + 2 < toks.length && bop && (BINARY_OPS.has(bop) || bop === '=~')) {
+        const a = i;
+        const c = i + 2;
         i += 3;
-        switch (b.s) {
+        if (skipping) return false;
+        switch (bop) {
           case '==':
           case '=':
-            return matchPattern(c.pat, a.s);
+            return matchPattern(await this.expandPattern(toks[c].w), await str(a));
           case '!=':
-            return !matchPattern(c.pat, a.s);
-          case '=~': {
-            try {
-              const m = new RegExp(c.s).exec(a.s);
-              this.vars.set('BASH_REMATCH', m ? m[0] : '');
-              return !!m;
-            } catch {
-              return false;
-            }
-          }
+            return !matchPattern(await this.expandPattern(toks[c].w), await str(a));
+          case '=~':
+            return this.regexMatch(await str(a), toks[c].w);
           case '<':
-            return a.s < c.s;
+            return (await str(a)) < (await str(c));
           case '>':
-            return a.s > c.s;
+            return (await str(a)) > (await str(c));
+          case '-eq':
+            return (await arith(a)) === (await arith(c));
+          case '-ne':
+            return (await arith(a)) !== (await arith(c));
+          case '-lt':
+            return (await arith(a)) < (await arith(c));
+          case '-le':
+            return (await arith(a)) <= (await arith(c));
+          case '-gt':
+            return (await arith(a)) > (await arith(c));
+          case '-ge':
+            return (await arith(a)) >= (await arith(c));
           default:
-            return builtinTest(this, [a.s, b.s, c.s]) === 0;
+            return builtinTest(this, [await str(a), bop, await str(c)]) === 0;
         }
       }
-      if (a?.lit && a.s.startsWith('-') && b) {
+      const uop = toks[i].op;
+      if (uop && UNARY_OPS.has(uop) && i + 1 < toks.length && !isOp(i + 1, '&&', '||', ')')) {
+        const a = i + 1;
         i += 2;
-        return builtinTest(this, [a.s, b.s]) === 0;
+        if (skipping) return false;
+        return builtinTest(this, [uop, await str(a)]) === 0;
       }
-      i++;
-      return !!a && a.s !== '';
+      if (toks[i].op && /^-./.test(toks[i].op!) && i + 1 < toks.length && !isOp(i + 1, '&&', '||', ')')) fail(`unexpected argument \`${toks[i + 1].op ?? '…'}' to conditional unary operator`);
+      const k = i++;
+      if (i < toks.length && !isOp(i, '&&', '||', ')')) fail('conditional binary operator expected');
+      return (await str(k)) !== '';
     };
     try {
-      return orExpr() ? 0 : 1;
-    } catch {
+      if (!toks.length) fail('unexpected end of expression');
+      const v = await orExpr();
+      if (i < toks.length) fail(`syntax error near \`${toks[i].op ?? '…'}'`);
+      return v ? 0 : 1;
+    } catch (e) {
+      if (!(e instanceof DbracketError)) throw e;
+      this.err(`sh: [[: ${e.message}\n`);
       return 2;
     }
+  }
+
+  /**
+   * [[ s =~ re ]]: `re` is a POSIX extended regular expression; quoted parts of it match
+   * literally. Sets BASH_REMATCH (the match and its groups). An invalid regex gives status 2.
+   */
+  private async regexMatch(s: string, w: Word): Promise<boolean> {
+    const segs = await this.expandSegs(w, false);
+    let src = '';
+    for (const seg of segs) {
+      if ('brk' in seg) src += ' ';
+      else src += seg.quoted ? seg.s.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&') : seg.s;
+    }
+    let re: RegExp;
+    try {
+      re = new RegExp(eregToRegexSource(src));
+    } catch {
+      throw new DbracketError(`invalid regular expression \`${src}'`);
+    }
+    const m = re.exec(s);
+    const groups = m ? [...m].map((g) => g ?? '') : [];
+    this.arrays.set('BASH_REMATCH', groups);
+    this.vars.set('BASH_REMATCH', groups[0] ?? '');
+    return !!m;
   }
 
   // ---------------------------------------------------------------------------
@@ -944,7 +1326,7 @@ export class Shell {
       }
       case 'arith': {
         const expr = await this.expandSingle(p.expr);
-        let v: number;
+        let v: bigint;
         try {
           v = evalArith(expr, (n) => this.getVar(n), (n, val) => this.setVar(n, val));
         } catch (e: any) {
@@ -980,8 +1362,18 @@ export class Shell {
       return;
     }
     let val = this.getVar(name);
+    if (p.index !== undefined) {
+      const arr = this.arrays.get(name);
+      const all = p.index === '@' || p.index === '*';
+      if (p.length && all) {
+        segs.push({ s: String(arr ? arr.length : val === undefined ? 0 : 1), quoted: inDq, split: false });
+        return;
+      }
+      if (arr) val = all ? arr.join(' ') : arr[Number(evalArith(p.index, (n) => this.getVar(n), (n, v) => this.setVar(n, v)))];
+      else if (!all && Number(evalArith(p.index, (n) => this.getVar(n), (n, v) => this.setVar(n, v))) !== 0) val = undefined;
+    }
     if (p.length) {
-      segs.push({ s: String((name === '@' || name === '*' ? this.positional.length : (val ?? '').length)), quoted: inDq, split: false });
+      segs.push({ s: String((name === '@' || name === '*' ? this.positional.length : [...(val ?? '')].length)), quoted: inDq, split: false });
       return;
     }
     const op = p.op;
@@ -1007,8 +1399,7 @@ export class Shell {
       case '?':
         if (op === ':?' ? unsetOrNull : val === undefined) {
           const msg = p.arg?.length ? await this.expandSingle(p.arg) : 'parameter null or not set';
-          this.err(`sh: ${name}: ${msg}\n`);
-          throw new ExitSignal(1);
+          this.expansionError(`${name}: ${msg}`);
         }
         break;
       case ':+':
@@ -1060,13 +1451,20 @@ export class Shell {
       }
     }
     if (val === undefined) {
-      if (this.opts.nounset && !/^[@*#?$!0-]$/.test(name)) {
-        this.err(`sh: ${name}: unbound variable\n`);
-        throw new ExitSignal(1);
-      }
+      if (this.opts.nounset && !/^[@*#?$!0-]$/.test(name)) this.expansionError(`${name}: unbound variable`);
       val = '';
     }
     segs.push({ s: val, quoted: inDq, split: !inDq && !assignment });
+  }
+
+  /**
+   * ${p:?msg} or an unset variable under set -u: a non-interactive shell exits (status 1); an
+   * interactive one abandons the command line and keeps running.
+   */
+  private expansionError(msg: string): never {
+    if (this.opts.interactive) throw new ShellError(msg);
+    this.err(`sh: ${msg}\n`);
+    throw new ExitSignal(1);
   }
 
   private async commandSubst(src: string): Promise<string> {
@@ -1083,15 +1481,7 @@ export class Shell {
       }
       return chunks;
     })();
-    let code = 0;
-    try {
-      code = await sub.runSource(src, 'sh');
-    } catch (e) {
-      if (e instanceof ExitSignal) code = e.code;
-      else throw e;
-    } finally {
-      sub.releaseFds();
-    }
+    const code = await Shell.isolated(sub, () => sub.runSource(src, 'sh'));
     const chunks = await reader;
     r.unref();
     this.lastSubstStatus = code;
@@ -1167,7 +1557,15 @@ export class Shell {
       bases = next;
       if (!bases.length) break;
     }
-    if (pat.endsWith('/')) bases = bases.map((b) => b + '/');
+    // a trailing slash matches directories only (and symlinks to them)
+    if (pat.endsWith('/')) {
+      bases = bases
+        .filter((b) => {
+          const node = vfs.tryLookup(this.resolve(b));
+          return !!node && isDir(node);
+        })
+        .map((b) => (b.endsWith('/') ? b : b + '/'));
+    }
     return bases.filter((b) => b !== '' && b !== '/').sort();
   }
 
@@ -1190,13 +1588,7 @@ export class Shell {
   async interactive(): Promise<number> {
     this.opts.interactive = true;
     const proc = this.ctx.proc;
-    proc.onSignal = (sig) => {
-      if (sig === 'SIGINT' || sig === 'SIGTSTP' || sig === 'SIGQUIT' || sig === 'SIGWINCH') {
-        this.interrupted = true;
-        return true;
-      }
-      return false;
-    };
+    this.installSignalHandler();
     const tty = proc.fds.get(0)?.opts.tty;
     if (tty) tty.foregroundPgid = proc.pgid;
     let buffer = '';
@@ -1222,11 +1614,16 @@ export class Shell {
       buffer = '';
       if (!src.trim()) continue;
       if (this.history[this.history.length - 1] !== src) this.history.push(src);
+      this.interrupted = false;
       try {
         this.status = await this.runSource(src);
       } catch (e) {
         if (e instanceof ExitSignal) return e.code;
-        if (e instanceof BreakSig || e instanceof ContinueSig) continue;
+        if (e instanceof BreakSig || e instanceof ContinueSig || e instanceof ReturnSig) continue;
+        if (e instanceof InterruptSig) {
+          this.status = 130;
+          continue;
+        }
         if (e instanceof ShellError) {
           this.err(`sh: ${e.message}\n`);
           this.status = e.code;
@@ -1490,6 +1887,9 @@ export class ShellError extends Error {
   }
 }
 
+/** A malformed [[ ]] expression (status 2). */
+class DbracketError extends Error {}
+
 function escapePattern(s: string) {
   return s.replace(/[\\*?[\]]/g, (c) => '\\' + c);
 }
@@ -1532,7 +1932,8 @@ export const BUILTINS: Record<string, ShellBuiltin> = {
     sh.setVar('OLDPWD', sh.cwd, true);
     sh.cwd = dir;
     sh.vars.set('PWD', dir);
-    sh.ctx.proc.cwd = dir;
+    // an in-process subshell must not move its parent's process
+    if (sh.ownsProc) sh.ctx.proc.cwd = dir;
     return 0;
   },
   pwd(sh) {
@@ -1592,17 +1993,6 @@ export const BUILTINS: Record<string, ShellBuiltin> = {
         sh.positional = args.slice(i);
         return 0;
       }
-      if (a === '-o' || a === '+o') {
-        const on = a === '-o';
-        const name = args[++i];
-        if (name === 'pipefail') sh.opts.pipefail = on;
-        else if (name === 'errexit') sh.opts.errexit = on;
-        else if (name === 'nounset') sh.opts.nounset = on;
-        else if (name === 'xtrace') sh.opts.xtrace = on;
-        else if (name === 'noglob') sh.opts.noglob = on;
-        else if (name === 'allexport') sh.opts_allexport = on;
-        continue;
-      }
       if (/^[-+][a-zA-Z]+$/.test(a)) {
         const on = a[0] === '-';
         for (const c of a.slice(1)) {
@@ -1611,6 +2001,20 @@ export const BUILTINS: Record<string, ShellBuiltin> = {
           else if (c === 'u') sh.opts.nounset = on;
           else if (c === 'f') sh.opts.noglob = on;
           else if (c === 'a') sh.opts_allexport = on;
+          else if (c === 'o') {
+            // -o name (also inside a group: set -euo pipefail)
+            const name = args[++i];
+            if (name === undefined) {
+              for (const n of ['allexport', 'errexit', 'noglob', 'nounset', 'pipefail', 'xtrace']) sh.out(`${n.padEnd(15)}\t${sh.optionIsSet(n) ? 'on' : 'off'}\n`);
+              continue;
+            }
+            if (name === 'pipefail') sh.opts.pipefail = on;
+            else if (name === 'errexit') sh.opts.errexit = on;
+            else if (name === 'nounset') sh.opts.nounset = on;
+            else if (name === 'xtrace') sh.opts.xtrace = on;
+            else if (name === 'noglob') sh.opts.noglob = on;
+            else if (name === 'allexport') sh.opts_allexport = on;
+          }
         }
         continue;
       }
@@ -1687,18 +2091,28 @@ export const BUILTINS: Record<string, ShellBuiltin> = {
     return builtinTest(sh, args.slice(0, -1));
   },
   '((': (sh, args) => {
+    const expr = args.join(' ');
     try {
-      const v = evalArith(args.join(' '), (n) => sh.getVar(n), (n, val) => sh.setVar(n, val));
-      return v !== 0 ? 0 : 1;
+      const v = evalArith(expr, (n) => sh.getVar(n), (n, val) => sh.setVar(n, val));
+      return v !== 0n ? 0 : 1;
     } catch (e: any) {
-      sh.err(`sh: ((: ${e.message}\n`);
+      if (e instanceof ShellError) throw e;
+      sh.err(`sh: ((: ${expr}: ${e.message}\n`);
       return 1;
     }
   },
   let(sh, args) {
-    let v = 0;
-    for (const a of args) v = evalArith(a, (n) => sh.getVar(n), (n, val) => sh.setVar(n, val));
-    return v !== 0 ? 0 : 1;
+    if (!args.length) throw new ShellError('expression expected');
+    let v = 0n;
+    for (const a of args) {
+      try {
+        v = evalArith(a, (n) => sh.getVar(n), (n, val) => sh.setVar(n, val));
+      } catch (e: any) {
+        if (e instanceof ShellError) throw e;
+        throw new ShellError(`${a}: ${e.message}`);
+      }
+    }
+    return v !== 0n ? 0 : 1;
   },
   async read(sh, args) {
     let raw = false;
@@ -1777,6 +2191,10 @@ export const BUILTINS: Record<string, ShellBuiltin> = {
     if (args.length > 1) sh.positional = args.slice(1);
     try {
       return await sh.runSource(src, args[0]);
+    } catch (e) {
+      // `return` at the top of a sourced file ends the file
+      if (e instanceof ReturnSig) return e.code;
+      throw e;
     } finally {
       if (args.length > 1) sh.positional = saved;
     }
@@ -1853,28 +2271,80 @@ export const BUILTINS: Record<string, ShellBuiltin> = {
     return b(sh, args.slice(1));
   },
   async wait(sh, args) {
+    // a trapped signal interrupts the wait: it returns 128+n and the trap runs
+    const interrupted: unique symbol = Symbol();
+    const untilTrap = async <T>(p: Promise<T>): Promise<T | typeof interrupted> => {
+      if (!sh.ownsProc) return p;
+      return Promise.race([p, sh.waitForTrap().then((): typeof interrupted => interrupted)]);
+    };
+    const statusOfTrap = () => 128 + (SIGNALS['SIG' + (sh.pendingTrapSignal() ?? 'TERM')] ?? 15);
     if (args.length) {
       let st = 0;
       for (const a of args) {
-        const j = sh.bgJobs.get(Number(a));
-        if (j) st = await j;
-        else {
-          try {
-            const p = sh.kernel.get(Number(a));
-            st = exitCodeOf(await p.exited);
-          } catch {
-            st = 127;
-          }
+        const pid = a === '%%' || a === '%+' || a === '%' ? sh.lastBg : Number(a);
+        const j = sh.bgJobs.get(pid);
+        if (!j) {
+          sh.err(`sh: wait: pid ${a} is not a child of this shell\n`);
+          st = 127;
+          continue;
         }
+        const r = await untilTrap(j);
+        if (r === interrupted) return statusOfTrap();
+        st = r;
+        sh.bgJobs.delete(pid);
       }
       return st;
     }
-    await Promise.all(sh.bgJobs.values());
+    const r = await untilTrap(Promise.all(sh.bgJobs.values()));
+    if (r === interrupted) return statusOfTrap();
+    sh.bgJobs.clear();
     return 0;
   },
   trap(sh, args) {
-    if (args.length >= 2) for (const s of args.slice(1)) sh.traps.set(s.replace(/^SIG/, ''), args[0]);
-    return 0;
+    const signalSpec = (s: string): string | null => {
+      if (/^\d+$/.test(s)) {
+        const n = Number(s);
+        if (n === 0) return 'EXIT';
+        const name = Object.keys(SIGNALS).find((k) => SIGNALS[k] === n);
+        return name ? name.slice(3) : null;
+      }
+      const u = s.toUpperCase().replace(/^SIG/, '');
+      if (u === 'EXIT' || u === 'ERR' || u === 'DEBUG' || u === 'RETURN') return u;
+      return SIGNALS['SIG' + u] !== undefined ? u : null;
+    };
+    const show = (name: string) => {
+      const v = sh.traps.get(name);
+      if (v !== undefined) sh.out(`trap -- '${v.replace(/'/g, "'\\''")}' ${name === 'EXIT' || name === 'ERR' || name === 'DEBUG' || name === 'RETURN' ? name : 'SIG' + name}\n`);
+    };
+    if (args[0] === '--') args = args.slice(1);
+    if (args[0] === '-l') {
+      sh.out(Object.entries(SIGNALS).map(([k, v]) => `${String(v).padStart(2)}) ${k}`).join('\n') + '\n');
+      return 0;
+    }
+    if (args.length === 0 || args[0] === '-p') {
+      const names = args.length > 1 ? args.slice(1).map(signalSpec) : [...sh.traps.keys()];
+      for (const n of names) if (n) show(n);
+      return 0;
+    }
+    // `trap SIG…` (the first operand a signal number) or `trap - SIG…` resets them
+    let action: string | null = args[0];
+    let sigs = args.slice(1);
+    if (action === '-' || (args.length === 1 && signalSpec(action) !== null) || /^\d+$/.test(action)) {
+      if (action !== '-') sigs = args;
+      action = null;
+    }
+    let st = 0;
+    for (const s of sigs) {
+      const name = signalSpec(s);
+      if (!name || name === 'KILL' || name === 'STOP') {
+        sh.err(`sh: trap: ${s}: invalid signal specification\n`);
+        st = 1;
+        continue;
+      }
+      if (action === null) sh.traps.delete(name);
+      else sh.traps.set(name, action);
+    }
+    return st;
   },
   local(sh, args) {
     const scope = sh.locals[sh.locals.length - 1];
@@ -1926,11 +2396,32 @@ export const BUILTINS: Record<string, ShellBuiltin> = {
     return 0;
   },
   umask(sh, args) {
+    let symbolic = false;
+    let reusable = false;
+    while (args[0]?.startsWith('-') && args[0].length > 1) {
+      const a = args.shift()!;
+      if (a === '--') break;
+      for (const c of a.slice(1)) {
+        if (c === 'S') symbolic = true;
+        else if (c === 'p') reusable = true;
+        else throw new ShellError(`${a}: invalid option`, 2);
+      }
+    }
+    const mask = sh.umask;
     if (!args.length) {
-      sh.out(sh.ctx.proc.umask.toString(8).padStart(4, '0') + '\n');
+      const v = symbolic ? symbolicUmask(mask) : mask.toString(8).padStart(4, '0');
+      sh.out((reusable ? `umask ${symbolic ? '-S ' : ''}` : '') + v + '\n');
       return 0;
     }
-    sh.ctx.proc.umask = parseInt(args[0], 8) & 0o777;
+    const spec = args[0];
+    if (/^[0-7]+$/.test(spec)) {
+      sh.setUmask(parseInt(spec, 8) & 0o777);
+      return 0;
+    }
+    // symbolic: the operations act on the permissions the mask leaves
+    const allowed = applySymbolicMode(~mask & 0o777, spec, { umask: 0 });
+    if (allowed === null) throw new ShellError(`${spec}: invalid symbolic mode operator`);
+    sh.setUmask(~allowed & 0o777);
     return 0;
   },
   getopts(sh, args) {
@@ -2006,36 +2497,82 @@ function escapeClass(s: string) {
 // the `sh` program
 
 export async function shProgram(ctx: ProgramContext): Promise<number> {
+  // the process of a background job: run the job in the copy of the shell that started it
+  const job = pendingJobs.get(ctx.proc);
+  if (job) {
+    pendingJobs.delete(ctx.proc);
+    return job(ctx);
+  }
   const sh = new Shell(ctx);
+  sh.ownsProc = true;
   const args = ctx.argv.slice(1);
-  let command: string | null = null;
+  let readCommand = false;
   let interactive = false;
   let i = 0;
+  // options may be grouped (sh -ec '…', sh -eo pipefail script); with -c the command string is
+  // the first operand after the options, then $0 and the positional parameters
   for (; i < args.length; i++) {
     const a = args[i];
-    if (a === '-c') {
-      command = args[++i] ?? '';
+    if (a === '--' || a === '-') {
       i++;
       break;
     }
-    if (a === '-i') interactive = true;
-    else if (a === '-l' || a === '--login' || a === '--norc' || a === '--noprofile' || a === '-s') {
-      // ignore
-    } else if (/^[-+][euxfa]+$/.test(a) || a === '-o' || a === '+o') {
-      if (a === '-o' || a === '+o') {
-        await BUILTINS.set(sh, [a, args[++i]]);
-      } else await BUILTINS.set(sh, [a]);
-    } else if (a === '--') {
-      i++;
-      break;
-    } else break;
+    if (a.startsWith('--')) {
+      if (['--login', '--norc', '--noprofile', '--posix', '--noediting'].includes(a)) continue;
+      if (a === '--rcfile' || a === '--init-file') {
+        i++;
+        continue;
+      }
+      ctx.err(`sh: ${a}: invalid option\n`);
+      return 2;
+    }
+    if (!/^[-+]./.test(a)) break;
+    const on = a[0] === '-';
+    for (const c of a.slice(1)) {
+      if (c === 'c' && on) readCommand = true;
+      else if (c === 'i' && on) interactive = true;
+      else if (c === 's' || c === 'l') {
+        // read from stdin (the default without operands) / login shell
+      } else if (c === 'o') await BUILTINS.set(sh, [`${a[0]}o`, args[++i] ?? '']);
+      else if ('euxfavnhmbCBHPTE'.includes(c)) await BUILTINS.set(sh, [a[0] + c]);
+      else {
+        ctx.err(`sh: ${a[0]}${c}: invalid option\n`);
+        return 2;
+      }
+    }
   }
   const rest = args.slice(i);
+  sh.installSignalHandler();
+  let code: number;
   try {
-    if (command !== null) {
-      sh.arg0 = rest[0] ?? 'sh';
-      sh.positional = rest.slice(1);
-      return await sh.runSource(command);
+    code = await runMain();
+  } catch (e) {
+    if (e instanceof ExitSignal) code = e.code;
+    else if (e instanceof ShellError) {
+      sh.err(`sh: ${e.message}\n`);
+      code = e.code;
+    } else if (e instanceof ReturnSig) code = e.code;
+    else if (e instanceof BreakSig || e instanceof ContinueSig || e instanceof InterruptSig) code = sh.status;
+    else {
+      sh.releaseFds();
+      throw e;
+    }
+  }
+  try {
+    return await sh.runExitTrap(code);
+  } finally {
+    sh.releaseFds();
+  }
+
+  async function runMain(): Promise<number> {
+    if (readCommand) {
+      if (!rest.length) {
+        ctx.err('sh: -c: option requires an argument\n');
+        return 2;
+      }
+      sh.arg0 = rest[1] ?? ctx.argv[0];
+      sh.positional = rest.slice(2);
+      return await sh.runSource(rest[0]);
     }
     if (rest.length > 0) {
       const file = rest[0];
@@ -2060,17 +2597,6 @@ export async function shProgram(ctx: ProgramContext): Promise<number> {
     }
     const src = await ctx.readAllText(0);
     return await sh.runSource(src);
-  } catch (e) {
-    if (e instanceof ExitSignal) return e.code;
-    if (e instanceof ShellError) {
-      ctx.err(`sh: ${e.message}\n`);
-      return e.code;
-    }
-    if (e instanceof ReturnSig) return e.code;
-    if (e instanceof BreakSig || e instanceof ContinueSig) return 0;
-    throw e;
-  } finally {
-    sh.releaseFds();
   }
 }
 

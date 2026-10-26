@@ -74,6 +74,66 @@ function escapeRe(c: string) {
   return /[\\^$.*+?()[\]{}|/-]/.test(c) ? '\\' + c : c;
 }
 
+/**
+ * A POSIX extended regular expression (with the GNU \w \W \s \S \b \B \< \> escapes) as JavaScript
+ * regex source: bracket expressions with [:class:], a literal backslash inside brackets, `\x` for
+ * any other x is that character, and a `{` that doesn't start an interval is literal.
+ */
+export function eregToRegexSource(re: string): string {
+  let out = '';
+  for (let i = 0; i < re.length; i++) {
+    const c = re[i];
+    if (c === '\\') {
+      const n = re[++i];
+      if (n === undefined) throw new Error('trailing backslash');
+      if ('wWsSbB'.includes(n)) out += '\\' + n;
+      else if (n === '<') out += '\\b(?=\\w)';
+      else if (n === '>') out += '\\b(?<=\\w)';
+      else if (/[1-9]/.test(n)) out += '\\' + n;
+      else out += escapeRe(n);
+    } else if (c === '[') {
+      let j = i + 1;
+      let cls = '';
+      if (re[j] === '^') {
+        cls += '^';
+        j++;
+      }
+      // a `]` first in the list is literal
+      if (re[j] === ']') {
+        cls += '\\]';
+        j++;
+      }
+      for (; j < re.length && re[j] !== ']'; j++) {
+        const cj = re[j];
+        if (cj === '[' && (re[j + 1] === ':' || re[j + 1] === '=' || re[j + 1] === '.')) {
+          const close = re.indexOf(re[j + 1] + ']', j + 2);
+          if (close === -1) throw new Error('unterminated bracket expression');
+          const name = re.slice(j + 2, close);
+          if (re[j + 1] === ':') {
+            if (POSIX_CLASSES[name] === undefined) throw new Error(`invalid character class ${name}`);
+            cls += POSIX_CLASSES[name];
+          } else cls += name.replace(/[\\\]^-]/g, '\\$&');
+          j = close + 1;
+          continue;
+        }
+        cls += cj === '\\' || (cj === '^' && cls !== '' && cls !== '^') ? '\\' + cj : cj;
+      }
+      if (j >= re.length) throw new Error('unterminated bracket expression');
+      out += `[${cls}]`;
+      i = j;
+    } else if (c === '{') {
+      const m = /^\{(\d+)(,(\d*))?\}/.exec(re.slice(i));
+      if (m && out !== '') {
+        out += m[0];
+        i += m[0].length - 1;
+      } else out += '\\{';
+    } else if (c === '}') out += '\\}';
+    else if (c === '/') out += '\\/';
+    else out += c;
+  }
+  return out;
+}
+
 export function matchPattern(pat: string, s: string): boolean {
   let re = cache.get(pat);
   if (!re) {
