@@ -23,6 +23,17 @@ export function macrotask(fn: () => void) {
   channel.port2.postMessage(0);
 }
 
+// uv_close callbacks: their own task, but always before the next timers phase (libuv runs the close
+// phase at the end of an iteration; the browser may otherwise run an expired timer's task first)
+const closeQueue: (() => void)[] = [];
+export function closeCallback(fn: () => void) {
+  closeQueue.push(fn);
+  macrotask(runCloseCallbacks);
+}
+function runCloseCallbacks() {
+  while (closeQueue.length) closeQueue.shift()!();
+}
+
 // -----------------------------------------------------------------------------
 // handles and requests
 
@@ -312,6 +323,7 @@ export function toggleTimerRef(refed: boolean) {
 
 function fireTimers() {
   timer.id = null;
+  runCloseCallbacks();
   if (!processTimers || S.exiting) return;
   const t = now();
   const run = () => {

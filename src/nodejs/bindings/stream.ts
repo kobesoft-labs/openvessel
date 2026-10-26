@@ -104,9 +104,9 @@ export class HandleWrap {
     this._onClose();
     this.#handle.active = false;
     loop.removeHandle(this.#handle);
-    // uv_close callbacks run on a later loop turn
+    // uv_close callbacks run on a later loop turn, before the next timers
     const done = loop.startReq('HandleClose');
-    loop.macrotask(() => {
+    loop.closeCallback(() => {
       done();
       if (typeof cb === 'function') loop.scope(cb, this);
       const onclose = (this as any)[S.perIsolateSymbols.handle_onclose];
