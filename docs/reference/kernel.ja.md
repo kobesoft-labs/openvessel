@@ -50,7 +50,7 @@ URL（末尾の `/` なし）です。ランタイムの Service Worker は、�
 - ある URL の待機列は、その URL を使う最初のプロセスの起動のときに作られます。Worker を 1 つ取るたびに
   （`setTimeout(…, 0)` で）補充します。
 - 待機中の Worker は、`init` のメッセージを受け取るまで何もしません。待機列が空なら、その場で新しく作ります。
-- ワーカースレッドも、メインスレッドと同じ待機列から取ります。
+- ワーカースレッドも、メインスレッドと同じ待機列（そのプロセスのランタイムの待機列）から取ります。
 
 ### Node.js のランタイムの選択
 
@@ -61,8 +61,9 @@ URL（末尾の `/` なし）です。ランタイムの Service Worker は、�
 | 旧ランタイム | `dist/runtime/process.js` | `src/node/`（手書きの Node 互換の層） | 既定 |
 | 移植ランタイム | `dist/runtime/node-process.js` | `src/nodejs/`（Node 自身の `lib/` と、TypeScript で書いた `internalBinding()`） | VFS のファイル `/etc/openvessel/node` の中身が `port` のとき |
 
-カーネルは Worker を作るたびに（プロセスの起動ごと、ワーカースレッドごとに）`/etc/openvessel/node` を読み、前後の空白を
-除いて比べます。ほかの中身のときや、ファイルが無いときは旧ランタイムです。公開している互換性の数字
+カーネルは node のプログラムが起動するたびに（新しいプロセスと `execve`）`/etc/openvessel/node` を読み、前後の空白を
+除いて比べ、選んだランタイムをプロセスに記録します。プロセスのワーカースレッドは、実行中にファイルが変わっても、
+いつもメインスレッドと同じランタイムになります。ほかの中身のときや、ファイルが無いときは旧ランタイムです。公開している互換性の数字
 （[互換性](../compatibility.ja.md)）は、移植ランタイムのものです。
 
 ```ts
@@ -144,18 +145,18 @@ node のスレッドは、`SharedArrayBuffer` の通信路を通して、カー�
 | `stat` | `p`・`l`（lstat） | stat のオブジェクト | `ENOENT`・`ENOTDIR`・`ELOOP`・`ENAMETOOLONG` | 呼んだプロセスの `/proc/self`・`/proc/<pid>`・`/proc/<pid>/fd`・`/proc/self/fd/N` にも答える（[特別なファイル](filesystem.ja.md#特別なファイル)） | P, L |
 | `fstat` | `fd` | stat のオブジェクト | `EBADF` | inode の無い fd は作った値（tty `S_IFCHR\|0620`、パイプ `S_IFIFO\|0600`、ソケット `S_IFSOCK\|0600`） | P, L |
 | `fdKind` | `fd` | `file`・`dir`・`pipe`・`tty`・`null`・`socket` または `null` | — | | P |
-| `access` | `p`・`mode` | `null` | 探すときのエラー・`EACCES` | 調べるのは `X_OK`（ビット 1）だけ。ディレクトリ以外で `x` のビットが 1 つも無いとき | P, L |
-| `open` | `p`・`flags`（0）・`mode`（0o666） | fd（空いている 3 以上の最小の番号） | `ENOENT`・`ENOTDIR`・`EEXIST`・`EISDIR`・`EACCES`・`ENXIO`・`ELOOP`・`ENAMETOOLONG` | `O_CREAT` で、書き込みと検索の権限の無いディレクトリに作ろうとすると `EACCES` | P, L |
+| `access` | `p`・`mode` | `null` | 探すときのエラー・`EACCES` | `R_OK`・`W_OK`・`X_OK` を権限のビットで調べる（[権限](filesystem.ja.md#持ち主と権限)） | P, L |
+| `open` | `p`・`flags`（0）・`mode`（0o666） | fd（空いている 3 以上の最小の番号） | `ENOENT`・`ENOTDIR`・`EEXIST`・`EISDIR`・`EACCES`・`ENXIO`・`ELOOP`・`ENAMETOOLONG`・`EMFILE` | フラグが求める読み書きの権限がファイルに無いとき、また `O_CREAT` で書き込みと検索の権限の無いディレクトリに作ろうとすると `EACCES`。新しいファイルの mode は umask で削る。シンボリックリンクに `O_NOFOLLOW` なら `ELOOP`。`RLIMIT_NOFILE` に達すると `EMFILE` | P, L |
 | `close` | `fd` | `null` | `EBADF` | その fd でカーネルが始めた読み取りも止める | P, L |
 | `read` | `fd`・`len`（65536、最大 16 MiB）・`pos` | バイト列 | `EBADF`・`EISDIR` | パイプ・tty・ソケットは、データか EOF が来るまで待つ | P, L |
 | `write` | `fd`・`pos`・`nonblock`・`sendHandle` とバイト列 | 書いたバイト数 | `EBADF`・`EISDIR`・`EPIPE`・`EINVAL` | パイプ・ソケットに `nonblock` で書くと、入る分だけ書く（0 = いっぱい）。`sendHandle` はハンドルを最初の 1 バイトに添える（ソケットだけ） | P, L |
 | `lseek` | `fd`・`offset`・`whence`（0/1/2） | 新しい位置 | `ESPIPE`・`EINVAL`・`EBADF` | 通常のファイルだけ。末尾より先へも動ける | L（WASI） |
-| `readFile` | `p` | バイト列 | `ENOENT`・`EISDIR` など | キャラクタデバイスは 1 回分（最大 64 KiB）だけ読む。`/proc/self/fd/N` はその fd を EOF まで読む | P, L |
-| `writeFile` | `p`・`flags`（0o1101）・`mode`（0o666）とバイト列 | `null` | `EEXIST`・`EISDIR`・`ENOENT`・`ENOTDIR`・`EACCES` | `O_APPEND` は `open` を通す。mode は umask で削る | P, L |
-| `readdir` | `p`・`types` | 名前、または `[名前, S_IF* の種類]` の組 | `ENOENT`・`ENOTDIR` | 作った順。`.`/`..` は無い | P, L |
-| `mkdir` | `p`・`mode`（0o777）・`recursive` | `recursive` なら最初に作ったディレクトリか `null` | `EEXIST`・`ENOENT`・`ENOTDIR`・`EACCES` | | P, L |
-| `mkdtemp` | `prefix` | 作ったパス | `EACCES`・`ENOENT`・`EEXIST` | ランダムな 6 文字 `[A-Za-z0-9]`、mode 0o700、最大 100 回試す | P, L |
-| `rmdir` | `p` | `null` | `ENOENT`・`ENOTDIR`・`ENOTEMPTY`・`EACCES` | | P, L |
+| `readFile` | `p` | バイト列 | `ENOENT`・`EISDIR`・`EACCES` など | キャラクタデバイスは 1 回分（最大 64 KiB）だけ読む。`/proc/self/fd/N` はその fd を EOF まで読む | P, L |
+| `writeFile` | `p`・`flags`（0o1101）・`mode`（0o666）とバイト列 | `null` | `EEXIST`・`EISDIR`・`ENOENT`・`ENOTDIR`・`EACCES` | `O_APPEND` は `open` を通す。新しいファイルの mode は umask で削る | P, L |
+| `readdir` | `p`・`types` | 名前、または `[名前, S_IF* の種類]` の組 | `ENOENT`・`ENOTDIR`・`EACCES` | 作った順。`.`/`..` は無い | P, L |
+| `mkdir` | `p`・`mode`（0o777）・`recursive` | `recursive` なら最初に作ったディレクトリか `null` | `EEXIST`・`ENOENT`・`ENOTDIR`・`EACCES` | mode は umask で削る | P, L |
+| `mkdtemp` | `prefix` | 作ったパス | `EACCES`・`ENOENT`・`EEXIST` | ランダムな 6 文字 `[A-Za-z0-9]`、mode 0o700 を umask で削ったもの、最大 100 回試す | P, L |
+| `rmdir` | `p` | `null` | `ENOENT`・`ENOTDIR`・`ENOTEMPTY`・`EACCES`・`EBUSY` | `/` は `EBUSY` | P, L |
 | `rm` | `p`・`recursive`・`force` | `null` | `ENOENT`・`ERR_FS_EISDIR` | 権限は調べない | L |
 | `unlink` | `p` | `null` | `ENOENT`・`EISDIR`・`EACCES` | | P, L |
 | `rename` | `from`・`to` | `null` | `ENOENT`・`EINVAL`・`EISDIR`・`ENOTDIR`・`ENOTEMPTY`・`EACCES` | | P, L |
@@ -165,11 +166,11 @@ node のスレッドは、`SharedArrayBuffer` の通信路を通して、カー�
 | `realpath` | `p` | 文字列 | `ENOENT`・`ENOTDIR`・`ELOOP` | | P, L |
 | `chmod` | `p`・`mode` | `null` | 探すときのエラー | シンボリックリンクはたどる | P, L |
 | `fchmod` | `fd`・`mode` | `null` | `EBADF` | inode の無い fd には何もしない | P, L |
-| `utimes` | `p`・`atime`・`mtime`（ミリ秒）・`l` | `null` | 探すときのエラー | シンボリックリンクはいつもたどる（`l` は無視） | P, L |
+| `utimes` | `p`・`atime`・`mtime`（ミリ秒）・`l` | `null` | 探すときのエラー | シンボリックリンクはたどる。`l`（`lutimes`）ならリンクそのものの時刻を変える | P, L |
 | `futimes` | `fd`・`atime`・`mtime`（ミリ秒） | `null` | `EBADF` | | P, L |
-| `truncate` | `p`・`len`（0） | `null` | `EISDIR`・探すときのエラー | 通常のファイル以外はそのまま | L |
-| `ftruncate` | `fd`・`len`（0） | `null` | `EBADF`・`EINVAL` | | P, L |
-| `copyFile` | `from`・`to`・`excl` | `null` | `EISDIR`・`EEXIST`・`ENOENT` | mode のビットも写す | P, L |
+| `truncate` | `p`・`len`（0） | `null` | `EISDIR`・`EACCES`・探すときのエラー | 通常のファイル以外はそのまま | L |
+| `ftruncate` | `fd`・`len`（0） | `null` | `EBADF`・`EINVAL` | 書き込み用に開いていない fd も `EINVAL` | P, L |
+| `copyFile` | `from`・`to`・`excl` | `null` | `EISDIR`・`EEXIST`・`ENOENT`・`EACCES` | mode のビットも写す | P, L |
 | `cp` | `from`・`to`・`force`・`errorOnExist`・`dereference` | `null` | `EEXIST`・`EISDIR` | 再帰。コピー先の親ディレクトリも作る | L |
 | `watch` | `id`・`p`・`recursive` | `null` | — | 通知は `watch` のメッセージで送る（[監視](filesystem.ja.md#監視)） | P, L |
 | `unwatch` | `id` | `null` | — | | P, L |
@@ -190,11 +191,11 @@ node のスレッドは、`SharedArrayBuffer` の通信路を通して、カー�
 | システムコール | 引数 | 結果 | エラー | 補足 | 使う側 |
 |---|---|---|---|---|---|
 | `getcwd` | — | 作業ディレクトリ | — | | P |
-| `chdir` | `p` | 実際のパス（シンボリックリンクを解決したもの） | `ENOENT`・`ENOTDIR` | | P, L |
-| `umask` | `mask`（省略可） | 前の値 | — | `mask & 0o777` を記録する | P |
+| `chdir` | `p` | 実際のパス（シンボリックリンクを解決したもの） | `ENOENT`・`ENOTDIR`・`EACCES` | 検索の権限が無ければ `EACCES` | P, L |
+| `umask` | `mask`（省略可） | 前の値 | — | `mask & 0o777` を記録する。子プロセスに引き継がれる | P |
 | `exit` | `code` | `null` | — | 終了状態は `code & 0xff`。[終了](processes.ja.md#終了) を参照 | P, L |
 | `execve` | `argv`・`env`・`argv0` | うまくいけば返事は無い | `ENOENT`・`EACCES`・`ELOOP` | 何かを変える前に調べる | P |
-| `kill` | `pid`・`sig` | `null` | `EINVAL`・`ESRCH` | `pid` 0 = 呼んだプロセス自身、負 = プロセスグループ、`sig` 0 = あるかどうかを調べるだけ | P, L |
+| `kill` | `pid`・`sig` | `null` | `EINVAL`・`ESRCH` | `pid` 0 = 呼んだプロセスのプロセスグループ、-1 = 呼んだプロセス以外の全部、ほかの負の数 = プロセスグループ、`sig` 0 = あるかどうかを調べるだけ。[kill](processes.ja.md#kill) を参照 | P, L |
 | `sigaction` | `sig`・`on` | `null` | — | プロセスがそのシグナルを自分で受けると記録する | P, L |
 | `spawn` | `argv`・`argv0`・`env`・`cwd`・`stdio`・`keepStdioOnError` | `{ pid, fds, error? }` | `ENOENT`・`EACCES`・`ELOOP`・`EINVAL` | `fds` は、パイプの親の側の端 | P, L |
 | `spawnSync` | `argv`・`argv0`・`env`・`cwd`・`stdio`・`timeout`・`killSignal` と標準入力のバイト列 | `{ pid, status, signal, outLen, error? }` と標準出力・標準エラーのバイト列 | `spawn` と同じ | 時間切れのあとは `error: 'ETIMEDOUT'` | P, L |
@@ -217,14 +218,14 @@ node のスレッドは、`SharedArrayBuffer` の通信路を通して、カー�
 | `listen` | `port`（0 = 選ぶ）・`host`・`kind` | ポート | `EADDRINUSE` | `kind`: `raw`（バイト列）・`http`（旧ランタイムの HTTP サーバー）・それ以外 = TCP だけ | P, L |
 | `unlisten` | `port` | `null` | — | | P, L |
 | `listenShare` | `port` | `null` | `EINVAL` | ほかのプロセスから受け取った待ち受けのソケットで accept する | P |
-| `tcpConnect` | `port`・`host` | `{ fd, self }` | `ECONNREFUSED` | `raw` の待ち受けにだけつなぐ。`self`: 呼んだスレッド自身が受け付ける | P |
+| `tcpConnect` | `port`・`host` | `{ fd, self, localAddress, localPort }` | `ECONNREFUSED`・`EMFILE` | `raw` の待ち受けにだけつなぐ。`self`: 呼んだスレッド自身が受け付ける。`localAddress` / `localPort`: つなぐ側のソケットのループバックアドレス（`host` が IPv6 なら `::1`、それ以外は `127.0.0.1`）とエフェメラルポート（[接続](#接続)） | P |
 | `tcpConnectOut` | `host`・`port`・`tls` | fd | — | 外のホストへの接続（[外への接続](#外への接続)） | P |
 | `tcpSetTls` | `fd`・`servername` | 外への接続なら `true` | — | | P |
 | `tlsHello` | `fd`・`certs` | `{ wait, certs }` | — | 2 つのプロセスのあいだで証明書を交換する | P |
 | `shutdown` | `fd` | `null` | `EBADF`・`ENOTSOCK` | 片側を閉じる。相手は EOF を読む | P |
 | `unixListen` | `p` | ソケットの inode の番号 | `EADDRINUSE`・`ENOENT`・`ENOTDIR` | ソケットのファイルを作る | P |
 | `unixUnlisten` | `ino` | `null` | — | ソケットのファイルが同じ inode のままなら消す | P |
-| `unixConnect` | `p` | fd | `ECONNREFUSED`・`ENOENT` | | P |
+| `unixConnect` | `p` | fd | `ECONNREFUSED`・`ENOENT`・`EMFILE` | | P |
 | `portInfo` | `port` | そこで待ち受けているか | — | | L |
 | `udpBind` | `port`・`address`・`reuse` | ポート | `EADDRINUSE` | | P |
 | `udpJoin` | `port` | `null` | `EINVAL` | 割り当て済みのポートに加わる（共有のソケット） | P |
@@ -323,12 +324,17 @@ node のスレッドは、`SharedArrayBuffer` の通信路を通して、カー�
 
 `tcpConnect` は socketpair を作ります。待ち受けているプロセスは片方の端を新しい fd（空いている 3 以上の最小の番号）と
 `tcp-accept` のメッセージで受け取り、呼んだ側はもう片方を受け取ります。socketpair は、ブロックしない書き手に対して
-向きごとに 212992 バイトまでためます（[パイプ](processes.ja.md#パイプ)）。アドレスの細部:
+向きごとに 212992 バイトまでためます（[パイプ](processes.ja.md#パイプ)）。待ち受けているプロセスに空いている
+ファイル記述子が無いとき（`EMFILE`）は受け付けられず、接続は拒否されます。
+
+つなぐ側は、Linux の既定の範囲 32768〜60999 からエフェメラルポートをもらいます。前に渡した番号の次（始まりはランダム）で、
+待ち受けに使われているポートと、開いているほかの接続が持っているポートは飛ばします。つなぐ側の端を閉じると、
+そのポートはまた空きます。アドレスの細部:
 
 | 接続元 | サーバーから見た `remoteAddress` / `remotePort` |
 |---|---|
-| プロセス（`tcpConnect`） | `127.0.0.1` / `0` |
-| プレビュー、または旧ランタイムの HTTP の要求 | `127.0.0.1` / 40001, 40002, …（60000 の次は 40000 に戻る） |
+| プロセス（`tcpConnect`） | `127.0.0.1`（IPv6 のアドレスへつないだときは `::1`）/ そのエフェメラルポート（つなぐ側の `localPort`） |
+| プレビュー、または旧ランタイムの HTTP の要求 | `127.0.0.1` / エフェメラルポート |
 | Unix ドメインソケット | `''` / `0` |
 
 ### プレビューからの HTTP
@@ -440,13 +446,18 @@ TLS を始めるときに `tcpSetTls` を呼びます。カーネルはその接
 ## ES モジュールの配信
 
 `src/kernel/esm.ts` は、VFS のファイルをブラウザの ES モジュールとして配ります。ランタイムの Service Worker が
-次の URL をカーネルへ回し、答えを `Content-Type: text/javascript; charset=utf-8` と `Cache-Control: no-store` で返します。
+（`RUNTIME_BASE` の下の）次の URL をカーネルへ回し、答えを `Content-Type: text/javascript; charset=utf-8` と
+`Cache-Control: no-store` で返します。
 
 | URL | 答え |
 |---|---|
 | `/__ov/esm/<絶対パス>[?query]` | そのファイルを ES モジュールにしたもの |
 | `/__ov/builtin/<name>` | 組み込みのモジュール（`node:fs` など）を `globalThis.__ov.builtin(name)` から export し直すモジュール |
+| `/__ov/esm-error?code=…&msg=…&names=…` | 解決できない import の代わり。`names` の名前（`default` も）を 1 回ずつ宣言し、評価されると `code` と `msg` の `Error` を投げる。import する側のモジュールはリンクできる |
 | `/__ov/mw/<pid>/<id>.mjs` | `esmRegister` で登録したソース（移植ランタイムの `ModuleWrap`）。知らないキーには `ERR_INTERNAL_ASSERTION` を投げるモジュール |
+
+生成するモジュールに書き込む URL は `RUNTIME_BASE` から始まる絶対 URL なので、ランタイムをサブパスで配信しても
+動きます。
 
 形式ごとの、ファイルからモジュールへの変え方:
 
@@ -521,9 +532,9 @@ TLS を始めるときに `tcpSetTls` を呼びます。カーネルはその接
 | `/dev/null`・`/dev/zero`・`/dev/random`・`/dev/urandom` | キャラクタデバイス | 0666 |
 | `/dev/fd` | ディレクトリ | 空。`/dev/fd/N` はプロセスごとに答える |
 | `/dev/stdin`・`/dev/stdout`・`/dev/stderr` | シンボリックリンク | `/proc/self/fd/0`・`/1`・`/2` へ |
-| `/proc/cpuinfo` | ファイル | `processor : 0`、`model name : OpenVessel virtual CPU` |
-| `/proc/meminfo` | ファイル | `MemTotal: 4194304 kB`、`MemFree: 2097152 kB` |
-| `/proc/version` | ファイル | `Linux version 6.1.0-openvessel` |
+| `/proc/cpuinfo` | ファイル | `navigator.hardwareConcurrency`（不明なら 4）の数だけの項目（`processor`、`model name : OpenVessel Virtual CPU`、`cpu MHz : 2400.000`、`cpu cores`）。移植ランタイムの `os.cpus()` と同じ数 |
+| `/proc/meminfo` | ファイル | `MemTotal: 8388608 kB`、`MemFree: 4194304 kB`、`MemAvailable: 4194304 kB`（移植ランタイムの `os.totalmem()` と `os.freemem()`） |
+| `/proc/version` | ファイル | `Linux version 6.8.0-openvessel (user@openvessel) #1 SMP OpenVessel`（移植ランタイムの `os.release()` と `os.version()`） |
 | `/bin/*`・`/usr/bin/*` | 実行できる小さなファイル | [登録されているプログラム](#登録されているプログラム) を参照 |
 | `/usr/bin/nodejs` | シンボリックリンク | `/usr/bin/node` へ |
 | `/home/user/.shrc` | ファイル | `alias ll='ls -l'`、`alias la='ls -la'` |

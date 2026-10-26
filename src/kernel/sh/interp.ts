@@ -716,7 +716,7 @@ export class Shell {
 
   private open(target: string, flags: number): OpenFile {
     try {
-      return this.kernel.openFile({ cwd: this.cwd, fds: this.fds, tty: this.ctx.proc.tty } as any, target, flags, 0o666);
+      return this.kernel.openFile({ cwd: this.cwd, fds: this.fds, tty: this.ctx.proc.tty, umask: this.ctx.proc.umask } as any, target, flags, 0o666);
     } catch (e: any) {
       const msg = e.code === 'ENOENT' ? 'No such file or directory' : e.code === 'EISDIR' ? 'Is a directory' : e.code === 'EACCES' ? 'Permission denied' : e.message;
       throw new ShellError(`${target}: ${msg}`);

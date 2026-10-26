@@ -7,10 +7,10 @@ import type { EsmService } from './esm.ts';
 import { O_ACCMODE, O_RDONLY, O_WRONLY, OpenFile, type Pipe, type PipeAttachment, createPipe, createSocketPair } from './io.ts';
 import { type Kernel, fdPathOf, leaveListener } from './kernel.ts';
 import type { NetRouter } from './net.ts';
-import { type NodeThread, type Proc, exitCodeOf, signalName } from './proc.ts';
+import { type NodeThread, type Proc, exitCodeOf, signalName, signalNumber } from './proc.ts';
 import { RUNTIME_BASE } from './base.ts';
 import { connectOutbound, markOutboundTls } from './outbound.ts';
-import { S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFREG, S_IFSOCK, isDir } from './vfs.ts';
+import { type Inode, S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFREG, S_IFSOCK, isDir, permits } from './vfs.ts';
 
 const enc = new TextEncoder();
 
@@ -70,9 +70,16 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
    * that holds `p`: write and search permission on it.
    */
   const checkDirWritable = (p: string) => {
-    const d = vfs.lookup(path.dirname(p));
-    const shift = d.uid === 1000 ? 6 : d.gid === 1000 ? 3 : 0;
-    if (((d.mode >> shift) & 3) !== 3) throw kerr('EACCES');
+    if (!permits(vfs.lookup(path.dirname(p)), 3)) throw kerr('EACCES');
+  };
+  /** EACCES unless a process may read (4), write (2) or execute (1) the inode: uid 1000 isn't root. */
+  const checkPerm = (n: Inode, want: number) => {
+    if (want && !permits(n, want)) throw kerr('EACCES');
+  };
+  /** What open(2) flags ask of an existing file: read and/or write permission. */
+  const accessFor = (flags: number) => {
+    const acc = flags & O_ACCMODE;
+    return (acc !== O_WRONLY ? 4 : 0) | (acc !== O_RDONLY || flags & 0o1000 ? 2 : 0);
   };
 
   /** The open file behind fd N of /proc/self/fd/N (ENOENT if it isn't open). */
@@ -106,23 +113,34 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
     const child: (OpenFile | null)[] = [];
     const parentFds: (number | null)[] = [];
     const toClose: OpenFile[] = [];
+    try {
+      buildStdioInto(proc, specs, child, parentFds, toClose);
+    } catch (e) {
+      // EMFILE: nothing of a half-built set stays open
+      for (const f of toClose) f.unref();
+      for (const fd of parentFds) if (fd !== null) proc.closeFd(fd);
+      throw e;
+    }
+    return { child, parentFds, toClose };
+  };
+  const buildStdioInto = (proc: Proc, specs: any[], child: (OpenFile | null)[], parentFds: (number | null)[], toClose: OpenFile[]) => {
     specs.forEach((s, i) => {
       if ((s === 'pipe' || s === 'overlapped') && i > 2) {
         // extra stdio pipes are duplex (libuv makes every stdio pipe with socketpair)
         const [mine, theirs] = createSocketPair();
         child.push(theirs);
-        parentFds.push(proc.allocFd(mine, 3));
         toClose.push(theirs);
+        parentFds.push(proc.allocFd(mine, 3));
       } else if (s === 'pipe' || s === 'overlapped') {
         const { r, w } = createPipe();
         if (i === 0) {
           child.push(r);
-          parentFds.push(proc.allocFd(w, 3));
           toClose.push(r);
+          parentFds.push(proc.allocFd(w, 3));
         } else {
           child.push(w);
-          parentFds.push(proc.allocFd(r, 3));
           toClose.push(w);
+          parentFds.push(proc.allocFd(r, 3));
         }
       } else if (s === 'inherit') {
         child.push(proc.fds.get(i) ?? null);
@@ -130,8 +148,8 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       } else if (s === 'ipc') {
         const [mine, theirs] = createSocketPair();
         child.push(theirs);
-        parentFds.push(proc.allocFd(mine, 3));
         toClose.push(theirs);
+        parentFds.push(proc.allocFd(mine, 3));
       } else if (s === 'ignore' || s === null || s === undefined) {
         const f = kernel.openFile(proc, '/dev/null', i === 0 ? O_RDONLY : O_WRONLY);
         child.push(f);
@@ -145,7 +163,6 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         parentFds.push(null);
       }
     });
-    return { child, parentFds, toClose };
   };
 
   const spawnChild = (proc: Proc, a: any, stdio: (OpenFile | null)[]) => {
@@ -211,13 +228,21 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         return proc.fds.get(a.fd)?.kind ?? null;
       case 'access': {
         const n = vfs.lookup(abs(proc, a.p));
-        if (a.mode & 1 && !(n.mode & 0o111) && !isDir(n)) throw kerr('EACCES');
+        checkPerm(n, (a.mode ?? 0) & 7);
         return null;
       }
       case 'open': {
         const p = abs(proc, a.p);
-        if ((a.flags ?? 0) & 0o100 && !vfs.tryLookup(p)) checkDirWritable(p);
-        const f = kernel.openFile(proc, p, a.flags ?? 0, a.mode ?? 0o666);
+        const flags = a.flags ?? 0;
+        proc.freeFd(3); // EMFILE before anything is created
+        // an existing file needs the permission its access mode asks for (the kernel's own /proc and
+        // /dev/tty paths aside); a new one, write permission on its directory
+        const existing = kernel.procFdOf(p, proc.pid) === null && p !== '/dev/tty' ? vfs.tryLookup(p, !(flags & 0o400000)) : undefined;
+        if (existing) {
+          if ((flags & 0o300) !== 0o300) checkPerm(existing, accessFor(flags)); // O_CREAT|O_EXCL: EEXIST comes first
+        }
+        else if (flags & 0o100 && !vfs.tryLookup(p)) checkDirWritable(p);
+        const f = kernel.openFile(proc, p, flags, a.mode ?? 0o666);
         return proc.allocFd(f, 3);
       }
       case 'close':
@@ -294,6 +319,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
           })();
         }
         const n = vfs.lookup(p);
+        checkPerm(n, 4);
         if (isDir(n)) throw kerr('EISDIR');
         if (n.device) return n.device.read(65536) ?? new Uint8Array(0);
         return vfs.readFile(p);
@@ -302,7 +328,11 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         const p = abs(proc, a.p);
         const flags = a.flags ?? 0o1101;
         const data = bin ?? new Uint8Array(0);
+        const existing = vfs.tryLookup(p);
+        if (existing && flags & 0o200) throw kerr('EEXIST');
+        if (existing && !isDir(existing)) checkPerm(existing, 2);
         if (flags & 0o2000) {
+          if (!existing && flags & 0o100) checkDirWritable(p);
           const f = kernel.openFile(proc, p, flags, a.mode ?? 0o666);
           try {
             f.write(data);
@@ -311,8 +341,6 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
           }
           return null;
         }
-        const existing = vfs.tryLookup(p);
-        if (existing && flags & 0o200) throw kerr('EEXIST');
         if (existing && isDir(existing)) throw kerr('EISDIR');
         if (existing?.device) {
           existing.device.write(data);
@@ -320,11 +348,12 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         }
         vfs.lookupParent(p); // ENOENT if parent is missing
         if (!existing) checkDirWritable(p);
-        vfs.writeFile(p, data, (a.mode ?? 0o666) & ~proc.umask);
+        vfs.writeFile(p, data, a.mode ?? 0o666, proc.umask);
         return null;
       }
       case 'readdir': {
         const p = abs(proc, a.p);
+        checkPerm(vfs.lookup(p), 4);
         if (a.types) {
           // resolve symlink entry types like readdir(3) d_type (links stay links)
           return vfs.readdirTypes(p);
@@ -337,7 +366,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         let first = p;
         if (a.recursive) while (first !== '/' && !vfs.tryLookup(path.dirname(first))) first = path.dirname(first);
         if (!vfs.tryLookup(first)) checkDirWritable(first);
-        const r = vfs.mkdir(p, a.mode ?? 0o777, !!a.recursive);
+        const r = vfs.mkdir(p, a.mode ?? 0o777, !!a.recursive, proc.umask);
         return a.recursive ? (r ?? null) : null;
       }
       case 'mkdtemp': {
@@ -346,7 +375,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
           const p = abs(proc, a.prefix + suffix);
           if (vfs.exists(p)) continue;
           checkDirWritable(p);
-          vfs.mkdir(p, 0o700);
+          vfs.mkdir(p, 0o700, false, proc.umask);
           return p;
         }
         throw kerr('EEXIST');
@@ -421,26 +450,39 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         return null;
       case 'fchmod': {
         const f = proc.getFd(a.fd);
-        if (f.opts.node) f.opts.node.mode = (f.opts.node.mode & ~0o7777) | (a.mode & 0o7777);
-        return null;
-      }
-      case 'utimes':
-        vfs.utimes(abs(proc, a.p), a.atime, a.mtime);
-        return null;
-      case 'futimes': {
-        const f = proc.getFd(a.fd);
-        if (f.opts.node) {
-          f.opts.node.atimeMs = a.atime;
-          f.opts.node.mtimeMs = a.mtime;
+        const n = f.opts.node;
+        if (n) {
+          n.mode = (n.mode & ~0o7777) | (a.mode & 0o7777);
+          n.ctimeMs = Date.now();
+          vfs.touched(f.opts.path);
         }
         return null;
       }
-      case 'truncate':
-        vfs.truncate(abs(proc, a.p), a.len ?? 0);
+      case 'utimes':
+        // lutimes (l) sets the times of a symlink itself
+        vfs.utimes(abs(proc, a.p), a.atime, a.mtime, !a.l);
         return null;
+      case 'futimes': {
+        const f = proc.getFd(a.fd);
+        const n = f.opts.node;
+        if (n) {
+          n.atimeMs = a.atime;
+          n.mtimeMs = a.mtime;
+          n.ctimeMs = Date.now();
+          vfs.touched(f.opts.path);
+        }
+        return null;
+      }
+      case 'truncate': {
+        const p = abs(proc, a.p);
+        checkPerm(vfs.lookup(p), 2);
+        vfs.truncate(p, a.len ?? 0);
+        return null;
+      }
       case 'ftruncate': {
         const f = proc.getFd(a.fd);
-        if (!f.opts.node) throw kerr('EINVAL');
+        // Linux: EINVAL for a descriptor that isn't a file open for writing
+        if (!f.opts.node || !f.writable) throw kerr('EINVAL');
         vfs.truncateNode(f.opts.node, a.len ?? 0, f.opts.path);
         return null;
       }
@@ -449,8 +491,12 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         const to = abs(proc, a.to);
         const n = vfs.lookup(from);
         if (isDir(n)) throw kerr('EISDIR');
-        if (a.excl && vfs.exists(to)) throw kerr('EEXIST');
+        checkPerm(n, 4);
+        const dest = vfs.tryLookup(to);
+        if (a.excl && dest) throw kerr('EEXIST');
         vfs.lookupParent(to);
+        if (dest) checkPerm(dest, 2);
+        else checkDirWritable(to);
         const data = vfs.readFile(from);
         const out = vfs.writeFile(to, data, n.mode & 0o7777);
         out.mode = (out.mode & ~0o7777) | (n.mode & 0o7777);
@@ -467,8 +513,9 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       case 'watch': {
         const base = abs(proc, a.p);
         const key = `${proc.pid}:${a.id}`;
+        const below = base === '/' ? '/' : base + '/';
         const stop = vfs.onChange((ev) => {
-          const inside = ev.path === base || (a.recursive ? ev.path.startsWith(base + '/') : path.dirname(ev.path) === base);
+          const inside = ev.path === base || (a.recursive ? ev.path.startsWith(below) : path.dirname(ev.path) === base);
           if (!inside) return;
           kernel.postTo(proc, thread, { t: 'watch', id: a.id, type: ev.type, path: ev.path });
         });
@@ -521,6 +568,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         const p = abs(proc, a.p);
         const n = vfs.lookup(p);
         if (!isDir(n)) throw kerr('ENOTDIR');
+        checkPerm(n, 1);
         const real = vfs.realpath(p);
         proc.cwd = real;
         return real;
@@ -618,17 +666,27 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         return new Promise(() => {});
       }
       case 'kill': {
-        if (typeof a.sig === 'number' && (a.sig < 0 || a.sig > 64 || !Number.isInteger(a.sig))) throw kerr('EINVAL');
-        const target = a.pid === 0 ? proc.pid : a.pid;
-        if (target < 0) {
-          kernel.killGroup(-target, signalName(a.sig));
-          return null;
+        const sig = a.sig ?? 'SIGTERM';
+        const num = signalNumber(sig);
+        if (num < 0) throw kerr('EINVAL');
+        const pid = Number(a.pid);
+        // pid > 0: that process; 0: the caller's process group; -1: every process but the caller;
+        // < -1: the process group -pid. Signal 0 only checks that there is one.
+        // (an exited process has been reaped as far as the caller can tell: libuv reaps on SIGCHLD)
+        let targets: Proc[];
+        if (pid > 0) {
+          const t = kernel.get(pid);
+          if (t.state !== 'running') throw kerr('ESRCH');
+          targets = [t];
+        } else {
+          const pgid = pid === 0 ? proc.pgid : -pid;
+          targets = [...kernel.procs.values()].filter((p) => p.state === 'running' && (pid === -1 ? p !== proc : p.pgid === pgid));
+          if (!targets.length) throw kerr('ESRCH');
         }
-        const t = kernel.get(target);
-        // an exited process has been reaped as far as the caller can tell (libuv reaps on SIGCHLD)
-        if (t.state !== 'running') throw kerr('ESRCH');
-        if (a.sig === 0) return null;
-        kernel.kill(t.pid, a.sig);
+        if (num === 0) return null;
+        // the caller last: a signal that ends it ends this loop too
+        targets.sort((x, y) => Number(x === proc) - Number(y === proc));
+        for (const t of targets) if (t.state === 'running') kernel.kill(t.pid, sig);
         return null;
       }
       case 'sigaction':
@@ -826,11 +884,14 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       case 'tcpConnect': {
         const rec = kernel.ports.get(Number(a.port));
         if (!rec || rec.host !== 'raw') throw kerr('ECONNREFUSED');
-        const end = net.tcp.connect(rec, { address: '127.0.0.1', port: 0 });
-        if (!end) throw kerr('ECONNREFUSED');
+        proc.freeFd(3);
+        // the connecting socket is bound to an ephemeral port of the loopback address it used
+        const address = String(a.host ?? '').includes(':') ? '::1' : '127.0.0.1';
+        const conn = net.tcp.connect(rec, { address });
+        if (!conn) throw kerr('ECONNREFUSED');
         const by = net.tcp.lastAcceptor;
         // and whether the caller's own thread is the one accepting it
-        return { fd: proc.allocFd(end, 3), self: by?.pid === proc.pid && by?.tid === thread.tid };
+        return { fd: proc.allocFd(conn.end, 3), self: by?.pid === proc.pid && by?.tid === thread.tid, localAddress: address, localPort: conn.port };
       }
       case 'tcpConnectOut': {
         // not a virtual port: HTTP over the policy-checked proxy (see outbound.ts)
@@ -850,7 +911,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       }
       case 'unixListen': {
         // the socket inode is made by bind(); listen() registers it
-        const node = kernel.vfs.mknodSock(abs(proc, a.p));
+        const node = kernel.vfs.mknodSock(abs(proc, a.p), 0o777 & ~proc.umask);
         kernel.unixSockets.set(node.ino, { port: node.ino, pid: proc.pid, tid: thread.tid, host: 'unix', path: abs(proc, a.p) });
         return node.ino;
       }
@@ -869,9 +930,10 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         const node = kernel.vfs.lookup(abs(proc, a.p), true);
         const rec = kernel.unixSockets.get(node.ino);
         if (!rec || (node.mode & 0o170000) !== S_IFSOCK) throw kerr('ECONNREFUSED');
-        const end = net.tcp.connect(rec, { address: '', port: 0 }, 'pipe-accept');
-        if (!end) throw kerr('ECONNREFUSED');
-        return proc.allocFd(end, 3);
+        proc.freeFd(3);
+        const conn = net.tcp.connect(rec, { address: '', port: 0 }, 'pipe-accept');
+        if (!conn) throw kerr('ECONNREFUSED');
+        return proc.allocFd(conn.end, 3);
       }
       case 'portInfo':
         return kernel.ports.has(a.port);
@@ -942,8 +1004,14 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
                 release();
                 return;
               }
-              // a received file gets a descriptor in this process
-              const handle = r.item ? { ...r.item.meta, ...(r.item.file ? { fd: proc.allocFd(r.item.file, 3) } : {}) } : undefined;
+              // a received file gets a descriptor in this process; with none left (EMFILE) it is
+              // dropped, as Linux truncates the control message (MSG_CTRUNC)
+              let handle: Record<string, unknown> | undefined;
+              try {
+                handle = r.item ? { ...r.item.meta, ...(r.item.file ? { fd: proc.allocFd(r.item.file, 3) } : {}) } : undefined;
+              } catch {
+                handle = undefined;
+              }
               kernel.postTo(proc, thread, { t: 'fd-data', fd: msg.fd, data: r.data, handle });
             }
           } finally {

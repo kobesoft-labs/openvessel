@@ -4,8 +4,8 @@ import { KernelError, kerr } from '../shared/errno.ts';
 import * as path from '../shared/path.ts';
 import { createChannelBuffer, SyncServer } from '../shared/syncchan.ts';
 import { O_RDONLY, O_RDWR, O_WRONLY, OpenFile, Tty, createPipe, openFifo } from './io.ts';
-import { type ExitStatus, type NodeThread, Proc, exitCodeOf, signalName, signalNumber } from './proc.ts';
-import { S_IFIFO, S_IFMT, S_IFREG, VFS, isDir, isLink } from './vfs.ts';
+import { type ExitStatus, type NodeThread, Proc, defaultAction, exitCodeOf, signalName, signalNumber } from './proc.ts';
+import { S_IFIFO, S_IFMT, S_IFREG, VFS, isDir, isLink, permits } from './vfs.ts';
 
 export type Program = (ctx: ProgramContext) => Promise<number>;
 
@@ -25,8 +25,10 @@ export interface SpawnOptions {
 }
 
 export interface KernelHooks {
-  /** Creates a process worker (node runtime). */
-  createWorker(name: string): Worker;
+  /** Creates a process worker for a Node.js runtime (as chosen by runtime()). */
+  createWorker(name: string, runtime?: string): Worker;
+  /** The Node.js runtime for a node program starting now; its worker threads keep using it. */
+  runtime?(): string;
   /** Called when a process starts listening on a virtual port. */
   onListen?(port: number, pid: number): void;
   onUnlisten?(port: number, pid: number): void;
@@ -109,9 +111,14 @@ export class Kernel {
     v.symlink('/proc/self/fd/0', '/dev/stdin');
     v.symlink('/proc/self/fd/1', '/dev/stdout');
     v.symlink('/proc/self/fd/2', '/dev/stderr');
-    v.writeFile('/proc/cpuinfo', 'processor\t: 0\nmodel name\t: OpenVessel virtual CPU\n');
-    v.writeFile('/proc/meminfo', 'MemTotal:        4194304 kB\nMemFree:         2097152 kB\n');
-    v.writeFile('/proc/version', 'Linux version 6.1.0-openvessel\n');
+    // what the ported runtime's os module reports: os.cpus() (one per navigator.hardwareConcurrency),
+    // os.totalmem() / os.freemem(), os.release() / os.version()
+    const cpus = (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator?.hardwareConcurrency || 4;
+    let cpuinfo = '';
+    for (let i = 0; i < cpus; i++) cpuinfo += `processor\t: ${i}\nmodel name\t: OpenVessel Virtual CPU\ncpu MHz\t\t: 2400.000\ncpu cores\t: ${cpus}\n\n`;
+    v.writeFile('/proc/cpuinfo', cpuinfo);
+    v.writeFile('/proc/meminfo', 'MemTotal:        8388608 kB\nMemFree:         4194304 kB\nMemAvailable:    4194304 kB\n');
+    v.writeFile('/proc/version', 'Linux version 6.8.0-openvessel (user@openvessel) #1 SMP OpenVessel\n');
   }
 
   /** Installs a builtin program as an executable file in /bin (or another dir). */
@@ -161,18 +168,20 @@ export class Kernel {
     return path.resolve(cwd, p);
   }
 
-  /** Finds an executable for `cmd` (PATH lookup when no slash). */
+  /**
+   * Finds an executable for `cmd` (PATH lookup when no slash). As in execvp(3), an empty PATH entry
+   * is the working directory and an unset PATH is /bin:/usr/bin.
+   */
   which(cmd: string, env: Record<string, string>, cwd: string): string | null {
     if (cmd.includes('/')) {
       const p = this.resolvePath(cwd, cmd);
       const n = this.vfs.tryLookup(p);
       return n && !isDir(n) ? p : null;
     }
-    for (const dir of (env.PATH ?? '').split(':')) {
-      if (!dir) continue;
-      const p = path.join(this.resolvePath(cwd, dir), cmd);
+    for (const dir of (env.PATH ?? '/bin:/usr/bin').split(':')) {
+      const p = path.join(this.resolvePath(cwd, dir || '.'), cmd);
       const n = this.vfs.tryLookup(p);
-      if (n && !isDir(n) && (n.mode & S_IFMT) === S_IFREG && n.mode & 0o111) return p;
+      if (n && (n.mode & S_IFMT) === S_IFREG && permits(n, 1)) return p;
     }
     return null;
   }
@@ -202,9 +211,12 @@ export class Kernel {
 
     const pid = this.nextPid++;
     const pgid = opts.pgid === 0 ? pid : (opts.pgid ?? parent?.pgid ?? pid);
-    const proc = new Proc({ pid, ppid: opts.ppid ?? 0, pgid, argv: plan.argv, env, cwd });
+    const proc = new Proc({ pid, ppid: opts.ppid ?? 0, pgid, argv: plan.argv, env: plan.env ?? env, cwd });
     proc.tty = opts.tty ?? parent?.tty;
-    if (parent) proc.nofile = parent.nofile;
+    if (parent) {
+      proc.nofile = parent.nofile;
+      proc.umask = parent.umask;
+    }
     const stdio = opts.stdio ?? [];
     for (let i = 0; i < stdio.length; i++) {
       const f = stdio[i];
@@ -221,14 +233,15 @@ export class Kernel {
         }
       }
       for (const [ino, rec] of this.unixSockets) if (rec.pid === pid) this.unixSockets.delete(ino);
-      // reparent children to init (pid 0)
+      // orphans go to init: there is no init process, the host plays its part (ppid 0)
       for (const c of proc.children) {
         const cp = this.procs.get(c);
         if (cp) cp.ppid = 0;
       }
-      // reap after a while if nobody waits (keep status for waitpid)
+      proc.children.clear();
+      // the record (and its exit status) is kept for a while, then dropped
       const t = setTimeout(() => {
-        if (!this.procs.get(pid)?.children.size) this.procs.delete(pid);
+        this.procs.delete(pid);
         this.procs.get(proc.ppid)?.children.delete(pid);
       }, 60_000) as any;
       t?.unref?.();
@@ -246,49 +259,56 @@ export class Kernel {
     return proc;
   }
 
-  /** Determines how to run argv: builtin program or node, following shebangs. */
-  planExec(argv: string[], env: Record<string, string>, cwd: string, searchPath = true): { kind: 'builtin'; name: string; argv: string[] } | { kind: 'node'; argv: string[]; direct?: boolean } {
+  /**
+   * Determines how to run argv: builtin program or node, following shebangs. `env` is set when a
+   * `#!/usr/bin/env` line changes the environment of the program.
+   */
+  planExec(argv: string[], env: Record<string, string>, cwd: string, searchPath = true): ({ kind: 'builtin'; name: string; argv: string[] } | { kind: 'node'; argv: string[]; direct?: boolean }) & { env?: Record<string, string> } {
     let depth = 0;
+    let newEnv: Record<string, string> | undefined;
     for (;;) {
       if (depth++ > 8) throw kerr('ELOOP');
       const cmd = argv[0];
-      const file = searchPath || cmd.includes('/') ? this.which(cmd, env, cwd) : null;
+      const file = searchPath || cmd.includes('/') ? this.which(cmd, newEnv ?? env, cwd) : null;
       if (!file) {
         // bare program names that exist as builtins even without a /bin entry
-        if (!cmd.includes('/') && this.programs.has(cmd)) return { kind: 'builtin', name: cmd, argv };
+        if (!cmd.includes('/') && this.programs.has(cmd)) return { kind: 'builtin', name: cmd, argv, env: newEnv };
         throw new KernelError('ENOENT', `${cmd}: command not found`);
       }
       const node = this.vfs.lookup(file);
-      if (!(node.mode & 0o111)) throw new KernelError('EACCES', `${cmd}: Permission denied`);
+      if (!permits(node, 1)) throw new KernelError('EACCES', `${cmd}: Permission denied`);
       const head = dec.decode(node.data!.subarray(0, Math.min(node.size, 256)));
-      if (head.startsWith('#!')) {
-        const line = head.slice(2).split('\n')[0].trim();
-        const parts = line.split(/\s+/);
-        let interp = parts[0];
-        let iargs = parts.slice(1);
+      // Linux: the interpreter, then the rest of the line (blanks around it removed) as ONE argument
+      const shebang = head.startsWith('#!') ? /^[ \t]*([^ \t\n]+)[ \t]*([^\n]*?)[ \t]*(?:\n|$)/.exec(head.slice(2)) : null;
+      if (shebang) {
+        let interp = shebang[1];
+        let iargs = shebang[2] ? [shebang[2]] : [];
         if (interp === BUILTIN_SHEBANG) {
-          const name = iargs[0];
-          if (name === 'node') return { kind: 'node', argv: ['node', ...argv.slice(1)], direct: depth === 1 };
+          const name = shebang[2];
+          if (name === 'node') return { kind: 'node', argv: ['node', ...argv.slice(1)], direct: depth === 1, env: newEnv };
           if (!this.programs.has(name)) throw new KernelError('ENOENT', `${name}: builtin missing`);
-          return { kind: 'builtin', name, argv };
+          return { kind: 'builtin', name, argv, env: newEnv };
         }
         if (interp === '/usr/bin/env' || interp === '/bin/env') {
-          if (iargs[0] === '-S') iargs = iargs.slice(1).join(' ').split(/\s+/);
-          while (iargs[0]?.includes('=')) iargs.shift();
-          interp = iargs[0];
-          iargs = iargs.slice(1);
+          // what env does with that argument; without a command it runs as itself (and prints the environment)
+          const r = envShebang(iargs[0], newEnv ?? env);
+          if (r.argv.length) {
+            newEnv = r.env;
+            interp = r.argv[0];
+            iargs = r.argv.slice(1);
+          }
         }
-        const base = path.basename(interp ?? '');
+        const base = path.basename(interp);
         if (base === 'node' || base === 'nodejs' || base === 'bun' || base === 'deno') {
-          return { kind: 'node', argv: ['node', ...iargs, file, ...argv.slice(1)] };
+          return { kind: 'node', argv: ['node', ...iargs, file, ...argv.slice(1)], env: newEnv };
         }
         argv = [interp, ...iargs, file, ...argv.slice(1)];
         continue;
       }
       // JS files executed directly (e.g. bins without a shebang)
-      if (/\.(c|m)?js$/.test(file)) return { kind: 'node', argv: ['node', file, ...argv.slice(1)] };
+      if (/\.(c|m)?js$/.test(file)) return { kind: 'node', argv: ['node', file, ...argv.slice(1)], env: newEnv };
       // ENOEXEC: run as a shell script, like POSIX shells do
-      return { kind: 'builtin', name: 'sh', argv: ['sh', file, ...argv.slice(1)] };
+      return { kind: 'builtin', name: 'sh', argv: ['sh', file, ...argv.slice(1)], env: newEnv };
     }
   }
 
@@ -316,7 +336,7 @@ export class Kernel {
     }
     for (const [ino, rec] of this.unixSockets) if (rec.pid === proc.pid) this.unixSockets.delete(ino);
     proc.argv = plan.argv;
-    proc.env = env;
+    proc.env = plan.env ?? env;
     if (plan.kind === 'builtin') {
       proc.kind = 'builtin';
       proc.title = plan.name;
@@ -360,7 +380,9 @@ export class Kernel {
   /** Starts a node thread (main or worker_threads) for `proc`. */
   startThread(proc: Proc, init: Record<string, unknown>, transfer: Transferable[] = [], parentTid?: number, explicitTid?: number): NodeThread {
     const tid = explicitTid ?? this.nextTid++;
-    const worker = this.hooks.createWorker(`node:${proc.pid}:${tid}`);
+    // the runtime is chosen when the program starts (also by execve); its threads get the same one
+    if (init.kind === 'main') proc.runtime = this.hooks.runtime?.();
+    const worker = this.hooks.createWorker(`node:${proc.pid}:${tid}`, proc.runtime);
     const sab = createChannelBuffer();
     const thread: NodeThread = { tid, worker, server: new SyncServer(sab), busy: false, parentTid };
     proc.threads.set(tid, thread);
@@ -446,17 +468,26 @@ export class Kernel {
   // ---------------------------------------------------------------------------
   // signals
 
+  /**
+   * Sends a signal (a number 1–64 or a name; 0 does nothing). EINVAL for something that is no signal,
+   * ESRCH for an unknown pid. Without a handler the signal's default action applies: ignored (SIGCHLD,
+   * SIGURG, SIGWINCH, and SIGCONT, as nothing is ever stopped) or the process ends. There is no stopped
+   * state, so the stop signals (SIGSTOP, SIGTSTP, SIGTTIN, SIGTTOU) end the process too.
+   */
   kill(pid: number, sig: string | number = 'SIGTERM', soft = false) {
+    const num = signalNumber(sig);
+    if (num < 0) throw kerr('EINVAL');
     const proc = this.get(pid);
+    if (proc.state !== 'running' || num === 0) return;
     const name = signalName(sig);
-    if (proc.state !== 'running') return;
-    if (signalNumber(name) === 0) return;
+    const action = defaultAction(name);
     if (proc.kind === 'node') {
-      if (proc.handledSignals.has(name) && name !== 'SIGKILL') {
+      if (proc.handledSignals.has(name) && name !== 'SIGKILL' && name !== 'SIGSTOP') {
         this.post(proc, { t: 'signal', sig: name });
         return;
       }
-      if (name === 'SIGWINCH' || name === 'SIGCHLD' || name === 'SIGCONT') {
+      if (action === 'ign' || action === 'cont') {
+        // the runtime follows the terminal's size even without a handler
         if (name === 'SIGWINCH') this.post(proc, { t: 'signal', sig: name });
         return;
       }
@@ -465,15 +496,22 @@ export class Kernel {
     }
     // builtin program
     if (proc.onSignal?.(name)) return;
-    if (name === 'SIGWINCH' || name === 'SIGCHLD' || name === 'SIGCONT') return;
+    if (action === 'ign' || action === 'cont') return;
     if (soft) return;
     proc.abort.abort(name);
     proc.finish({ code: null, signal: name });
   }
 
-  killGroup(pgid: number, sig: string) {
-    if (!pgid) return;
-    for (const p of [...this.procs.values()]) if (p.pgid === pgid && p.state === 'running') this.kill(p.pid, sig);
+  /** Signals every running process of a group; returns how many there were. */
+  killGroup(pgid: number, sig: string | number): number {
+    if (!pgid) return 0;
+    let n = 0;
+    for (const p of [...this.procs.values()]) {
+      if (p.pgid !== pgid || p.state !== 'running') continue;
+      this.kill(p.pid, sig);
+      n++;
+    }
+    return n;
   }
 
   // ---------------------------------------------------------------------------
@@ -518,11 +556,13 @@ export class Kernel {
     const O_NOFOLLOW = 0o400000;
     let node = this.vfs.tryLookup(abs, !(flags & O_NOFOLLOW));
     if (node && flags & O_EXCL && flags & O_CREAT) throw kerr('EEXIST');
+    // O_NOFOLLOW: a symlink as the last component is an error, not a file
+    if (node && isLink(node)) throw kerr('ELOOP');
     if (!node) {
       if (!(flags & O_CREAT)) {
         this.vfs.lookup(abs); // throws the precise error (ENOENT/ENOTDIR)
       }
-      node = this.vfs.createFile(abs, mode & ~(proc.umask ?? 0o022), { excl: !!(flags & O_EXCL) });
+      node = this.vfs.createFile(abs, mode, { excl: !!(flags & O_EXCL), umask: proc.umask ?? 0o022 });
     } else {
       if (flags & O_DIRECTORY && !isDir(node)) throw kerr('ENOTDIR');
       if (isDir(node) && (flags & 3) !== O_RDONLY) throw kerr('EISDIR');
@@ -532,6 +572,82 @@ export class Kernel {
     if (node.device) return new OpenFile('file', flags, { vfs: this.vfs, node, path: abs });
     return new OpenFile(isDir(node) ? 'dir' : 'file', flags, { vfs: this.vfs, node, path: abs });
   }
+}
+
+/**
+ * What GNU env does with the one argument a `#!/usr/bin/env …` line passes it: `-S` (also `-vS`) splits
+ * the rest into words, which may start with options (-i, -u NAME, --) and NAME=value assignments; then
+ * comes the command. Without -S the whole argument is one word: an assignment or the command's name
+ * (so `#!/usr/bin/env node --flag` looks for a program called "node --flag", as on Linux).
+ */
+export function envShebang(arg: string | undefined, env: Record<string, string>): { argv: string[]; env: Record<string, string> } {
+  if (arg === undefined) return { argv: [], env };
+  const s = /^-v*S[ \t]*(.*)$/s.exec(arg);
+  const words = s ? splitEnvS(s[1], env) : [arg];
+  const out = { ...env };
+  let i = 0;
+  for (; s && i < words.length && words[i].startsWith('-'); i++) {
+    const w = words[i];
+    if (w === '--') {
+      i++;
+      break;
+    }
+    if (w === '-' || w === '-i' || w === '--ignore-environment') for (const k of Object.keys(out)) delete out[k];
+    else if (w === '-u' || w === '--unset') delete out[words[++i]];
+    else if (w.startsWith('-u')) delete out[w.slice(2)];
+  }
+  for (; i < words.length; i++) {
+    const eq = words[i].indexOf('=');
+    if (eq <= 0) break;
+    out[words[i].slice(0, eq)] = words[i].slice(eq + 1);
+  }
+  return { argv: words.slice(i), env: out };
+}
+
+/** env -S's splitting: blanks separate words; quotes, backslash escapes, ${NAME}, and # starts a comment. */
+function splitEnvS(s: string, env: Record<string, string>): string[] {
+  const words: string[] = [];
+  let cur: string | null = null;
+  const esc: Record<string, string> = { t: '\t', n: '\n', r: '\r', f: '\f', v: '\v', _: ' ', '\\': '\\', '"': '"', "'": "'", '$': '$', '#': '#' };
+  let quote: '' | "'" | '"' = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote === "'") {
+      if (c === "'") quote = '';
+      else if (c === '\\' && (s[i + 1] === '\\' || s[i + 1] === "'")) cur += s[++i];
+      else cur += c;
+      continue;
+    }
+    if (c === '\\') {
+      const n = s[++i];
+      if (n === 'c') break;
+      cur = (cur ?? '') + (esc[n] ?? n ?? '');
+      continue;
+    }
+    if (c === '$' && s[i + 1] === '{') {
+      const end = s.indexOf('}', i);
+      if (end > i) {
+        cur = (cur ?? '') + (env[s.slice(i + 2, end)] ?? '');
+        i = end;
+        continue;
+      }
+    }
+    if (quote === '"') {
+      if (c === '"') quote = '';
+      else cur += c;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      cur ??= '';
+    } else if (c === ' ' || c === '\t' || c === '\n') {
+      if (cur !== null) words.push(cur);
+      cur = null;
+    } else if (c === '#' && cur === null) break;
+    else cur = (cur ?? '') + c;
+  }
+  if (cur !== null) words.push(cur);
+  return words;
 }
 
 /** N for /proc/self/fd/N, /proc/<pid>/fd/N (of this pid) and /dev/fd/N; null for other paths. */
@@ -576,8 +692,10 @@ export class ProgramContext {
   set cwd(v: string) {
     this.proc.cwd = v;
   }
-  get vfs() {
-    return this.kernel.vfs;
+  private procVfs?: VFS;
+  /** The file system, creating files and directories with this process's umask. */
+  get vfs(): VFS {
+    return (this.procVfs ??= this.kernel.vfs.forProcess(this.proc));
   }
   get signal() {
     return this.proc.abort.signal;

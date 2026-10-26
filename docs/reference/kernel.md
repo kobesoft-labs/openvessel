@@ -52,7 +52,7 @@ idle process workers ready (`src/kernel/index.ts`):
   (`setTimeout(…, 0)`) every time a worker is taken.
 - An idle worker does nothing until it receives its `init` message. If the pool is empty a new
   worker is created on the spot.
-- Worker threads are taken from the same pool as main threads.
+- Worker threads are taken from the same pool as main threads (the pool of their process's runtime).
 
 ### Choosing the Node.js runtime
 
@@ -63,9 +63,11 @@ The build contains two Node.js runtimes:
 | The legacy runtime | `dist/runtime/process.js` | `src/node/` (a hand-written Node-compatible layer) | by default |
 | The ported runtime | `dist/runtime/node-process.js` | `src/nodejs/` (Node's own `lib/` with `internalBinding()` in TypeScript) | the VFS file `/etc/openvessel/node` contains `port` |
 
-The kernel reads `/etc/openvessel/node` (trimmed) every time it creates a worker — for each process
-start and each worker thread. Any other content, or a missing file, selects the legacy runtime. The
-published compatibility numbers ([compatibility](../compatibility.md)) refer to the ported runtime.
+The kernel reads `/etc/openvessel/node` (trimmed) every time a node program starts — a new process
+or an `execve` — and records the choice in the process; the process's worker threads always get the
+same runtime as its main thread, even when the file changes while it runs. Any other content, or a
+missing file, selects the legacy runtime. The published compatibility numbers
+([compatibility](../compatibility.md)) refer to the ported runtime.
 
 ```ts
 // select the ported runtime for every node process started from now on
@@ -149,18 +151,18 @@ the last column (P = ported, L = legacy).
 | `stat` | `p`, `l` (lstat) | stat object | `ENOENT`, `ENOTDIR`, `ELOOP`, `ENAMETOOLONG` | Also answers `/proc/self`, `/proc/<pid>`, `/proc/<pid>/fd` and `/proc/self/fd/N` of the caller ([special files](filesystem.md#special-files)) | P, L |
 | `fstat` | `fd` | stat object | `EBADF` | fds without an inode get a synthetic stat (tty `S_IFCHR\|0620`, pipe `S_IFIFO\|0600`, socket `S_IFSOCK\|0600`) | P, L |
 | `fdKind` | `fd` | `file`, `dir`, `pipe`, `tty`, `null`, `socket` or `null` | — | | P |
-| `access` | `p`, `mode` | `null` | lookup errors, `EACCES` | Only `X_OK` (bit 1) is checked: a non-directory without any `x` bit | P, L |
-| `open` | `p`, `flags` (0), `mode` (0o666) | fd (lowest free ≥ 3) | `ENOENT`, `ENOTDIR`, `EEXIST`, `EISDIR`, `EACCES`, `ENXIO`, `ELOOP`, `ENAMETOOLONG` | `EACCES` when `O_CREAT` creates in a directory without write+search permission | P, L |
+| `access` | `p`, `mode` | `null` | lookup errors, `EACCES` | `R_OK`, `W_OK`, `X_OK` against the permission bits ([permissions](filesystem.md#ownership-and-permissions)) | P, L |
+| `open` | `p`, `flags` (0), `mode` (0o666) | fd (lowest free ≥ 3) | `ENOENT`, `ENOTDIR`, `EEXIST`, `EISDIR`, `EACCES`, `ENXIO`, `ELOOP`, `ENAMETOOLONG`, `EMFILE` | `EACCES` when the file lacks the read/write permission the flags ask for, or when `O_CREAT` creates in a directory without write+search permission; a new file's mode is masked with the umask; `ELOOP` for `O_NOFOLLOW` on a symlink; `EMFILE` at `RLIMIT_NOFILE` | P, L |
 | `close` | `fd` | `null` | `EBADF` | Also stops a kernel reader started on the fd | P, L |
 | `read` | `fd`, `len` (65536, at most 16 MiB), `pos` | bytes | `EBADF`, `EISDIR` | Pipes, ttys and sockets block until data or EOF | P, L |
 | `write` | `fd`, `pos`, `nonblock`, `sendHandle` + bytes | bytes written | `EBADF`, `EISDIR`, `EPIPE`, `EINVAL` | `nonblock` on a pipe/socket writes only what fits (0 = full). `sendHandle` attaches a handle to the first byte (sockets only) | P, L |
 | `lseek` | `fd`, `offset`, `whence` (0/1/2) | new offset | `ESPIPE`, `EINVAL`, `EBADF` | Regular files only; seeking past the end is allowed | L (WASI) |
-| `readFile` | `p` | bytes | `ENOENT`, `EISDIR`, … | A character device returns one read of at most 64 KiB; `/proc/self/fd/N` reads that fd to EOF | P, L |
-| `writeFile` | `p`, `flags` (0o1101), `mode` (0o666) + bytes | `null` | `EEXIST`, `EISDIR`, `ENOENT`, `ENOTDIR`, `EACCES` | `O_APPEND` goes through `open`; mode is masked with the umask | P, L |
-| `readdir` | `p`, `types` | names, or `[name, S_IF* type]` pairs | `ENOENT`, `ENOTDIR` | Creation order, no `.`/`..` | P, L |
-| `mkdir` | `p`, `mode` (0o777), `recursive` | `recursive`: first directory created or `null` | `EEXIST`, `ENOENT`, `ENOTDIR`, `EACCES` | | P, L |
-| `mkdtemp` | `prefix` | the new path | `EACCES`, `ENOENT`, `EEXIST` | 6 random characters `[A-Za-z0-9]`, mode 0o700, up to 100 attempts | P, L |
-| `rmdir` | `p` | `null` | `ENOENT`, `ENOTDIR`, `ENOTEMPTY`, `EACCES` | | P, L |
+| `readFile` | `p` | bytes | `ENOENT`, `EISDIR`, `EACCES`, … | A character device returns one read of at most 64 KiB; `/proc/self/fd/N` reads that fd to EOF | P, L |
+| `writeFile` | `p`, `flags` (0o1101), `mode` (0o666) + bytes | `null` | `EEXIST`, `EISDIR`, `ENOENT`, `ENOTDIR`, `EACCES` | `O_APPEND` goes through `open`; a new file's mode is masked with the umask | P, L |
+| `readdir` | `p`, `types` | names, or `[name, S_IF* type]` pairs | `ENOENT`, `ENOTDIR`, `EACCES` | Creation order, no `.`/`..` | P, L |
+| `mkdir` | `p`, `mode` (0o777), `recursive` | `recursive`: first directory created or `null` | `EEXIST`, `ENOENT`, `ENOTDIR`, `EACCES` | mode masked with the umask | P, L |
+| `mkdtemp` | `prefix` | the new path | `EACCES`, `ENOENT`, `EEXIST` | 6 random characters `[A-Za-z0-9]`, mode 0o700 masked with the umask, up to 100 attempts | P, L |
+| `rmdir` | `p` | `null` | `ENOENT`, `ENOTDIR`, `ENOTEMPTY`, `EACCES`, `EBUSY` | `EBUSY` for `/` | P, L |
 | `rm` | `p`, `recursive`, `force` | `null` | `ENOENT`, `ERR_FS_EISDIR` | No permission check | L |
 | `unlink` | `p` | `null` | `ENOENT`, `EISDIR`, `EACCES` | | P, L |
 | `rename` | `from`, `to` | `null` | `ENOENT`, `EINVAL`, `EISDIR`, `ENOTDIR`, `ENOTEMPTY`, `EACCES` | | P, L |
@@ -170,11 +172,11 @@ the last column (P = ported, L = legacy).
 | `realpath` | `p` | string | `ENOENT`, `ENOTDIR`, `ELOOP` | | P, L |
 | `chmod` | `p`, `mode` | `null` | lookup errors | Follows symlinks | P, L |
 | `fchmod` | `fd`, `mode` | `null` | `EBADF` | No effect on fds without an inode | P, L |
-| `utimes` | `p`, `atime`, `mtime` (ms), `l` | `null` | lookup errors | Always follows symlinks (`l` is ignored) | P, L |
+| `utimes` | `p`, `atime`, `mtime` (ms), `l` | `null` | lookup errors | Follows symlinks; with `l` (`lutimes`) sets the link's own times | P, L |
 | `futimes` | `fd`, `atime`, `mtime` (ms) | `null` | `EBADF` | | P, L |
-| `truncate` | `p`, `len` (0) | `null` | `EISDIR`, lookup errors | Non-regular files are left alone | L |
-| `ftruncate` | `fd`, `len` (0) | `null` | `EBADF`, `EINVAL` | | P, L |
-| `copyFile` | `from`, `to`, `excl` | `null` | `EISDIR`, `EEXIST`, `ENOENT` | Copies the mode bits | P, L |
+| `truncate` | `p`, `len` (0) | `null` | `EISDIR`, `EACCES`, lookup errors | Non-regular files are left alone | L |
+| `ftruncate` | `fd`, `len` (0) | `null` | `EBADF`, `EINVAL` | `EINVAL` also for an fd not open for writing | P, L |
+| `copyFile` | `from`, `to`, `excl` | `null` | `EISDIR`, `EEXIST`, `ENOENT`, `EACCES` | Copies the mode bits | P, L |
 | `cp` | `from`, `to`, `force`, `errorOnExist`, `dereference` | `null` | `EEXIST`, `EISDIR` | Recursive; creates the destination's parent directories | L |
 | `watch` | `id`, `p`, `recursive` | `null` | — | Events are posted as `watch` messages ([watchers](filesystem.md#watchers)) | P, L |
 | `unwatch` | `id` | `null` | — | | P, L |
@@ -195,11 +197,11 @@ Resolution conditions: `import`, `node`, `module-sync`, `default` for ESM and `r
 | Syscall | Arguments | Result | Errors | Notes | Used by |
 |---|---|---|---|---|---|
 | `getcwd` | — | the working directory | — | | P |
-| `chdir` | `p` | the real path (symlinks resolved) | `ENOENT`, `ENOTDIR` | | P, L |
-| `umask` | `mask` (optional) | the previous mask | — | Stores `mask & 0o777` | P |
+| `chdir` | `p` | the real path (symlinks resolved) | `ENOENT`, `ENOTDIR`, `EACCES` | `EACCES` without search permission | P, L |
+| `umask` | `mask` (optional) | the previous mask | — | Stores `mask & 0o777`; children inherit it | P |
 | `exit` | `code` | `null` | — | Status `code & 0xff`. See [exit](processes.md#exit) | P, L |
 | `execve` | `argv`, `env`, `argv0` | no reply on success | `ENOENT`, `EACCES`, `ELOOP` | Checked before anything changes | P |
-| `kill` | `pid`, `sig` | `null` | `EINVAL`, `ESRCH` | `pid` 0 = the caller, negative = a process group, `sig` 0 = existence check | P, L |
+| `kill` | `pid`, `sig` | `null` | `EINVAL`, `ESRCH` | `pid` 0 = the caller's process group, -1 = every process but the caller, other negative = a process group; `sig` 0 = existence check. See [kill](processes.md#kill) | P, L |
 | `sigaction` | `sig`, `on` | `null` | — | Marks a signal as handled by the process | P, L |
 | `spawn` | `argv`, `argv0`, `env`, `cwd`, `stdio`, `keepStdioOnError` | `{ pid, fds, error? }` | `ENOENT`, `EACCES`, `ELOOP`, `EINVAL` | `fds`: the parent's ends of the pipes | P, L |
 | `spawnSync` | `argv`, `argv0`, `env`, `cwd`, `stdio`, `timeout`, `killSignal` + stdin bytes | `{ pid, status, signal, outLen, error? }` + stdout and stderr bytes | as `spawn` | `error: 'ETIMEDOUT'` after the timeout | P, L |
@@ -222,14 +224,14 @@ Resolution conditions: `import`, `node`, `module-sync`, `default` for ESM and `r
 | `listen` | `port` (0 = pick), `host`, `kind` | the port | `EADDRINUSE` | `kind`: `raw` (byte streams), `http` (legacy HTTP server), anything else = TCP-only | P, L |
 | `unlisten` | `port` | `null` | — | | P, L |
 | `listenShare` | `port` | `null` | `EINVAL` | Accept on a listening socket received from another process | P |
-| `tcpConnect` | `port`, `host` | `{ fd, self }` | `ECONNREFUSED` | Only to `raw` listeners. `self`: the caller's own thread accepts it | P |
+| `tcpConnect` | `port`, `host` | `{ fd, self, localAddress, localPort }` | `ECONNREFUSED`, `EMFILE` | Only to `raw` listeners. `self`: the caller's own thread accepts it. `localAddress` / `localPort`: the connecting socket's loopback address (`::1` when `host` is IPv6, else `127.0.0.1`) and ephemeral port ([connections](#connections)) | P |
 | `tcpConnectOut` | `host`, `port`, `tls` | fd | — | A connection to an outside host ([outbound](#outbound-connections)) | P |
 | `tcpSetTls` | `fd`, `servername` | `true` if it is an outbound connection | — | | P |
 | `tlsHello` | `fd`, `certs` | `{ wait, certs }` | — | Exchanges certificates between two processes | P |
 | `shutdown` | `fd` | `null` | `EBADF`, `ENOTSOCK` | Half-close: the peer reads EOF | P |
 | `unixListen` | `p` | the socket's inode number | `EADDRINUSE`, `ENOENT`, `ENOTDIR` | Creates the socket file | P |
 | `unixUnlisten` | `ino` | `null` | — | Removes the socket file if it is still the same inode | P |
-| `unixConnect` | `p` | fd | `ECONNREFUSED`, `ENOENT` | | P |
+| `unixConnect` | `p` | fd | `ECONNREFUSED`, `ENOENT`, `EMFILE` | | P |
 | `portInfo` | `port` | whether anything listens there | — | | L |
 | `udpBind` | `port`, `address`, `reuse` | the port | `EADDRINUSE` | | P |
 | `udpJoin` | `port` | `null` | `EINVAL` | Join a bound port (a shared socket) | P |
@@ -330,12 +332,17 @@ pair of connected kernel sockets.
 
 `tcpConnect` creates a socketpair: the listener's process gets one end as a new fd (lowest free ≥ 3)
 and a `tcp-accept` message; the caller gets the other end. Each socketpair direction buffers up to
-212992 bytes for non-blocking writers (see [pipes](processes.md#pipes)). Address details:
+212992 bytes for non-blocking writers (see [pipes](processes.md#pipes)). A listener's process that has
+no descriptor left (`EMFILE`) can't accept: the connection is refused.
+
+The connecting side gets an ephemeral port from Linux's default range 32768–60999: the next one after
+the last given (starting at a random place), skipping ports that are listened on or held by another
+open connection. It is free again once the connecting end is closed. Address details:
 
 | Connection from | `remoteAddress` / `remotePort` seen by the server |
 |---|---|
-| a process (`tcpConnect`) | `127.0.0.1` / `0` |
-| the preview or a legacy-runtime HTTP request | `127.0.0.1` / 40001, 40002, … (wraps from 60000 to 40000) |
+| a process (`tcpConnect`) | `127.0.0.1` (`::1` when it connected to an IPv6 address) / its ephemeral port, which is its `localPort` |
+| the preview or a legacy-runtime HTTP request | `127.0.0.1` / an ephemeral port |
 | a Unix domain socket | `''` / `0` |
 
 ### HTTP from the preview
@@ -457,14 +464,18 @@ bytes stay plaintext as well. See [compatibility](../compatibility.md) for what 
 ## ES module service
 
 `src/kernel/esm.ts` serves files of the VFS as browser ES modules. The runtime service worker
-forwards these URLs to the kernel and returns the answer with
+forwards these URLs (under `RUNTIME_BASE`) to the kernel and returns the answer with
 `Content-Type: text/javascript; charset=utf-8` and `Cache-Control: no-store`:
 
 | URL | Answer |
 |---|---|
 | `/__ov/esm/<absolute path>[?query]` | the file as an ES module |
 | `/__ov/builtin/<name>` | a module re-exporting a builtin (`node:fs` …) from `globalThis.__ov.builtin(name)` |
+| `/__ov/esm-error?code=…&msg=…&names=…` | stands in for an import that can't be resolved: declares each of `names` once (`default` included) and throws an `Error` with `code` and `msg` when it is evaluated, so the importing module still links |
 | `/__ov/mw/<pid>/<id>.mjs` | a source registered with `esmRegister` (the ported runtime's `ModuleWrap`); an unknown key gives a module that throws `ERR_INTERNAL_ASSERTION` |
+
+The URLs written into generated modules are absolute and start with `RUNTIME_BASE`, so they keep
+working when the runtime is served under a sub-path.
 
 How a file is turned into a module, by format:
 
@@ -541,9 +552,9 @@ What the kernel creates when it starts (`src/kernel/kernel.ts`, `src/kernel/inde
 | `/dev/null`, `/dev/zero`, `/dev/random`, `/dev/urandom` | character devices | 0666 |
 | `/dev/fd` | directory | empty; `/dev/fd/N` is answered per process |
 | `/dev/stdin`, `/dev/stdout`, `/dev/stderr` | symlinks | to `/proc/self/fd/0`, `/1`, `/2` |
-| `/proc/cpuinfo` | file | `processor : 0`, `model name : OpenVessel virtual CPU` |
-| `/proc/meminfo` | file | `MemTotal: 4194304 kB`, `MemFree: 2097152 kB` |
-| `/proc/version` | file | `Linux version 6.1.0-openvessel` |
+| `/proc/cpuinfo` | file | one entry (`processor`, `model name : OpenVessel Virtual CPU`, `cpu MHz : 2400.000`, `cpu cores`) per `navigator.hardwareConcurrency` (4 when unknown), as many as the ported runtime's `os.cpus()` |
+| `/proc/meminfo` | file | `MemTotal: 8388608 kB`, `MemFree: 4194304 kB`, `MemAvailable: 4194304 kB` (the ported runtime's `os.totalmem()` and `os.freemem()`) |
+| `/proc/version` | file | `Linux version 6.8.0-openvessel (user@openvessel) #1 SMP OpenVessel` (the ported runtime's `os.release()` and `os.version()`) |
 | `/bin/*`, `/usr/bin/*` | executable stubs | see [registered programs](#registered-programs) |
 | `/usr/bin/nodejs` | symlink | to `/usr/bin/node` |
 | `/home/user/.shrc` | file | `alias ll='ls -l'`, `alias la='ls -la'` |

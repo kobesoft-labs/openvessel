@@ -15,13 +15,14 @@ Node.js runtime inside a process in [Node.js runtime](nodejs-runtime.md).
 | Field | Meaning |
 |---|---|
 | `pid` | Process id: 1, 2, 3, … in start order for the whole kernel; never reused |
-| `ppid` | Parent's pid; 0 for processes the host started, and for orphans |
+| `ppid` | Parent's pid; 0 for processes the host started, and for orphans (there is no init process: the host plays its part) |
 | `pgid` | Process group ([process groups](#process-groups-and-job-control)) |
 | `argv` | Arguments. For a node process `argv[0]` is `node` (see [argv0](#argv-env-and-cwd)) |
 | `env` | Environment (a plain object of strings) |
 | `cwd` | Working directory (a real path after `chdir`) |
-| `umask` | 0o022 at start, for every process |
+| `umask` | File mode creation mask: 0o022 for processes the host starts, otherwise inherited from the parent ([modes and umask](filesystem.md#modes-and-umask)) |
 | `nofile` | `RLIMIT_NOFILE`: 1024, inherited from the parent; set with the shell's `ulimit -n` |
+| `runtime` | Node processes: the Node.js runtime chosen when the program started ([starting node processes](#starting-node-processes)) |
 | `fds` | File descriptor table |
 | `tty` | Controlling terminal, inherited from the parent |
 | `kind` | `builtin` (runs in the kernel) or `node` (runs in workers) |
@@ -45,8 +46,8 @@ The host's `ps()` and the `ps` program list running processes only (`PID`, `PPID
 2. Finds out how to run `argv` ([finding programs](#finding-programs)). Errors are thrown here, before
    a pid is taken: `ENOENT` (`<cmd>: command not found`), `EACCES` (`<cmd>: Permission denied`),
    `ELOOP` (interpreter chain too deep), `EINVAL` (empty `argv`).
-3. Takes the next pid, sets the process group, the controlling TTY and `nofile`, and installs the
-   given stdio descriptors as fds 0, 1, 2, … (each gets a new reference).
+3. Takes the next pid, sets the process group, the controlling TTY, `nofile` and `umask`, and installs
+   the given stdio descriptors as fds 0, 1, 2, … (each gets a new reference).
 4. Starts the program: a builtin runs on the kernel's event loop; a node program gets a worker
    ([starting node processes](#starting-node-processes)).
 
@@ -84,14 +85,14 @@ sends them a `ping` and waits for their `pong` (up to 250 ms). The exiting threa
 
 Then, in this order: all worker threads are terminated, all fds are closed (pipe readers see EOF),
 waiters are told, the process's TCP listeners and Unix socket listeners are released (`port-closed`
-reaches the host), its watches and UDP ports go away, and its children are re-parented to pid 0.
+reaches the host), its watches and UDP ports go away, and its children are re-parented to pid 0 (they
+are no longer its children).
 
 The exit status as a number (what `$?` and the host's `exit` event show) is the code, or
-`128 + signal number` for a signal (`143` for `SIGTERM`, `130` for `SIGINT`). A signal name the kernel
-doesn't know counts as 15.
+`128 + signal number` for a signal (`143` for `SIGTERM`, `130` for `SIGINT`, `158` for `SIGPWR`).
 
-The record of an exited process stays in the process table for 60 seconds; then it is dropped,
-unless it still lists child processes at that moment. There is no `waitpid`: a parent that started a
+The record of an exited process stays in the process table for 60 seconds; then it is dropped (also
+when it had children: they were re-parented when it exited). There is no `waitpid`: a parent that started a
 child with the `spawn` system call gets a `child-exit` message (`pid`, `code`, `signal`) on the thread that spawned it, and
 signalling an exited process fails with `ESRCH`.
 
@@ -103,8 +104,9 @@ process:
 - The new program is looked up first; `ENOENT`, `EACCES` or `ELOOP` leave the process untouched.
 - Every fd above 2 is closed, watches are removed, the old program's threads are terminated, the set
   of handled signals is cleared, and the process's TCP and Unix listeners are released.
-- The pid, ppid, process group, `cwd`, fds 0–2, controlling TTY and `nofile` stay.
-- The new image gets the given `argv` and `env`.
+- The pid, ppid, process group, `cwd`, fds 0–2, controlling TTY, `nofile` and `umask` stay.
+- The new image gets the given `argv` and `env`; a node program gets the runtime `/etc/openvessel/node`
+  selects now.
 
 ## Finding programs
 
@@ -112,24 +114,32 @@ process:
 
 1. **A name with a `/`** is a path, relative to `cwd`. It must exist and not be a directory.
 2. **A bare name** is looked up in each `PATH` entry in order (relative entries are taken relative to
-   `cwd`, empty entries are skipped). The first regular file with any `x` bit wins (symlinks are
-   followed).
+   `cwd`, and an empty entry — `PATH=/bin:`, `PATH=:/bin`, `a::b` — is `cwd` itself, as POSIX says). An
+   unset `PATH` is `/bin:/usr/bin` (glibc's `execvp`). The first regular file the process may execute
+   wins (symlinks are followed).
 3. **Not found:** if a builtin program of that name is registered, it runs (even without a file in
    `/bin`). Otherwise `ENOENT`, `<cmd>: command not found` (the shell exits 127).
-4. **Found:** the file must have an `x` bit, otherwise `EACCES`, `<cmd>: Permission denied` (the
-   shell exits 126). The kernel reads the first 256 bytes:
+4. **Found:** the process must have execute permission on the file, otherwise `EACCES`,
+   `<cmd>: Permission denied` (the shell exits 126). The kernel reads the first 256 bytes:
 
 | First line / file | Runs as |
 |---|---|
 | `#!/ov/builtin node` | a node process (this is `/usr/bin/node`) |
 | `#!/ov/builtin <name>` | the builtin `<name>` (`ENOENT`, `<name>: builtin missing` if not registered) |
-| `#!/usr/bin/env <interp> [args]` or `#!/bin/env …` | as `#!<interp> [args]`, with `<interp>` looked up on `PATH`. `-S` splits the rest of the line into words; leading `NAME=value` words are dropped (not applied to the environment) |
-| `#!<interp> [args]` where the base name of `<interp>` is `node`, `nodejs`, `bun` or `deno` | a node process: `node [args] <file> <arguments…>` |
-| `#!<interp> [args]` (anything else) | `<interp> [args] <file> <arguments…>`, resolved again from step 1 |
+| `#!/usr/bin/env <arg>` or `#!/bin/env <arg>` | what GNU `env` does with `<arg>` (below), then as `#!<command> [args]` with `<command>` looked up on `PATH` |
+| `#!<interp> [arg]` where the base name of `<interp>` is `node`, `nodejs`, `bun` or `deno` | a node process: `node [arg] <file> <arguments…>` |
+| `#!<interp> [arg]` (anything else) | `<interp> [arg] <file> <arguments…>`, resolved again from step 1 |
 | no `#!`, file name ends in `.js`, `.cjs` or `.mjs` | `node <file> <arguments…>` |
 | no `#!`, anything else | `sh <file> <arguments…>` (as POSIX shells do for `ENOEXEC`) |
 
-- The `#!` line's arguments are split on whitespace (Linux passes them as a single argument).
+- As on Linux, everything after the interpreter on the `#!` line (blanks around it removed) is passed
+  as **one** argument: `#!/usr/bin/node --a --b` runs `node '--a --b' <file>`.
+- `#!/usr/bin/env`: without `-S`, the argument is one word — a `NAME=value` assignment or the command's
+  name, so `#!/usr/bin/env node --flag` looks for a program called `node --flag` and fails with
+  `ENOENT`, as on Linux. With `-S` (`#!/usr/bin/env -S node --flag`) the rest is split into words with
+  GNU `env -S`'s rules (blanks, `'…'` and `"…"`, backslash escapes such as `\_` for a space, `${NAME}`,
+  `#` comments); leading options `-i`, `-u NAME` and `--`, then `NAME=value` words are applied to the
+  program's environment, and the next word is the command.
 - A chain of interpreters may hold at most 9 files (the program and 8 interpreters), otherwise
   `ELOOP`.
 - An interpreter that doesn't exist (`#!/usr/bin/python3`) gives `ENOENT`.
@@ -157,8 +167,9 @@ chmod +x hello
 ## Starting node processes
 
 1. The kernel takes a worker for the runtime selected by `/etc/openvessel/node` (`port` → the ported
-   runtime `node-process.js`, anything else or missing → the legacy runtime `process.js`; read at
-   every start). Two idle workers per runtime are kept loaded ([warm worker pool](kernel.md#warm-worker-pool)).
+   runtime `node-process.js`, anything else or missing → the legacy runtime `process.js`; read when the
+   program starts and recorded in the process, whose worker threads get the same runtime). Two idle
+   workers per runtime are kept loaded ([warm worker pool](kernel.md#warm-worker-pool)).
 2. It creates a 4 MiB `SharedArrayBuffer` channel for the thread's system calls.
 3. It posts `init`:
 
@@ -196,7 +207,9 @@ The runtime then boots Node.js and runs the program. Everything else — the eve
 - Each process has its own table. Descriptors refer to shared open file descriptions with a
   reference count; a description is closed when its last reference goes.
 - New descriptors (`open`, the parent's pipe ends, accepted connections, received handles) take the
-  lowest free number ≥ 3. `nofile` does not limit the number of descriptors.
+  lowest free number ≥ 3. That number must be below `nofile` (`RLIMIT_NOFILE`, `ulimit -n`), otherwise
+  the call fails with `EMFILE` and nothing is created; with the default of 1024 a process can open
+  1021 descriptors besides 0–2.
 - The child inherits only what is passed as its stdio; there is no close-on-exec flag.
 - Writing to stdout/stderr (fds 0–2) of the ported runtime writes the whole buffer synchronously, as
   Node does for pipes and files on Linux.
@@ -271,68 +284,88 @@ FIFOs are described in [File system](filesystem.md#fifos).
 
 ### Signal table
 
-| Signal | Number | Node process without a handler | Builtin program |
-|---|---|---|---|
-| `SIGHUP` | 1 | terminated | terminated |
-| `SIGINT` | 2 | terminated | terminated |
-| `SIGQUIT` | 3 | terminated | terminated |
-| `SIGILL` | 4 | terminated | terminated |
-| `SIGTRAP` | 5 | terminated | terminated |
-| `SIGABRT` | 6 | terminated | terminated |
-| `SIGBUS` | 7 | terminated | terminated |
-| `SIGFPE` | 8 | terminated | terminated |
-| `SIGKILL` | 9 | terminated (also with a handler) | terminated |
-| `SIGUSR1` | 10 | terminated | terminated |
-| `SIGSEGV` | 11 | terminated | terminated |
-| `SIGUSR2` | 12 | terminated | terminated |
-| `SIGPIPE` | 13 | terminated | terminated |
-| `SIGALRM` | 14 | terminated | terminated |
-| `SIGTERM` | 15 | terminated | terminated |
-| `SIGCHLD` | 17 | ignored | ignored |
-| `SIGCONT` | 18 | ignored | ignored |
-| `SIGSTOP` | 19 | terminated | terminated |
-| `SIGTSTP` | 20 | terminated | terminated |
-| `SIGTTIN` | 21 | terminated | terminated |
-| `SIGTTOU` | 22 | terminated | terminated |
-| `SIGWINCH` | 28 | ignored (the message is still posted) | ignored |
+The kernel knows Linux's signals (`src/kernel/proc.ts`). Without a handler, each has its default
+action from signal(7):
 
-There is no stopped state: `SIGSTOP`, `SIGTSTP`, `SIGTTIN` and `SIGTTOU` terminate like other
-signals. Numbers missing from the table (16, 23–27, 29–64) are taken as `SIGTERM`; the ported
-runtime always sends signals by number, so `process.kill(pid, 'SIGPWR')` arrives as `SIGTERM`. The
-legacy runtime sends names and passes unknown names through.
+| Signal | Number | Default action |
+|---|---|---|
+| `SIGHUP` | 1 | terminate |
+| `SIGINT` | 2 | terminate |
+| `SIGQUIT` | 3 | terminate (core) |
+| `SIGILL` | 4 | terminate (core) |
+| `SIGTRAP` | 5 | terminate (core) |
+| `SIGABRT` (`SIGIOT`) | 6 | terminate (core) |
+| `SIGBUS` | 7 | terminate (core) |
+| `SIGFPE` | 8 | terminate (core) |
+| `SIGKILL` | 9 | terminate (also with a handler) |
+| `SIGUSR1` | 10 | terminate |
+| `SIGSEGV` | 11 | terminate (core) |
+| `SIGUSR2` | 12 | terminate |
+| `SIGPIPE` | 13 | terminate |
+| `SIGALRM` | 14 | terminate |
+| `SIGTERM` | 15 | terminate |
+| `SIGSTKFLT` | 16 | terminate |
+| `SIGCHLD` (`SIGCLD`) | 17 | ignore |
+| `SIGCONT` | 18 | continue — ignored, as nothing is ever stopped |
+| `SIGSTOP` | 19 | stop — terminates (also with a handler) |
+| `SIGTSTP` | 20 | stop — terminates |
+| `SIGTTIN` | 21 | stop — terminates |
+| `SIGTTOU` | 22 | stop — terminates |
+| `SIGURG` | 23 | ignore |
+| `SIGXCPU` | 24 | terminate (core) |
+| `SIGXFSZ` | 25 | terminate (core) |
+| `SIGVTALRM` | 26 | terminate |
+| `SIGPROF` | 27 | terminate |
+| `SIGWINCH` | 28 | ignore (a node process still gets the message, for the terminal size) |
+| `SIGIO` (`SIGPOLL`) | 29 | terminate |
+| `SIGPWR` | 30 | terminate |
+| `SIGSYS` (`SIGUNUSED`) | 31 | terminate (core) |
+| `SIG32`, `SIG33` | 32, 33 | terminate |
+| `SIGRTMIN`, `SIGRTMIN+1` … `SIGRTMIN+15`, `SIGRTMAX-14` … `SIGRTMAX-1`, `SIGRTMAX` | 34–64 | terminate |
+
+Names are those `kill -l` shows; the kernel also accepts them without `SIG`, the aliases in brackets,
+`SIGRTMIN+n`/`SIGRTMAX-n` in any spelling of the range, and `SIG<number>`. Signals cross the channel
+by number from the ported runtime and by name from the legacy runtime; either way
+`process.kill(pid, 'SIGPWR')` arrives as `SIGPWR`.
+
+"Terminate (core)" ends the process like "terminate" (there is no core dump). There is no stopped
+state, so the stop signals end the process too, and `SIGCONT` never has anything to continue.
 
 ### Delivery
 
 - A node process that has a handler for a signal (it called `sigaction` — `process.on('SIGINT', …)`)
-  receives `{ t: 'signal', sig }` and keeps running. `SIGKILL` is never delivered to a handler.
+  receives `{ t: 'signal', sig }` and keeps running. `SIGKILL` and `SIGSTOP` are never delivered to a
+  handler.
 - The legacy runtime registers handlers for `SIGINT`, `SIGTERM`, `SIGHUP`, `SIGQUIT`, `SIGUSR1`,
   `SIGUSR2`, `SIGWINCH`, `SIGBREAK`, `SIGPIPE`, `SIGCONT` and `SIGTSTP`; the ported runtime for any
   signal Node's `process.on` accepts.
 - Terminating a node process terminates its workers at once; there is no further JavaScript (no
   `exit` event).
 - A builtin program may install `onSignal` and swallow a signal (the interactive shell swallows
-  `SIGINT`, `SIGTSTP`, `SIGQUIT` and `SIGWINCH`). Otherwise it is terminated: its `AbortSignal`
-  fires and its status is set at once; whatever the program returns later is ignored.
+  `SIGINT`, `SIGTSTP`, `SIGQUIT` and `SIGWINCH`). Otherwise the default action applies; when it
+  terminates, the program's `AbortSignal` fires and its status is set at once; whatever the program
+  returns later is ignored.
 
 ### kill
 
-`kill { pid, sig }` (`process.kill`, `child.kill`):
+`kill { pid, sig }` (`process.kill`, `child.kill`), as kill(2):
 
 | `pid` | Target |
 |---|---|
 | `> 0` | that process |
-| `0` | the calling process itself |
-| `< 0` | every running process in group `-pid` |
+| `0` | every running process in the caller's process group (the caller included) |
+| `-1` | every running process except the caller |
+| `< -1` | every running process in group `-pid` |
 
 | `sig` | Effect |
 |---|---|
-| `0` | checks that the process exists and is running |
-| a number 1–64, or a name | delivered as described above |
-| a number outside 0–64 or not an integer | `EINVAL` |
+| `0` | only checks that the target exists and is running |
+| a number 1–64, or a signal's name | delivered to each target as described above (the caller last) |
+| anything else | `EINVAL` |
 
-A target that doesn't exist or has exited gives `ESRCH`. Every process may signal every other
-process (there is no permission check). The host's `kill(pid, signal)` signals the whole process
-group of `pid` and never fails.
+A target that doesn't exist or has exited — for a group or `-1`, no running process at all — gives
+`ESRCH`. Every process may signal every other process (there is no permission check). The host's
+`kill(pid, signal)` signals the whole process group of `pid` and never fails.
 
 ## Process groups and job control
 
@@ -406,8 +439,8 @@ When a foreground command of the interactive shell exits, the shell turns raw mo
 | Limit | Value |
 |---|---|
 | Processes | no limit; pids are never reused |
-| Descriptors per process | no limit |
-| `nofile` (`ulimit -n`) | 1024 by default; limits worker threads: refused when `threads × 8 + 30 > nofile` |
+| Descriptors per process | numbers below `nofile` (`EMFILE` beyond) |
+| `nofile` (`ulimit -n`) | 1024 by default; limits descriptors and worker threads: a thread is refused when `threads × 8 + 30 > nofile` |
 | Interpreter chain (`#!`) | 9 files (`ELOOP`) |
 | `#!` line | read from the first 256 bytes |
 | One `read` system call | 16 MiB |

@@ -114,14 +114,15 @@ class TCPWrap extends LibuvStreamWrap {
       }
       return this.#completeConnect(req, 0);
     }
-    let fd: number;
-    let acceptedHere = false;
+    let conn: { fd: number; self: boolean; localAddress: string; localPort: number };
     try {
-      ({ fd, self: acceptedHere } = sys<{ fd: number; self: boolean }>('tcpConnect', { port, host: address }));
+      conn = sys('tcpConnect', { port, host: address });
     } catch (e) {
       return this.#completeConnect(req, e instanceof SysError ? errno(e.code) : errno('ECONNREFUSED'));
     }
-    this._attach(fd, { address: isV6(address) ? '::1' : '127.0.0.1', port: 0 }, { address: isV6(address) ? '::1' : '127.0.0.1', port });
+    const { fd, self: acceptedHere } = conn;
+    // the kernel gave this end an ephemeral port: the server sees it as remotePort
+    this._attach(fd, { address: conn.localAddress, port: conn.localPort }, { address: conn.localAddress, port });
     if (acceptedHere && servers.has(port)) {
       const done = loop.startReq('TCPConnectWrap');
       let list = connectsAwaitingAccept.get(port);
