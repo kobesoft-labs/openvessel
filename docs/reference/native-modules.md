@@ -68,8 +68,9 @@ listed (`SKIP`). A `require()` of one of them fails with `MODULE_NOT_FOUND`.
   installed unchanged.
 - The package keeps the requested name and version: it is placed at `node_modules/esbuild`, its
   `package.json` gets `"name": "esbuild"`, the resolved version, and
-  `"_openvesselSource": "esbuild-wasm@<version>"`. Its `bin` is the substitute's, or the original's if
-  the substitute has none.
+  `"_openvesselSource": "esbuild-wasm@<version>"` with the version of the substitute that was unpacked
+  (which differs from the resolved one when the `~`/`^` fallback picked another). Its `bin` is the
+  substitute's, or the original's if the substitute has none.
 - The manifest used for dependencies is the substitute's, so the native package's per-platform
   `optionalDependencies` (`@esbuild/linux-x64`, …) are not requested.
 
@@ -351,9 +352,9 @@ writes into `dist/runtime/compat/`:
 
 ### How the installer uses them
 
-`loadCompat()` fetches `<runtime base>/compat/index.json` once per kernel (the runtime base is the
-directory the kernel script is served from). A failed or non-OK fetch counts as an empty index for the
-rest of the session.
+`loadCompat()` fetches `<runtime base>/compat/index.json` (the runtime base is the directory the kernel
+script is served from). An index that was fetched is kept for the life of the kernel. A failed or non-OK
+fetch counts as an empty index for that install only; the next install asks again.
 
 For a registry dependency, after the version is picked and [upgrades](#upgrades) applied, if the index
 has an entry for the package's real name (after `npm:` aliases) and the version satisfies its `range`
@@ -363,7 +364,8 @@ has an entry for the package's real name (after `npm:` aliases) and the version 
 - the tarball is `<runtime base>/compat/<file>`, fetched with a plain `fetch` from the runtime origin
   (not through the network gate), checked against `integrity`, and cached like registry tarballs;
 - the unpacked `package.json` gets the requested `name` and `version` and
-  `"_openvesselSource": "<compat package name>@<version>"`;
+  `"_openvesselSource": "<compat package name>@<version>"`, with the compat package's own version (the
+  requested one if its `pkg` has none);
 - [WebAssembly substitutes](#webassembly-substitutes) are not applied.
 
 If the deployment doesn't serve `compat/`, the native packages are installed as usual (and skipped by

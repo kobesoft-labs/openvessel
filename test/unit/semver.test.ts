@@ -48,3 +48,10 @@ test('maxSatisfying and minVersion', () => {
   assert.ok(validRange('>=1 <2 || 3.x'));
   assert.ok(!validRange('not a range'));
 });
+
+test('dist-tags are not ranges', () => {
+  assert.equal(validRange('latest'), false);
+  assert.equal(validRange('next'), false);
+  assert.ok(!satisfies('1.0.0', 'latest'));
+  assert.equal(validRange(''), true);
+});

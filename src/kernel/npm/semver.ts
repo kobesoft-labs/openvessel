@@ -133,7 +133,7 @@ export function parseRange(range: string): Range | null {
   const out: Range = [];
   for (let part of range.split('||')) {
     part = part.trim();
-    if (part === '' || part === '*' || part === 'x' || part === 'X' || part === 'latest') {
+    if (part === '' || part === '*' || part === 'x' || part === 'X') {
       out.push(ANY);
       continue;
     }
