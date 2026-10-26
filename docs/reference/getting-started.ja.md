@@ -11,7 +11,7 @@
 
 | 必要なもの | 理由 |
 |---|---|
-| Chromium 系のブラウザ | OpenVessel を試験しているブラウザです（[README](../../README.ja.md)）。 |
+| Chromium 系のブラウザか Firefox | OpenVessel をテストしているブラウザです（[README](../../README.ja.md)）。Firefox では移植版ランタイムを使ってください。いくつか違いがあります（[互換性](../compatibility.ja.md#firefox)）。 |
 | ホストのページの cross-origin isolation（`Cross-Origin-Opener-Policy: same-origin` と、`Cross-Origin-Embedder-Policy: require-corp` か `credentialless`） | カーネルとプロセスは `SharedArrayBuffer` と `Atomics.wait` でやり取りします。ブラウザはこれを cross-origin isolated なページでしか使わせません。`OpenVessel.boot()` は最初に `crossOriginIsolated` を確かめ、偽なら失敗します。 |
 | 3 つのオリジン: 自分のページ・ランタイム・プレビュー | ランタイム（カーネル・プロセス・通信の関所）とプレビュー（作っているサイト）は、自分のページとも、お互いとも、オリジンを分けます（[しくみ](../how-it-works.ja.md#3-つのオリジン)）。 |
 

@@ -68,6 +68,30 @@ To measure again: `node test/node-compat/run.mjs --port && node test/node-compat
 (the table lands in `test/node-compat/results/port/REPORT.md`).
 <!-- numbers: updated with each full run -->
 
+## Firefox
+
+The ported runtime (`port` in `/etc/openvessel/node`) works in the current Firefox release: booting,
+the shell, `node` (CommonJS, ES modules, TypeScript, `worker_threads`, `child_process`, zlib, crypto),
+`npm install`, `npx`, an HTTP server in the preview, and Astro builds and `astro dev` with hot reload
+over WebSocket. Node's own tests: 1200 of the 1237 that pass in Chrome (2026-10-26, Playwright's
+Firefox 157). The rest fail for these reasons:
+
+- Error messages come from SpiderMonkey, not V8 (`can't convert symbol to string` instead of
+  `Cannot convert a Symbol value to a string`, `too much recursion` as an `InternalError` instead
+  of `RangeError: Maximum call stack size exceeded`). Tests that compare the message fail; code
+  that checks `instanceof RangeError` for a stack overflow doesn't see one.
+- V8's stack trace API is emulated from Firefox's stack strings, so `Error.prepareStackTrace`,
+  `Error.captureStackTrace` and V8-style stacks work, but a CallSite has no receiver or type name
+  (`getThis()`, `getTypeName()`): `util.inspect` can't name the class of a null-prototype object,
+  and async frames and method names read slightly differently.
+- Some worker tests depend on the order in which a worker's last messages, its `exit` event and
+  its handle closing arrive; Firefox delivers them in a different order.
+- A few crypto tests (Diffie-Hellman key generation, many cipher rounds) run past the 30-second
+  limit, and some `vm` tests expect V8's exact behaviour for proxies and non-configurable properties.
+
+The legacy runtime boots and runs simple programs, but its stack traces stay in Firefox's format.
+The end-to-end scripts run in Firefox with `OV_BROWSER=firefox` (see the README).
+
 ## What can't work in a browser, and why
 
 These are limits of the platform, not missing work. Each has a reason a browser tab imposes.
