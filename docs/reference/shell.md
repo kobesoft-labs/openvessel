@@ -55,7 +55,7 @@ Options are read left to right until the first argument that is not one of these
 |---|---|
 | `-c command` | Run `command`. Option parsing stops here. The next argument becomes `$0` (default `sh`), the rest `$1`… |
 | `-i` | Interactive mode, even if stdin is not a TTY. |
-| `-e`, `-u`, `-x`, `-f`, `-a` and `+` forms | Same as `set` (see [Shell options](#shell-options)). Several letters may be combined (`-eu`, `+ex`), but only these five letters: `-ec` is not split and is taken as a script name. |
+| `-e`, `-u`, `-x`, `-f`, `-a` and `+` forms | Same as `set` (see [Shell options](#shell-options)). Letters may be combined, also with `c`, `i` and `o` (`-eu`, `+ex`, `-ec '…'`, `-eo pipefail`). |
 | `-o name`, `+o name` | Same as `set -o name` / `set +o name`. |
 | `-l`, `--login`, `--norc`, `--noprofile`, `-s` | Accepted and ignored. |
 | `--` | Ends the options. |
@@ -80,14 +80,15 @@ alias la='ls -la'
 
 `.shrc` is read only by interactive shells, so these aliases do not exist in `sh -c` or in scripts.
 
-A syntax error is reported as `<name>: <message>` (where `<name>` is `$0`, or the script name) and the
-shell returns status 2 without running any part of the input.
+Input is parsed and run one complete command (normally one line) at a time, as bash does. A syntax
+error is reported as `<name>: <message>` (where `<name>` is `$0`, or the script name) and the shell
+stops with status 2; the lines before it have already run.
 
 ## Grammar
 
 The parser (`src/kernel/sh/parse.ts`) implements a practical subset of the POSIX shell grammar plus some
-bash extensions. The whole input is parsed before anything runs (in interactive mode: each complete
-command line).
+bash extensions. Each complete command (up to the end of its line; a compound command may span
+several lines) is parsed and then run before the next one is parsed.
 
 ### Lists and pipelines
 
@@ -115,14 +116,11 @@ quotes (line continuation). `#` at the start of a word starts a comment to the e
 | `while list; do list; done` | |
 | `until list; do list; done` | |
 | `for name [in word...]; do list; done` | Without `in`, iterates over `"$@"`. The words undergo full expansion (splitting and globbing). |
-| `case word in [(]pattern[\|pattern]...) list ;; ... esac` | Shell patterns (see [Pattern matching](#pattern-matching)). The first matching item runs; the status is 0 if nothing matches. The last `;;` before `esac` may be omitted. |
+| `case word in [(]pattern[\|pattern]...) list ;; ... esac` | Shell patterns (see [Pattern matching](#pattern-matching)). The first matching item runs; the status is 0 if nothing matches. The last `;;` before `esac` may be omitted. An item may end with `;&` (run the next item's list too, without testing its patterns) or `;;&` (go on testing the following patterns). |
 | `(( expression ))` | Arithmetic command: status 0 if the expression is non-zero, else 1. The text is expanded like a double-quoted string first. |
 | `[[ expression ]]` | Conditional command (see [`[[ ]]`](#conditional-command)). |
 
 Redirections may follow any compound command (`while ...; done < file`, `{ ...; } 2>&1`).
-
-`;;&` is accepted as a case terminator and behaves like `;;` (no further patterns are tested). `;&`
-directly after a command is a syntax error; fallthrough is not supported.
 
 ### Functions
 
@@ -156,13 +154,11 @@ These are confirmed by the parser and interpreter:
 |---|---|
 | Brace expansion `{a,b}`, `{1..3}` | Not performed; the word stays literal (`echo {a,b}` prints `{a,b}`). |
 | Process substitution `<(cmd)`, `>(cmd)` | Syntax error: `syntax error near unexpected token '('`. |
-| Arrays | `name=(a b c)` stores the text between the parentheses (up to the first `)`, trimmed, quotes not processed) as one string; `${name[i]}` ignores the index; `name+=(x)` appends the text without a separator. |
+| Arrays | `name=(a b c)` stores the text between the parentheses (up to the first `)`, trimmed, quotes not processed) as one string; `${name[i]}` ignores the index; `name+=(x)` appends the text without a separator. The one exception is `BASH_REMATCH`. |
 | Indirect expansion `${!name}` | `bad substitution` (syntax error, status 2). |
 | `${parameter@op}`, `${!prefix*}` | `bad substitution`. |
-| Case fallthrough `;&` | Syntax error (see above). |
 | Extended globs `@(…)`, `!(…)`, `+(…)` | Syntax error: `(` is a metacharacter in a word. |
 | Job control | No `fg`, `bg` (command not found); `jobs` prints nothing. |
-| Traps | `trap` records handlers but never runs them (no `EXIT`, `INT`, `ERR` handlers). |
 | `PS2` | The continuation prompt is always `> `. |
 
 ## Quoting
@@ -172,7 +168,7 @@ These are confirmed by the parser and interpreter:
 | `'...'` | Literal; no character is special. Cannot contain `'`. |
 | `"..."` | `$`, `` ` `` and `\` stay special. `\` escapes only `$`, `` ` ``, `"`, `\` and newline (removed); before any other character it is kept. |
 | `\c` (outside quotes) | Quotes the next character. `\` + newline is a line continuation. |
-| `$'...'` | ANSI-C quoting. Escapes: `\n`, `\t`, `\r`, `\e`/`\E` (ESC), `\0` (NUL), `\xHH` (1–2 hex digits), `\uHHHH` (1–4 hex digits). Any other `\c` yields `c` (so `\\` → `\`, `\'` → `'`; note that `\a`, `\b`, `\f`, `\v` yield the letters). |
+| `$'...'` | ANSI-C quoting. Escapes: `\a` `\b` `\f` `\n` `\r` `\t` `\v`, `\e`/`\E` (ESC), `\nnn` (1–3 octal digits), `\xHH` (1–2 hex digits), `\uHHHH` (1–4 hex digits), `\UHHHHHHHH` (1–8 hex digits), `\cX` (control character). Any other `\c` yields `c` (so `\\` → `\`, `\'` → `'`). |
 
 Quoted text is never split or globbed. An empty quoted string (`""`, `''`) produces one empty field.
 
@@ -183,7 +179,7 @@ arithmetic (left to right), then field splitting of the unquoted results, then p
 fields that contain unquoted glob characters, then quote removal. Assignment values, redirection targets,
 `case` words and the operands of `[[ ]]` are expanded without field splitting and without globbing.
 
-Alias substitution happens after expansion, on the first word only (see [Aliases](#aliases)).
+Alias substitution happens earlier, while the command is parsed (see [Aliases](#aliases)).
 
 ### Tilde expansion
 
@@ -208,8 +204,8 @@ Special parameters:
 | Parameter | Value |
 |---|---|
 | `$?` | Status of the last command. |
-| `$$` | Pid of the shell process. Subshells, pipeline elements and command substitutions run in the same process, so they report the same pid. |
-| `$!` | Identifier of the last background job. It is an internal number, not a kernel pid: use it with `wait`, not with `kill`. Empty before the first `&`. |
+| `$$` | Pid of the shell process. Subshells, pipeline elements and command substitutions run in the same process, and a background job (a process of its own) keeps its parent's `$$`, as in bash. |
+| `$!` | Pid of the last background job's process, usable with `kill` and `wait`. Empty before the first `&`. |
 | `$#` | Number of positional parameters. |
 | `$0` | Shell or script name (`sh`, the `-c` name argument, or the script path). |
 | `$1`… | Positional parameters. |
@@ -233,22 +229,22 @@ Variables the shell sets or reads:
 | `PS4` | Prefix of `set -x` trace lines, default `+ `. |
 | `REPLY` | Default variable of `read`. |
 | `OPTIND`, `OPTARG` | Used by `getopts`. |
-| `BASH_REMATCH` | Set by `[[ string =~ regex ]]` to the whole matched text (a plain string, not an array). |
+| `BASH_REMATCH` | Set by `[[ string =~ regex ]]`: `$BASH_REMATCH` and `${BASH_REMATCH[0]}` are the whole match, `${BASH_REMATCH[n]}` the n-th group, `${#BASH_REMATCH[@]}` the number of elements. |
 | `__OV_OPTSUB`, `__OV_DIRSTACK` | Internal state of `getopts` and `pushd`/`popd` (visible in `set`). |
 
 Assignments:
 
 - `name=value` and `name+=value` (appends to the current value). Several may precede a command.
-- With no command word, the assignments are made in the current shell. The status is that of the most
-  recent command substitution the shell has run — also one from an earlier command (`x=$(false); y=1`
-  gives 1 for `y=1`) — or 0 if none has run yet.
+- With no command word, the assignments are made in the current shell. The status is that of the last
+  command substitution in them, or 0 if there is none (`x=$(false); y=1` gives 0 for `y=1`).
 - Before an external program, they go only into that program's environment.
 - Before a function or a regular built-in, they are set for the duration of the call and then restored.
 - Before a special built-in (`:` `.` `break` `continue` `eval` `exec` `exit` `export` `readonly`
   `return` `set` `shift` `trap` `unset` `source`), they remain set.
-- Assigning a `readonly` variable throws `sh: <name>: readonly variable`. In an assignment-only command
-  this aborts the non-interactive shell with status 1; inside a built-in (`export`, `read`, …) the
-  built-in fails with status 1.
+- Assigning a `readonly` variable prints `sh: <name>: readonly variable` with status 1. In an
+  assignment-only command the rest of the current line is skipped and the shell goes on with the next
+  line (bash's behaviour; an interactive shell gets a new prompt); inside a built-in (`export`, `read`,
+  …) the built-in fails with status 1.
 
 ### Parameter expansion
 
@@ -260,7 +256,7 @@ Assignments:
 | `${#parameter}` | Length in UTF-16 code units. `${#@}` and `${#*}` give the number of positional parameters. |
 | `${p:-word}` / `${p-word}` | `word` if `p` is unset or empty / unset; otherwise the value. |
 | `${p:=word}` / `${p=word}` | Same, and assigns `word` to `p`. |
-| `${p:?word}` / `${p?word}` | If unset or empty / unset: prints `sh: p: word` (or `sh: p: parameter null or not set`) and exits the shell with status 1 — an interactive shell exits too. |
+| `${p:?word}` / `${p?word}` | If unset or empty / unset: prints `sh: p: word` (or `sh: p: parameter null or not set`) and exits a non-interactive shell with status 1. An interactive shell does not exit: the command line is abandoned with status 1. |
 | `${p:+word}` / `${p+word}` | `word` if `p` is set and non-empty / set; otherwise empty. |
 | `${p#pattern}` / `${p##pattern}` | Removes the shortest / longest matching prefix. |
 | `${p%pattern}` / `${p%%pattern}` | Removes the shortest / longest matching suffix. |
@@ -274,7 +270,8 @@ Assignments:
 
 Patterns in `#`, `%` and `/` forms are shell patterns; quoted parts match literally. In `word` the usual
 expansions apply. When `set -u` is on, expanding an unset variable (other than the special parameters)
-prints `sh: name: unbound variable` and exits with status 1 (an interactive shell exits too).
+prints `sh: name: unbound variable` and exits a non-interactive shell with status 1 (an interactive
+shell abandons the command line instead).
 
 ### Command substitution
 
@@ -295,7 +292,7 @@ Operands:
 | Decimal | `42` |
 | Octal (leading `0`) | `010` = 8; `08` is an error |
 | Hexadecimal | `0x1f` |
-| `base#digits` (base 2–36) | `2#101` = 5, `36#z` = 35 |
+| `base#digits` (base 2–64) | `2#101` = 5, `36#z` = 35; above 36 the digits are `0-9a-zA-Z@_` (`64#_` = 63) |
 | Variable name | Unset or empty = 0. A value that is not a number is evaluated as an expression; a value that is a variable name is followed (up to 8 levels). |
 
 Operators, from highest to lowest precedence:
@@ -314,19 +311,19 @@ Operators, from highest to lowest precedence:
 | `&` | |
 | `^` | |
 | `\|` | |
-| `&&` | both operands are always evaluated |
-| `\|\|` | both operands are always evaluated |
-| `?:` | |
+| `&&` | the right operand is evaluated only if the left one is non-zero |
+| `\|\|` | the right operand is evaluated only if the left one is zero |
+| `?:` | only the chosen branch is evaluated |
 | `= += -= *= /= %= <<= >>= &= ^= \|= **=` | assignment to a variable |
 | `,` | value of the last expression |
 
-Numbers are JavaScript doubles, not 64-bit integers: `*` multiplies with 32-bit wrap-around
-(`2147483647*2` = `-2`), the bit operators `<< >> & ^ | ~` work on 32-bit integers (`1<<33` = `2`), and
-`+`/`-` are not wrapped (`2147483647+1` = `2147483648`).
+Arithmetic is on 64-bit signed integers with wrap-around, as in bash: `9223372036854775807+1` and
+`2**63` give `-9223372036854775808`, `2147483647*2` = `4294967294`, `1<<33` = `8589934592`.
 
-An error inside `$(( ))` (bad syntax, division by zero) prints `sh: <expression>: <message>`; in a
-non-interactive shell it aborts the shell with status 1. In `(( ))` it prints `sh: ((: <message>` and the
-command returns 1. In `let` it prints `sh: <message>` and aborts a non-interactive shell with status 1.
+An error inside `$(( ))` (bad syntax, division by zero) prints `sh: <expression>: <message>`, sets
+status 1 and skips the rest of the current line (the shell goes on with the next line). In `(( ))` it
+prints `sh: ((: <message>` and the command returns 1. In `let` it prints `sh: let: <expression>:
+<message>` and `let` returns 1.
 
 ### Word splitting
 
@@ -360,8 +357,8 @@ system. Matching is done per path component.
 
 - Names starting with `.` match only if the pattern component starts with `.`; `.` and `..` themselves
   are not listed by `readdir` and never match.
-- Results are sorted (by UTF-16 code unit). If the pattern ends in `/`, a `/` is appended to every
-  match; it does not restrict the matches to directories (`*/` also lists files, as `f1/`).
+- Results are sorted (by UTF-16 code unit). A pattern ending in `/` matches directories only (and
+  symbolic links to directories), each printed with the `/` (`*/` gives `d1/`).
 - If nothing matches, the word is left unchanged (`echo *.nomatch` prints `*.nomatch`). There is no
   `nullglob`/`failglob`.
 - `set -f` (or `set -o noglob`) turns pathname expansion off.
@@ -374,13 +371,16 @@ except that `*` and `?` also match `/` and leading dots need no special treatmen
 
 ### Aliases
 
-`alias name=value` defines an alias. When a simple command runs, if its first word (after expansion) is
-an alias name, the alias value is parsed as a simple command and its words replace the first word.
-Consequences:
+`alias name=value` defines an alias. While a command is parsed, an unquoted word in command position
+that is an alias name is replaced by the alias text, which is then parsed in its place. Consequences:
 
-- Only aliases whose value is a single simple command work. A value with `;`, `|`, `&&` or a compound
-  command expands to nothing.
-- Aliases are not expanded recursively, and an alias can be used on the same line that defines it.
+- The value may hold anything the grammar allows: several commands (`alias x='a; b'`), pipes
+  (`alias y='sort |'`), reserved words.
+- An alias is not expanded again inside its own text. If the value ends in a blank, the next word is
+  checked for an alias too.
+- A line is parsed before it runs, so an alias defined on a line takes effect from the next line on
+  (`alias x=…; x` on one line doesn't use it), as in bash. Aliases are expanded in scripts and `sh -c`
+  too (as POSIX sh does; bash needs `shopt -s expand_aliases` there).
 - Aliases defined in `$HOME/.shrc` (`ll`, `la` by default) exist only in interactive shells.
 
 ## Redirection
@@ -455,8 +455,12 @@ cat <<-EOF
 | `-p f` | FIFO |
 | `-c f` | character device |
 | `-s f` | size greater than zero |
-| `-r f`, `-w f` | `f` exists (permissions are not checked) |
-| `-x f` | any execute bit is set |
+| `-S f`, `-b f` | socket, block device |
+| `-r f`, `-w f`, `-x f` | read / write / execute permission for uid 1000 (the owner, group or other bits, whichever apply) |
+| `-u f`, `-g f`, `-k f` | setuid, setgid, sticky bit set |
+| `-O f`, `-G f` | owned by uid / gid 1000 |
+| `-N f` | modified since last read (mtime later than atime) |
+| `-o name` | shell option `name` is on |
 | `-t fd` | `fd` is a TTY |
 | `-z s` / `-n s` | `s` is empty / non-empty |
 | `-v name` | variable `name` is set |
@@ -469,8 +473,7 @@ cat <<-EOF
 | `! e`, `e1 -a e2`, `e1 -o e2`, `( e )` | not, and, or, grouping (`-a` binds tighter than `-o`) |
 
 No arguments: false (1). Status 2 with a message for `sh: test: <x>: integer expression expected`,
-`sh: test: too many arguments`, and `sh: [: missing ']'`. `-b`, `-g`, `-u`, `-k`, `-S`, `-O`, `-G`, `-N`
-are not supported.
+`sh: test: too many arguments`, and `sh: [: missing ']'`.
 
 ### Conditional command
 
@@ -480,15 +483,15 @@ The words between `[[` and `]]` are expanded without splitting or globbing. Supp
 |---|---|
 | `a == pattern`, `a = pattern` | shell pattern match; quoted parts of the pattern are literal |
 | `a != pattern` | no match |
-| `a =~ regex` | JavaScript `RegExp` search (not POSIX ERE). Quoting does not make the regex literal. Sets `BASH_REMATCH` to the matched text. An invalid regex is false. |
+| `a =~ regex` | POSIX extended regular expression search (bracket classes such as `[[:digit:]]`, back-references are not ERE). Quoted parts of the regex match literally (`[[ $v =~ ^a"."b ]]`); unquoted `( ) \| < >` belong to the regex, and blanks too inside parentheses. Sets `BASH_REMATCH`. An invalid regex gives status 2. |
 | `a < b`, `a > b` | string order |
 | `-eq -ne -lt -gt -le -ge -nt -ot` | as in `test` |
-| `-z -n -e -f -d -x -r -w -s -L -h` + operand | as in `test` |
+| every unary operator of `test` + operand | as in `test` |
 | `!`, `&&`, `\|\|`, `( )` | not, and, or, grouping |
 | `word` | true if non-empty |
 
-Only the unary operators listed are recognised; any other `-x` word is treated as a plain string (so it
-counts as non-empty: `[[ -p /dev/null ]]` is true). The status is 0 or 1.
+An unknown unary operator followed by an operand is an error (`sh: [[: unexpected argument … to
+conditional unary operator`, status 2). Otherwise the status is 0 or 1.
 
 ## Running commands
 
@@ -522,8 +525,8 @@ Which Node.js runtime is started (the ported or the legacy one) is decided per p
 | Status | Meaning |
 |---|---|
 | 0–255 | exit status of the command (`exit n` and `return n` use `n & 255`, so `exit 300` gives 44) |
-| 1 | redirection failure; assignment to a readonly variable; `${p:?}`; `set -u` violation |
-| 2 | syntax error; misuse of `test`/`[`/`printf`/`source` |
+| 1 | redirection failure; assignment to a readonly variable; an arithmetic error; `${p:?}`; `set -u` violation |
+| 2 | syntax error; misuse of `test`/`[`/`[[`/`printf`/`source` |
 | 126 | program file found but not executable (`sh: X: Permission denied`), or another spawn error |
 | 127 | command not found (`sh: X: command not found`); script file of `sh file` missing |
 | 128 + n | terminated by signal `n`: 130 SIGINT, 137 SIGKILL, 141 SIGPIPE, 143 SIGTERM |
@@ -541,20 +544,24 @@ A program receives the shell's exported variables (those inherited from the envi
 
 ### Subshells, pipelines and background jobs
 
-The shell does not create a kernel process for a subshell, a pipeline element, a command substitution or
-a background job: each runs as a copy of the shell state inside the same shell process, concurrently where
-applicable. Programs started from them are separate processes.
+The shell does not create a kernel process for a subshell, a pipeline element or a command
+substitution: each runs as a copy of the shell state inside the same shell process, concurrently where
+applicable. A background job is a process of its own. Programs started from any of them are separate
+processes.
 
 - **Subshell `( )`** — `exit` inside it only ends the subshell.
 - **Pipeline** — every element runs concurrently with its own copy; the status is that of the last
-  element, or with `set -o pipefail` that of the rightmost element that failed. In a non-interactive
-  shell the first program started by a pipeline becomes the process group leader and the other programs
-  join that group. `exit` in a pipeline element only ends that element.
-- **Background `&`** — the command runs concurrently in a copy of the shell; the shell continues
-  immediately with status 0. Stdin is not redirected. `$!` is set to the job's internal identifier.
-  `wait` (no arguments) waits for all background jobs of this shell and returns 0. `wait $!` waits for
-  that job and returns its status while the job is still running; a finished job is forgotten, and
-  `wait` on its identifier then returns 127. `wait <pid>` with a real pid waits for that kernel process.
+  element, or with `set -o pipefail` that of the rightmost element that failed. In an interactive shell
+  a pipeline is one job: its programs share one process group, which is the terminal's foreground group
+  while the pipeline runs. In a non-interactive shell programs stay in the shell's process group, so a
+  ^C sent to the group reaches them. `exit` in a pipeline element only ends that element.
+- **Background `&`** — the command runs in a new process, a copy of the shell (a simple command naming
+  a program is executed directly in that process); the shell continues immediately with status 0.
+  Stdin is not redirected. `$!` is that process's pid, so `kill $!` works. `wait` (no arguments) waits
+  for all background jobs and returns 0. `wait PID` waits for that job and returns its status, also
+  when it has already finished; the status is collected once, and a second `wait` on the same pid (or a
+  pid that is not a child of this shell) prints `sh: wait: pid N is not a child of this shell` and
+  returns 127. A trapped signal interrupts `wait` with status 128 + the signal number.
 
 ```sh
 npm run build > build.log 2>&1 &
@@ -570,7 +577,7 @@ wait "$job"; echo "build exited with $?"
 | Letter | `-o` name | Effect |
 |---|---|---|
 | `-e` | `errexit` | Exit when a command fails. Not applied to the condition of `if`/`elif`/`while`/`until`, to commands of an `&&`/`\|\|` list other than the last, or to a `!` pipeline. Applies inside functions. |
-| `-u` | `nounset` | Expanding an unset variable is an error (status 1, the shell exits). |
+| `-u` | `nounset` | Expanding an unset variable is an error (status 1; a non-interactive shell exits, an interactive one abandons the line). |
 | `-x` | `xtrace` | Before each simple command, print `$PS4` (default `+ `) and the expanded assignments and words to stderr, single-quoting words that contain characters other than `A-Za-z0-9_./=:@%+-`. |
 | `-f` | `noglob` | Disable pathname expansion. |
 | `-a` | `allexport` | Export every variable that is assigned. |
@@ -596,8 +603,8 @@ i.e. a green `user@openvessel`, a colon, the blue cwd, and `$ `. When a line is 
 (an open quote, `if` without `fi`, a trailing `|`), the shell prints `> ` and appends the next line.
 
 Commands entered: blank lines are ignored; errors print `sh: <message>` and set the status; `exit` or
-end of input ends the shell (end of input prints `exit` and returns the last status). An interactive
-shell also exits on `${p:?}` and `set -u` errors.
+end of input ends the shell (end of input prints `exit` and returns the last status). `${p:?}` and
+`set -u` errors don't end an interactive shell.
 
 ### Line editing
 
@@ -639,9 +646,26 @@ text and the prompt is still written to stderr.
 
 ### Signals
 
-The interactive shell ignores SIGINT, SIGTSTP, SIGQUIT and SIGWINCH. Each program it starts gets its own
-process group, which becomes the terminal's foreground group while the program runs, so Ctrl-C reaches
-the program and not the shell. See [Processes](processes.md) for the TTY.
+The interactive shell ignores SIGINT, SIGTSTP, SIGQUIT and SIGWINCH (unless trapped). Each job it starts
+(a program, or all the programs of a pipeline) gets its own process group, which becomes the terminal's
+foreground group while the job runs, so Ctrl-C reaches the job and not the shell. See
+[Processes](processes.md) for the TTY.
+
+### Traps
+
+`trap 'action' SIGNAL...` sets a handler; `trap '' SIGNAL` ignores the signal; `trap - SIGNAL` restores
+the default. Signals are names with or without `SIG` (`INT`, `SIGTERM`) or numbers; `EXIT` (or `0`) and
+`ERR` are pseudo-signals.
+
+- `EXIT` runs when the shell exits (end of input, `exit`, `set -e`, an error that ends the shell) and
+  before it dies of a signal; in a subshell it runs when the subshell ends. `exit` inside the action
+  sets the final status; `$?` in the action is the exit status.
+- `ERR` runs after a command fails, where `set -e` would apply.
+- A trapped signal received by the shell (from `kill`, or ^C on the terminal) runs its action at the
+  next command boundary, and interrupts a `wait`. An ignored signal is dropped. Untrapped SIGTERM,
+  SIGHUP… end a non-interactive shell (after the `EXIT` trap) with status 128 + n.
+- `trap` with no operands or `trap -p [SIGNAL...]` prints the handlers as `trap -- 'action' SIGNAME`;
+  `trap -l` lists the signals.
 
 ## Built-in commands
 
@@ -669,7 +693,7 @@ programs in `/bin` with the same behaviour (useful with `xargs`, `find -exec`, `
 | `hash` | any | no-op, status 0 |
 | `history` | — | Prints the history: number right-aligned in 5 columns, two spaces, the line. |
 | `jobs`, `times` | any | no-op, status 0, no output |
-| `let` | `expr...` | Evaluates each arithmetic expression; status 0 if the last is non-zero. |
+| `let` | `expr...` | Evaluates each arithmetic expression; status 0 if the last is non-zero, 1 if it is zero or an expression fails (`sh: let: <expr>: <message>`). |
 | `local` | `[name[=value]...]` | Saves `name` and restores it when the function returns. Without a value an unset variable is set to the empty string. Options are ignored. Outside a function it is a plain assignment. |
 | `printf` | `[-v var] format [args]` | See [printf](#printf). |
 | `pushd` | `[dir]` | Push the cwd on a directory stack, then `cd dir` (no operand: `cd $HOME`). Prints nothing. |
@@ -681,12 +705,12 @@ programs in `/bin` with the same behaviour (useful with `xargs`, `find -exec`, `
 | `set` | see [Shell options](#shell-options) | |
 | `shift` | `[n]` | Drop `n` (default 1) positional parameters; status 1 (nothing shifted) if `n` exceeds `$#`. |
 | `test`, `[` | see [test and [](#test-and-) | |
-| `trap` | `action signal...` | Records the action; actions are never run. Status 0. |
+| `trap` | `[-lp] [action] [signal...]` | See [Traps](#traps). |
 | `type` | `name...` | Prints `X is a function`, ``X is aliased to `v'``, `X is a shell builtin`, or `X is /path` (checked in that order); `sh: type: X: not found` and status 1 otherwise. Options are ignored. |
 | `ulimit` | `[-a] [-n] [value]` | Only the open-files limit (`-n`) exists. It bounds how many Node.js threads a process can start (each thread counts 8 descriptors on top of a base of 30). Default 1024, inherited by children; `unlimited` = 1048576. `-a` prints `open files (-n) N`. Any other option prints `unlimited` and setting it has no effect. |
-| `umask` | `[mode]` | Prints the mask as 4 octal digits, or sets it from an octal number. Symbolic modes are not supported (`umask u=rwx` sets the mask to 0). |
+| `umask` | `[-p] [-S] [mode]` | Prints the mask as 4 octal digits (`-S` symbolically, `u=rwx,g=rx,o=rx`; `-p` as `umask 0022`), or sets it from an octal number or a symbolic mode (`u=rwx,g=rx,o=`, `g+w`, `a-w`: the permissions to keep). The mask applies to the shell's redirections and the programs it starts; a subshell's `umask` stays in the subshell. |
 | `unset` | `[-f] [-v] name...` | Removes variables, or functions after `-f`. A readonly variable gives `sh: unset: X: readonly variable`, status 1. |
-| `wait` | `[id...]` | See [Background jobs](#subshells-pipelines-and-background-jobs). An unknown id gives 127. |
+| `wait` | `[pid...]` | See [Background jobs](#subshells-pipelines-and-background-jobs). A pid that isn't a child gives 127. |
 
 ### echo
 
@@ -757,12 +781,16 @@ parsed by a small getopt in `src/kernel/coreutils.ts`:
 
 - Short options can be combined (`-la`); an option that takes a value accepts it attached (`-n5`) or as
   the next argument (`-n 5`).
-- Options are recognised **anywhere** on the command line, also after operands; `--` ends them.
-- An argument of the form `-<digits>` (for example `-1`, `-0`) is an operand, not an option.
+- Options are recognised anywhere on the command line, also after operands (as GNU programs do); `--`
+  ends them. Programs that run another command (`xargs`, `env`, `timeout`, `nice`, `nohup`, `time`)
+  stop at their first operand, so the command's own options reach it (`xargs stat -c %F`).
+- Digits are option letters like any other (`ls -1`, `xargs -0`).
 - Unknown options are accepted silently and ignored.
 - Long options are mapped where listed; `--name=value` sets a value.
 - File operands that can't be read print `<cmd>: <file>: <reason>` and the command continues with the next
   one; the exit status is then 1 (2 for `ls`, `grep`, `diff`).
+- A command that a wrapper (`env`, `xargs`, `timeout`, `nice`, `nohup`, `time`) can't start gives 127
+  if it doesn't exist, else 126.
 - `-` as a file operand means stdin where a command reads files.
 
 ### Command table
@@ -777,23 +805,23 @@ parsed by a small getopt in `src/kernel/coreutils.ts`:
 | `clear` | — | Writes `ESC[H ESC[2J ESC[3J`. |
 | `cp` | `-r` `-R` `-a` `-n` `-P` `-d` `-f`, `--recursive`, `--force` | See [cp, mv, rm, ln](#cp-mv-rm-ln). |
 | `cut` | `-d C`, `-f LIST`, `-c LIST`, `-b LIST` | See [cut](#cut). |
-| `date` | `-u`, `--utc`, `-d STR`, `--date=STR`, `+FORMAT` | See [date](#date). |
+| `date` | `-u`, `-d STR`, `-r FILE`, `-I[FMT]`, `-R`, `+FORMAT` | See [date](#date). |
 | `df` | — | Prints a fixed line: `vfs 4194304 0 4194304 0% /`. |
-| `diff` | `-q` | See [diff](#diff). |
+| `diff` | `-u`, `-U N`, `-q`, `-s`, `-i`, `-w`, `-b`, `-L`, `-a` | See [diff](#diff). |
 | `dirname` | — | One line per operand. |
 | `du` | `-s`, `-h`, `-a`, `-d N`, `--max-depth=N` | See [du](#du). |
 | `echo` | `-n -e -E` | Same as the built-in. |
 | `egrep`, `fgrep` | as `grep` | `grep -E` / `grep -F`. |
-| `env` | `-i`, `-`, `-u NAME`, `-S STRING` | See [env](#env). Also `/usr/bin/env`. |
+| `env` | `-i`, `-`, `-u NAME`, `-C DIR`, `-S STRING` | See [env](#env). Also `/usr/bin/env`. |
 | `false` | — | Status 1. |
-| `file` | — | See [file](#file). |
+| `file` | `-b`, `-L` | See [file](#file). |
 | `find` | see [find](#find) | |
 | `free` | — | Prints fixed values (total 4194304, used 0). |
 | `grep` | see [grep](#grep) | |
 | `head` | `-n N`, `-N`, `-c N` | See [head and tail](#head-and-tail). |
 | `hostname` | — | `openvessel`. Cannot be changed. |
 | `id` | `-u`, `-g`, `-un`, `-nu` | `uid=1000(user) gid=1000(user) groups=1000(user)`; `-u`/`-g` print `1000`, `-un` prints `user`. |
-| `kill` | `-SIG`, `-N`, `-l` | See [ps and kill](#ps-and-kill). |
+| `kill` | `-s SIG`, `-n N`, `-SIG`, `-N`, `-l`, `-L` | See [ps and kill](#ps-and-kill). |
 | `less`, `more` | as `cat` | No paging: they behave exactly like `cat`. |
 | `ln` | `-s`, `-f`, `-n` | See [cp, mv, rm, ln](#cp-mv-rm-ln). |
 | `ls` | see [ls](#ls) | |
@@ -802,9 +830,9 @@ parsed by a small getopt in `src/kernel/coreutils.ts`:
 | `mkfifo` | `-m MODE` | Default mode `0666 & ~umask`. |
 | `mktemp` | `-d`, `-t`, `-p DIR` | See [mktemp](#mktemp). |
 | `mv` | `-n` | See [cp, mv, rm, ln](#cp-mv-rm-ln). |
-| `nice` | `-n N` | Runs the command; the niceness is ignored. |
+| `nice` | `-n N`, `-N` | Runs the command; the niceness is ignored. Without a command prints `0`. |
 | `nl` | — | Numbers non-empty lines (`%6d<TAB>`); empty lines are printed empty. Operands are files. |
-| `nohup` | — | Runs the command as is (no `nohup.out`, no signal changes). |
+| `nohup` | — | Runs the command as is (no `nohup.out`, no signal changes). No command: status 125. |
 | `nproc` | — | `navigator.hardwareConcurrency`, or 4. |
 | `printf` | `-v VAR` | Same as the built-in. |
 | `ps` | — | See [ps and kill](#ps-and-kill). |
@@ -812,31 +840,31 @@ parsed by a small getopt in `src/kernel/coreutils.ts`:
 | `readlink` | `-f`, `-e`, `-m` | Without options: the link target, or status 1 without a message if the path is not a symbolic link. With any of the options: the canonical path, or status 1 without a message if it does not exist. |
 | `realpath` | `-m` | Canonical path; `-m` prints the lexically resolved path when it does not exist. |
 | `rev` | — | Reverses each line (by code point). |
-| `rm` | `-r` `-R` `--recursive` `-f` `--force` `-d` | See [cp, mv, rm, ln](#cp-mv-rm-ln). |
+| `rm` | `-r` `-R` `--recursive` `-f` `--force` `-d` `-v` | See [cp, mv, rm, ln](#cp-mv-rm-ln). |
 | `rmdir` | `-p` | `-p` also removes the parent directories named in the operand. |
 | `sed` | see [sed](#sed) | |
 | `seq` | see [seq](#seq) | |
 | `sleep` | — | See [sleep](#sleep). |
 | `sort` | see [sort](#sort) | |
-| `stat` | `-L`, `-c FMT` | See [stat](#stat). |
+| `stat` | `-L`, `-f`, `-c FMT`, `--printf FMT`, `-t` | See [stat](#stat). |
 | `stty` | `size`, `raw`, `-raw`, `sane`, `cooked`, `echo`, `-echo` | Needs a TTY on stdin (status 1 otherwise). `size` prints `rows cols`. Other settings are ignored. |
 | `sync` | — | Does nothing, status 0. |
-| `tail` | `-n N`, `-n +N`, `-N`, `-c N`, `-f` | See [head and tail](#head-and-tail). |
+| `tail` | `-n N`, `-n +N`, `-N`, `-c N`, `-c +N`, `-q`, `-f` | See [head and tail](#head-and-tail). |
 | `tee` | `-a` | Copies stdin to stdout and each file (truncated, or appended with `-a`). |
 | `test`, `[` | — | Same as the built-ins. |
 | `time` | — | See [time and timeout](#time-and-timeout). |
-| `timeout` | — | See [time and timeout](#time-and-timeout). |
+| `timeout` | `-s SIG`, `-k DUR`, `--preserve-status`, `-v` | See [time and timeout](#time-and-timeout). |
 | `touch` | `-c`; `-d X`, `-t X`, `-r X` accepted | Creates missing files; sets atime and mtime of existing ones to now. The `-d`/`-t`/`-r` values are ignored (always now). `-c`: don't create. |
-| `tr` | `-d`, `-s`, `-c` | See [tr](#tr). |
+| `tr` | `-d`, `-s`, `-c`, `-t` | See [tr](#tr). |
 | `true` | — | Status 0. |
 | `truncate` | `-s N` | Sets each file to `N` bytes (default 0), creating it if missing. Only a plain byte count is accepted (no `K`/`M` suffix, no `+`/`-`). |
-| `tty` | — | `/dev/pts/N` if stdin is a TTY, else `not a tty` and status 1. |
+| `tty` | `-s` | `/dev/tty` if stdin is a TTY (the path the kernel gives a terminal), else `not a tty` and status 1. `-s`: status only. There is no device node for it in the file system (`stat /dev/tty` fails). |
 | `uname` | `-a -s -n -r -v -m -p -o` | `Linux`, `openvessel`, `6.1.0-openvessel`, `#1 SMP`, `x86_64` (`-m` and `-p`), `GNU/Linux`. No option: `-s`. `-a` prints them in the order s n r v m o. |
 | `uniq` | `-c`, `-d`, `-u`, `-i` | See [uniq](#uniq). |
 | `wc` | `-l`, `-w`, `-c`, `-m` | See [wc](#wc). |
 | `which` | `-a` | Prints the path found on `PATH`; `-a` prints every executable match. Status 1 if any name is not found. |
 | `whoami` | — | `user`. |
-| `xargs` | `-n N`, `-I STR`, `-d DELIM`, `-r`, `-P N` | See [xargs](#xargs). |
+| `xargs` | `-n N`, `-L N`, `-I STR`, `-i`, `-0`, `-d DELIM`, `-a FILE`, `-r`, `-t`, `-P N` | See [xargs](#xargs). |
 | `yes` | — | Repeats its arguments joined by spaces (default `y`) until killed or the pipe closes. |
 | `curl`, `wget` | see [curl and wget](#curl-and-wget) | In `/usr/bin`. |
 | `node`, `nodejs` | — | In `/usr/bin`. See [Node.js runtime](nodejs-runtime.md). |
@@ -861,15 +889,16 @@ ls [-a] [-A] [-l] [-h] [-R] [-t] [-r] [-d] [-1] [--no-color] [file...]
 | `-t` | | sort by modification time, newest first |
 | `-r` | | reverse the order |
 | `-d` | | list directories themselves, not their contents |
-| `-1` | | one name per line — only when combined with another letter (`-1a`): a lone `-1` is taken as a file name |
+| `-1` | | one name per line |
 | | `--no-color` | no colours |
 
 - Names are sorted with `localeCompare`. Without a TTY on stdout the output is one name per line;
   on a TTY it is in columns (filled top to bottom) fitted to the terminal width, and coloured: directories
   bold blue, symbolic links bold cyan, executables bold green.
 - Long format: `mode links user user size date name`, with `-> target` for links. The owner and group
-  are always `user`. The date is `Mon dd HH:MM` within 180 days of now, else `Mon dd  YYYY`. A `total`
-  line (sum of sizes in KiB, rounded up per file) precedes each list.
+  are always `user`; setuid, setgid and sticky bits show as `s`/`S`/`t`/`T`. The date is `Mon dd HH:MM`
+  within 180 days of now, else `Mon dd  YYYY`. A `total` line (sum of sizes in KiB, rounded up per file)
+  precedes the contents of each directory; file operands get none.
 - An operand that does not exist: `ls: cannot access 'x': No such file or directory`, status 2.
 
 ### cat
@@ -887,9 +916,9 @@ tail [-n N | -N | -n +N] [-c N] [-f] [file...]
 - `head`: first `N` lines (default 10) or `N` bytes. `-n -N` prints all but the last `N` lines. When
   reading stdin with a non-negative count, `head` stops reading as soon as it has its lines, so
   `yes | head -1` terminates. With several files each is preceded by `==> name <==`.
-- `tail`: last `N` lines (default 10), or from line `N` with `+N`, or the last `N` bytes with `-c`
-  (`-c +N` is not supported: it is treated as the last `N` bytes). `tail` reads the whole input first. No
-  headers are printed for several files.
+- `tail`: last `N` lines (default 10), or from line `N` with `+N`; the last `N` bytes with `-c N`, from
+  byte `N` on with `-c +N`. `tail` reads the whole input first. With several files each is preceded by
+  `==> name <==` (not with `-q`). A last line without a newline is printed without one.
 - `tail -f file` (one file only): after printing, polls the file every 250 ms and prints appended data
   until killed; if the file shrinks it continues from the new end.
 
@@ -904,41 +933,47 @@ is added for more than one input.
 
 ```text
 grep [options] pattern [file...]
-grep [options] -e pattern [file...]
+grep [options] -e pattern... [-f file]... [file...]
 egrep ...    fgrep ...
 ```
 
 | Option | Long form | Effect |
 |---|---|---|
-| `-i` | `--ignore-case` | case-insensitive |
+| `-i`, `-y` | `--ignore-case` | case-insensitive |
 | `-v` | `--invert-match` | select non-matching lines |
 | `-n` | `--line-number` | prefix line numbers |
 | `-c` | `--count` | print the count of selected lines per file |
-| `-l` | `--files-with-matches` | print only names of files with a match |
+| `-l` / `-L` | `--files-with-matches` / `--files-without-match` | print only names of files with / without a match |
 | `-q` | `--quiet`, `--silent` | no output; status only |
-| `-w` | `--word-regexp` | match whole words (`\b…\b`) |
-| `-x` | | match whole lines |
-| `-o` | `--only-matching` | print each match on its own line |
-| `-E` | `--extended-regexp` | extended syntax |
-| `-F` | `--fixed-strings` | literal string |
-| `-r`, `-R` | `--recursive` | search directories recursively (default `.`) |
-| `-h` | | never print file names |
-| `-a` | | treat binary files as text |
-| `-e PAT` | | the pattern (only one: the last `-e` wins) |
-| `-m N` | | stop after `N` selected lines per file |
-| | `--include=GLOB` | with `-r`, only files whose base name matches |
-| `-A N`, `-B N`, `-C N` | `--exclude=…`, `--color…` | accepted and ignored (no context lines) |
+| `-s` | `--no-messages` | accepted |
+| `-w` | `--word-regexp` | match whole words (not preceded or followed by a word character) |
+| `-x` | `--line-regexp` | match whole lines |
+| `-o` | `--only-matching` | print each non-empty match on its own line |
+| `-G` / `-E` / `-F` / `-P` | `--basic-regexp` / `--extended-regexp` / `--fixed-strings` / `--perl-regexp` | pattern syntax (`-P`: JavaScript `RegExp` syntax) |
+| `-r` / `-R` | `--recursive` / `--dereference-recursive` | search directories recursively (default `.`); `-r` skips symbolic links met on the way, `-R` follows them |
+| `-h` / `-H` | `--no-filename` / `--with-filename` | never / always print file names |
+| `-a` | `--text` | treat binary files as text |
+| `-e PAT` | `--regexp=PAT` | a pattern; may be repeated |
+| `-f FILE` | `--file=FILE` | patterns from a file, one per line (`-` for stdin) |
+| `-m N` | `--max-count=N` | stop after `N` selected lines per file |
+| `-A N`, `-B N`, `-C N` | `--after-context`, `--before-context`, `--context` | print `N` lines of context after / before / around each match |
+| | `--include=GLOB`, `--exclude=GLOB`, `--exclude-dir=GLOB` | with `-r`, filter files and directories by base name (repeatable) |
+| | `--color…` | accepted and ignored |
 
-- The pattern is turned into a JavaScript `RegExp`. In basic syntax (default) `\(` `\)` `\{` `\}` `\|`
-  `\+` `\?` are the operators and the bare characters are literal; `-E` passes the pattern unchanged.
-  Everything else follows JavaScript syntax: `\d`, `\w`, `\s`, `\b` work; POSIX bracket classes such as
-  `[[:digit:]]` are not translated. An invalid pattern prints `invalid regular expression`, status 2.
-- File names are prefixed when there is more than one file or with `-r`. `-r` walks every file and
-  directory, including dot files and `node_modules`; names under `.` are printed without `./`.
+- A line is selected if any pattern matches. A pattern operand may hold several patterns separated by
+  newlines.
+- POSIX regular expressions are translated to JavaScript `RegExp`. In basic syntax (default) `\(` `\)`
+  `\{` `\}` `\|` `\+` `\?` are the operators and the bare characters are literal, and a leading `*` is
+  literal; `-E` uses extended syntax. Bracket expressions with classes (`[[:digit:]]`, `[[:alpha:]]`…)
+  and the GNU escapes `\w` `\W` `\s` `\S` `\b` `\B` `\<` `\>` work. An invalid pattern prints the
+  `RegExp` error, status 2.
+- File names are prefixed when there is more than one file or with `-r`. Names under `.` are printed
+  without `./` when no file operand was given.
+- Context lines are printed with `-` instead of `:` after the file name and line number; groups that
+  are not adjacent are separated by `--`.
 - A file containing a NUL byte prints `Binary file NAME matches` (unless `-a`).
-- `-o` prints every match; a pattern that can match the empty string prints empty lines.
-- Exit status: 0 if any line was selected, 1 if none, 2 if a file could not be read and nothing was
-  selected.
+- Exit status: 0 if any line was selected, 1 if none, 2 if a file could not be read (also when other
+  lines were selected) — except that `-q` returns 0 as soon as there is a match.
 
 ### sed
 
@@ -948,14 +983,15 @@ sed [-n] [-E|-r] [-i[SUFFIX]] [-e script]... [-f file] [script] [file...]
 
 | Option | Effect |
 |---|---|
-| `-n`, `--quiet` | don't print the pattern space automatically |
-| `-e script` | add a script (several are joined with newlines) |
-| `-f file` | read the script from a file |
-| `-E`, `-r` | extended regular expressions |
-| `-i[SUFFIX]` | edit the files in place; with a suffix, keep a backup `file+SUFFIX` (the suffix must be attached: `-i.bak`) |
+| `-n`, `--quiet`, `--silent` | don't print the pattern space automatically |
+| `-e script`, `--expression=script` | add a script (several are joined with newlines) |
+| `-f file`, `--file=file` | read the script from a file |
+| `-E`, `-r`, `--regexp-extended` | extended regular expressions |
+| `-i[SUFFIX]`, `--in-place[=SUFFIX]` | edit the files in place; with a suffix, keep a backup `file+SUFFIX` (the suffix must be attached: `-i.bak`) |
+| `-s`, `-u`, `-z` | accepted and ignored |
 
-The first non-option argument is the script if no `-e`/`-f` was given; the rest are files. Options
-must be given separately (`-n -e …`, not `-ne`); a combined or unknown option is taken as a file name.
+The first operand is the script if no `-e`/`-f` was given; the rest are files. Options may be combined
+(`-ne`, `-Ei`) and given anywhere; an unknown option prints `sed: invalid option -- 'x'`, status 1.
 Without `-i`, all inputs are concatenated and processed as one stream.
 
 Addresses: a line number `N`, `$` (last line), `/regex/` (or `\cregexc` with another delimiter), each
@@ -964,7 +1000,7 @@ line number not greater than the current line, only one line). `!` after the add
 
 | Command | Effect |
 |---|---|
-| `s/re/repl/flags` | substitute; any delimiter. Flags: `g` (all), `N` (only the N-th match, one digit), `p` (print if replaced), `i`/`I` (ignore case). In `repl`: `&` = the match, `\1`–`\9` = groups, `\&` = literal `&`, `\n` = newline. |
+| `s/re/repl/flags` | substitute; any delimiter (escaped as `\/` inside the parts). Flags: `g` (all), `N` (only the N-th match, one digit), `p` (print if replaced), `i`/`I` (ignore case). In `repl`: `&` = the match, `\1`–`\9` = groups, `\&` = literal `&`, `\n` `\t` and the other escapes below, `\U` `\L` (upper / lower case until `\E`), `\u` `\l` (the next character). |
 | `y/abc/xyz/` | transliterate |
 | `d` | delete the line, start the next cycle |
 | `p` | print the line |
@@ -974,8 +1010,9 @@ line number not greater than the current line, only one line). `!` after the add
 | `i text` | insert text before the line |
 | `c text` | replace the line with text |
 
-Commands are separated by `;` or newlines. Regular expressions use the same BRE→JavaScript translation
-as `grep`. Not supported: `{ }` blocks (the braces are ignored, so the commands inside apply to every
+Commands are separated by `;` or newlines. Regular expressions use the same POSIX→JavaScript
+translation as `grep`, plus GNU sed's escapes `\n` `\t` `\r` `\f` `\v` `\a`, `\dNNN`, `\oNNN`, `\xHH`
+and `\cX`. Not supported: `{ }` blocks (the braces are ignored, so the commands inside apply to every
 line), `n N P D h H g G x b t T r w l`, `0,/re/`, `addr,+N`, `first~step`. A final line without a newline is output without one.
 
 ```sh
@@ -998,26 +1035,25 @@ given plus the relative name (`./src/a.js`).
 |---|---|
 | `-name PAT`, `-iname PAT` | base name matches the shell pattern (case-insensitive) |
 | `-path PAT`, `-wholename PAT` | the whole printed path matches (`*` also matches `/`) |
-| `-type f\|d\|l` | regular file, directory, symbolic link (other letters never match) |
+| `-type T` | `f` regular file, `d` directory, `l` symbolic link, `p` FIFO, `s` socket, `c` / `b` character / block device; a comma list (`f,d`) matches any |
 | `-maxdepth N`, `-mindepth N` | global depth limits (wherever they appear) |
-| `-empty` | empty file or directory |
+| `-empty` | empty regular file or directory |
 | `-newer FILE` | modified after `FILE` |
 | `-size [+-]N[ckMG]` | size in units of 512 bytes (default), `c` bytes, `k` KiB, `M` MiB, `G` GiB; `+` more, `-` less, else equal after rounding up |
 | `-true`, `-false` | |
 | `-print`, `-print0` | print the path followed by newline / NUL |
 | `-prune` | don't descend into this directory |
 | `-delete` | delete (directories recursively) |
-| `-exec CMD {} ;`, `-exec CMD {} +` | run `CMD` with `{}` replaced by the path; `+` also runs one command per path |
+| `-exec CMD {} ;`, `-exec CMD {} +` | run `CMD` with `{}` replaced by the path; with `+` (after a lone `{}`), one run with all the paths |
 | `!`, `-not`, `( )`, `-a`, `-and`, `-o`, `-or` | operators; juxtaposition means `-a` |
 
 - Without `-print`, `-print0`, `-delete` or `-exec`, every entry for which the expression is true is
   printed.
-- `-delete` and `-exec` are deferred: they run after the whole walk (deletions deepest first). `{}` is
-  replaced only when it is a whole argument. The status is 1 if any `-exec` command fails.
+- `-delete` and `-exec` are deferred: they run after the whole walk (deletions deepest first), so
+  `-exec` is always true as a predicate. With `;`, `{}` is replaced also inside a word (`"<{}>"`). The
+  status is 1 if any `-exec` command fails.
 - An unknown predicate prints `find: unknown predicate '-x'`, status 1. A starting path that does not
   exist prints `find: 'path': No such file or directory`, status 1.
-- `-empty` on a directory works only when the starting path is absolute: with a relative starting path,
-  find stops with an error when it reaches a directory.
 
 ### sort
 
@@ -1053,40 +1089,46 @@ input delimiter.
 
 ### tr
 
-`tr [-d] [-s] [-c] SET1 [SET2]` reads stdin only. Sets support ranges (`a-z`), the classes `[:lower:]`
-`[:upper:]` `[:digit:]` `[:space:]` `[:alpha:]` `[:alnum:]`, and `\n \t \r \\`. If `SET2` is shorter, its
-last character is repeated. `-d` deletes characters of `SET1`, `-s` squeezes repeats of translated
-characters, `-c` complements `SET1`. With `-c` and a `SET2`, every character (including those in `SET1`)
-is translated, so `-c` is only reliable together with `-d`.
+`tr [-c] [-d] [-s] [-t] SET1 [SET2]` reads stdin only. Sets support ranges (`a-z`), the classes
+`[:lower:]` `[:upper:]` `[:digit:]` `[:space:]` `[:alpha:]` `[:alnum:]`, and `\n \t \r \\`.
+
+- Translating: each character of `SET1` becomes the character at the same position of `SET2`; if `SET2`
+  is shorter its last character is repeated (`-t` truncates `SET1` to the length of `SET2` instead).
+- `-c` complements `SET1`: with a `SET2`, every character not in `SET1` becomes the last character of
+  `SET2`, and the characters of `SET1` stay.
+- `-d` deletes the characters of `SET1` (or of its complement with `-c`).
+- `-s` squeezes runs of a repeated character into one: characters of `SET2` when translating or
+  deleting, else of `SET1`.
+- A missing operand prints `tr: missing operand`, status 1.
 
 ```sh
 echo "Hello" | tr a-z A-Z        # HELLO
 tr -d '\r' < dos.txt > unix.txt
-tr -cd '[:alnum:]\n' < in.txt
+tr -cs '[:alnum:]' '\n' < in.txt   # one word per line
 ```
 
 ### xargs
 
 ```text
-xargs [-n N] [-I STR] [-d DELIM] [-r] [-P N] [--] [command [arg...]]
+xargs [-0] [-d DELIM] [-a FILE] [-n N | -L N | -I STR] [-r] [-t] [-P N] [command [arg...]]
 ```
 
-- Reads all of stdin, splits it into items at whitespace (no quote processing), or at `DELIM` with `-d`
-  (a literal string), then runs `command` (default `echo`) with the items appended — all at once, or `N`
-  at a time with `-n`.
-- `-I STR`: runs the command once per item, replacing every occurrence of `STR` in each argument. Items
-  are still split at whitespace, not at newlines.
-- `-r`: don't run the command if there are no items (otherwise it runs once without items).
-- `-P` is accepted; commands always run one after another.
-- NUL-separated input: the `0` flag must be combined with another letter (`-0r`); a lone `-0` is taken as
-  the command name.
-- Status 123 if any invocation exited non-zero.
-- Because options are recognised anywhere, options meant for `command` are taken by `xargs` unless the
-  command is preceded by `--`:
+- Options end at the command: everything after it reaches the command (`xargs stat -c %F`).
+- Reads all of stdin (or `FILE` with `-a`) and splits it into items at blanks and newlines; single and
+  double quotes and backslashes protect blanks (`'a b'` is one item; an unmatched quote is an error). With
+  `-0` items are separated by NUL, with `-d` by the given character (`\n`, `\t` … are understood), both
+  without quote processing.
+- Runs `command` (default `echo`) with the items appended — all at once, or `N` at a time with `-n` / `-L`
+  (`-L` counts items, not lines).
+- `-I STR` (`-i` means `-I {}`): one run per input line (leading blanks removed), replacing every `STR` in
+  the arguments.
+- `-r`: don't run the command when there are no items (otherwise it runs once without items). `-t`
+  prints each command line to stderr. `-P` is accepted; commands always run one after another.
+- Status: 123 if any run exited 1–125; 124 (and stop) if one exited 255; 125 if one was killed by a
+  signal; 127 / 126 if the command can't be found / run.
 
 ```sh
-find . -name '*.log' -print0 | xargs -0r rm -f      # -f is read by xargs here
-find . -name '*.log' -print0 | xargs -0r -- rm -f   # -f reaches rm
+find . -name '*.log' -print0 | xargs -0r rm -f
 ```
 
 ### cp, mv, rm, ln
@@ -1098,37 +1140,57 @@ find . -name '*.log' -print0 | xargs -0r -- rm -f   # -f reaches rm
   dereferencing; other `-a` semantics (ownership, timestamps) are not implemented by `cp` itself.
 - `mv [-n] SRC... DEST`: renames; an existing non-directory target is replaced. `-f`, `-i`, `-v` are
   ignored.
-- `rm [-r|-R] [-f] [-d] FILE...`: `-r` removes directories recursively, `-d` empty directories, `-f`
-  ignores missing files and a missing operand. `rm` refuses `/` (`it is dangerous to operate recursively
-  on '/'`). There are no prompts (`-i` is ignored).
+- `rm [-r|-R] [-f] [-d] [-v] FILE...`: `-r` removes directories recursively, `-d` empty directories, `-f`
+  ignores missing files and a missing operand, `-v` prints `removed 'x'`. As GNU rm with its default
+  `--preserve-root`, `rm -r /` refuses (`it is dangerous to operate recursively on '/'`, status 1), and
+  `.` and `..` (also `dir/.`) are refused. There are no prompts (`-i` is ignored).
 - `ln [-s] [-f] [-n] TARGET [LINK]`: hard link by default, `-s` symbolic. Without `LINK`, the link is
   created in the cwd with the target's base name; if `LINK` is a directory (and no `-n`), inside it. `-f`
   removes an existing `LINK` first. Only the first two operands are used.
 
 ### chmod
 
-`chmod [-R] MODE FILE...`. `MODE` is octal (`755`) or a comma-separated list of `[ugoa]*[+-=][rwxXst]*`
-(no letters means `a`). `+` and `-` add and remove bits for the named classes; `=` sets the **whole**
-permission mode to the given bits (`chmod u=rw f` gives `600`, not "u to rw, others unchanged"). `X` sets
-execute only for directories or files that already have an execute bit. `s` and `t` are accepted and set
-nothing. Arguments starting with `-r`, `-w`, `-x` or `-X` are removed before parsing, so a mode such as
-`-x` has no effect (write `a-x`). `-R` recurses.
+`chmod [-R] [-c] [-f] [-v] MODE FILE...`. `MODE` is octal (`755`) or a comma-separated list of
+`[ugoa]*[+-=][rwxXst]*` or `[ugoa]*[+-=][ugo]` (copy another class's bits: `g=u`).
+
+- `+` and `-` add and remove bits for the named classes, `=` sets the named classes and leaves the
+  others (`chmod u=rw f` on `755` gives `655`).
+- Without a class letter, the bits apply to all classes except those masked by the umask (with umask
+  `022`, `chmod +w f` only adds the owner's write bit; `a+w` adds all three).
+- `X` sets execute only for directories or files that already have an execute bit; `s` and `t` set the
+  setuid / setgid and sticky bits.
+- A mode such as `-x` or `-w,+r` is a mode, not an option.
+- `-R` recurses; symbolic links met while recursing are neither changed nor followed. `-c`, `-f`, `-v`
+  are accepted.
+- An invalid mode prints `chmod: invalid mode: 'x'`, status 1.
 
 ### stat
 
-`stat [-L] [-c FORMAT] FILE...`. Without `-L` links are not followed. The default output is:
+`stat [-L] [-c FORMAT | --printf FORMAT] [-t] FILE...` and `stat -f FILE...`. Without `-L` links are not
+followed. The default output follows GNU's layout, with times in the local time zone (`TZ`):
 
 ```text
   File: f.txt
-  Size: 18	Blocks: 1	IO Block: 4096	regular file
-Device: 2049	Inode: 139	Links: 1
-Access: (0644/-rw-r--r--)  Uid: ( 1000/ user)   Gid: ( 1000/ user)
-Modify: 2026-10-26T06:11:32.702Z
+  Size: 18              Blocks: 1          IO Block: 4096   regular file
+Device: 801h/2049d	Inode: 139         Links: 1
+Access: (0644/-rw-r--r--)  Uid: ( 1000/    user)   Gid: ( 1000/    user)
+Access: 2026-10-26 15:11:32.702000000 +0900
+Modify: 2026-10-26 15:11:32.702000000 +0900
+Change: 2026-10-26 15:11:32.702000000 +0900
+ Birth: 2026-10-26 15:11:32.702000000 +0900
 ```
 
-`-c FORMAT` sequences: `%n` name, `%s` size, `%a` octal mode, `%A` mode string, `%F` file type
-(`regular file`, `directory`, `symbolic link`), `%i` inode, `%Y` mtime in seconds; any other `%x` prints
-`?`. A newline is added. `-f` takes an argument and is otherwise ignored.
+`-c FORMAT` sequences: `%n` name, `%N` quoted name (with `-> target` for links), `%s` size, `%b` blocks,
+`%B` 512, `%o` I/O block, `%a` octal mode, `%A` mode string, `%f` raw mode (hex), `%F` file type
+(`regular file`, `regular empty file`, `directory`, `symbolic link`, `fifo`, `socket`,
+`character special file`, `block special file`), `%h` links, `%i` inode, `%d`/`%D` device (decimal /
+hex), `%t`/`%T` device major / minor (hex), `%u`/`%g` uid / gid, `%U`/`%G` `user`, `%x %y %z %w`
+access / modify / change / birth time, `%X %Y %Z %W` the same in seconds, `%%`; any other sequence prints
+`?`. A newline is added; `--printf` adds none and understands `\n`, `\t`, `\\`. `-t` prints the terse
+one-line form.
+
+`-f` reports the file system instead: one in-memory file system, type `tmpfs`, block size 4096,
+1048576 blocks all free. With `-c`: `%n %T %t %s %S %b %f %a %c %d %l %i`.
 
 ### du
 
@@ -1140,40 +1202,66 @@ is always 0.
 ### date
 
 ```text
-date [-u|--utc] [-d STRING|--date=STRING] [+FORMAT]
+date [-u] [-d STRING | -r FILE] [-I[FMT] | -R | +FORMAT]
 ```
 
-`-d @SECONDS` uses a Unix time; any other string is parsed by JavaScript `Date`. Without a format the
-output is JavaScript's `Date.prototype.toString()` (or `toUTCString()` with `-u`), in the browser's time
-zone. Format sequences:
+The time zone is `TZ` — an IANA name (`Asia/Tokyo`), a POSIX string (`JST-9`, `EST5`), `''` for UTC —
+or, when `TZ` is unset, the browser's zone; `-u` uses UTC. Zone abbreviations are those `Intl` gives
+(`EST`, `GMT`, `UTC`), a built-in table for common zones that `Intl` names only by offset (`JST`, `KST`,
+`CET`/`CEST`, `AEST`…), else the offset in tzdata's style (`+0530`).
+
+`-d @SECONDS` uses a Unix time; `now`, `today`, `tomorrow`, `yesterday` are understood; `YYYY-MM-DD` and
+`YYYY-MM-DD HH:MM[:SS]` are local times in the zone; any other string is parsed by JavaScript `Date`. An
+unparsable date prints `date: invalid date 'x'`, status 1. `-r FILE` uses the file's modification time.
+Without a format the output is GNU's default, `%a %b %e %H:%M:%S %Z %Y` (`Mon Oct 26 16:12:57 JST 2026`).
+`-I` prints ISO 8601 (`date`, `hours`, `minutes`, `seconds`, `ns`), `-R` RFC 5322.
 
 | Sequence | Value |
 |---|---|
-| `%Y` `%y` `%m` `%d` | year, 2-digit year, month, day |
-| `%H` `%M` `%S` | hour, minute, second |
-| `%s` | Unix seconds |
-| `%N` | nanoseconds (millisecond precision) |
-| `%F` `%T` | `%Y-%m-%d`, `%H:%M:%S` |
-| `%b` `%a` | `Jan`…`Dec`, `Sun`…`Sat` |
-| `%Z` | `UTC` with `-u`, otherwise always `JST` |
-| `%%` | `%` |
+| `%Y` `%y` `%C` `%G` `%g` | year, 2-digit year, century, ISO week year (4 / 2 digits) |
+| `%m` `%d` `%e` `%j` | month, day, day padded with a space, day of the year |
+| `%H` `%I` `%k` `%l` `%M` `%S` | hour (24 / 12, `%k` `%l` space-padded), minute, second |
+| `%p` `%P` | `AM`/`PM`, `am`/`pm` |
+| `%a` `%A` `%b` `%h` `%B` | day and month names (C locale) |
+| `%u` `%w` `%U` `%W` `%V` | weekday (1–7 / 0–6), week of the year (Sunday / Monday first, ISO) |
+| `%s` `%N` | Unix seconds, nanoseconds (millisecond precision; `%3N` gives 3 digits) |
+| `%F` `%T` `%D` `%R` `%r` `%c` `%x` `%X` | `%Y-%m-%d`, `%H:%M:%S`, `%m/%d/%y`, `%H:%M`, `%I:%M:%S %p`, `%a %b %e %H:%M:%S %Y`, `%m/%d/%y`, `%H:%M:%S` |
+| `%z` `%:z` `%::z` `%Z` | `+0900`, `+09:00`, `+09:00:00`, zone abbreviation |
+| `%n` `%t` `%%` | newline, tab, `%` |
 
-Other sequences are printed unchanged. Setting the clock is not supported.
+Flags after `%`: `-` (no padding), `_` (pad with spaces), `0` (pad with zeros), `^` (upper case), `#`
+(swap case), and a width (`%10s`). Other sequences are printed unchanged. Setting the clock is not
+supported.
 
 ### diff
 
-`diff [-q] FILE1 FILE2` (either may be `-` for stdin). Equal files: no output, status 0. Different:
-status 1 and, with `-q`, `Files A and B differ`; otherwise a header `--- A` / `+++ B` followed by **every**
-line of both files prefixed with a space (common), `+` or `-`. There are no `@@` hunks and no context
-limit; at a change, added lines are listed before removed ones. If the product of the line counts exceeds
-40 000 000, only `Files A and B differ` is printed. Other options (`-u`, `-r`, …) are ignored;
-directories are not compared. Errors: status 2.
+```text
+diff [-u | -U N] [-q] [-s] [-i] [-w] [-b] [-a] [-L LABEL]... FILE1 FILE2
+```
+
+Either file may be `-` for stdin. Equal files: no output, status 0 (`-s` prints
+`Files A and B are identical`). Different: status 1; trouble (a missing file, a directory, wrong
+operands): status 2.
+
+- Default (normal format): change commands such as `2c2`, `4a5`, `1d0`, followed by the old lines
+  prefixed `< `, `---`, and the new lines prefixed `> `.
+- `-u` / `-U N`: unified format with `N` (default 3) lines of context. The header is
+  `--- FILE1<TAB>mtime` / `+++ FILE2<TAB>mtime` (time as `2026-10-26 16:12:57.123000000 +0900`), or the
+  `-L` labels; then `@@ -l,n +l,n @@` hunks; changes closer than 2N lines share a hunk.
+- A last line without a newline is followed by `\ No newline at end of file`, and differs from the same
+  line with one.
+- `-q` prints only `Files A and B differ`. `-i` ignores case, `-w` all whitespace, `-b` changes in the
+  amount of whitespace. A file with a NUL byte gives `Binary files A and B differ` unless `-a`.
+- The edit script is minimal (Myers' algorithm); for very different large inputs it falls back to
+  replacing the whole changed middle. Directories are not compared (`-r` is not supported).
 
 ### file
 
-`file NAME...` prints `directory`, `symbolic link to TARGET`, `empty`, `data` (a NUL byte in the first
-512 bytes) or `ASCII text` (everything else, including UTF-8). Errors are printed to stdout as
-`NAME: cannot open (reason)`; the status is always 0.
+`file [-b] [-L] NAME...` prints `directory`, `symbolic link to TARGET` (followed with `-L`),
+`fifo (named pipe)`, `socket`, `character special (M/m)`, `block special (M/m)`, `empty`, `data` (a NUL
+byte in the first 4096 bytes), `X script, ASCII text executable` (a `#!` line), `Unicode text, UTF-8
+text` or `ASCII text`. `-b` omits the name. Errors are printed to stdout as
+``NAME: cannot open `NAME' (reason)``; the status is always 0.
 
 ### mktemp
 
@@ -1184,14 +1272,21 @@ replaced with random `[a-z0-9]` characters. The directory is `DIR` with `-p`, el
 
 ### seq
 
-`seq LAST`, `seq FIRST LAST`, `seq FIRST INCREMENT LAST`. Numbers may be negative or fractional and are
-printed with JavaScript's number formatting. An increment of 0 gives status 1 and no output. `-s` does
-not work: `-s,` is ignored and `-s ,` makes the output empty.
+```text
+seq [-s SEP] [-w] [-f FORMAT] [FIRST [INCREMENT]] LAST
+```
+
+Numbers may be negative (`seq -2 2 2`) or fractional; each output number has as many decimals as `FIRST`
+and `INCREMENT` (`seq 0 0.1 0.3` prints `0.0` … `0.3`), and is computed as `FIRST + k*INCREMENT` so no
+error accumulates. `-s` sets the separator (attached or separate: `-s,`, `-s ,`); a newline ends the
+output. `-w` pads with zeros to equal width. `-f` takes one `%f`, `%g` or `%e` conversion with flags,
+width and precision (`%03g`). An invalid number or a zero increment prints an error, status 1.
 
 ### sleep
 
-`sleep N[s|m|h|d]...` sleeps for the sum of the arguments (fractions allowed, default unit seconds;
-invalid arguments are ignored). A signal ends the sleep.
+`sleep N[s|m|h|d]...` sleeps for the sum of the arguments (fractions allowed, default unit seconds; `inf`
+sleeps until a signal). An invalid argument prints `sleep: invalid time interval 'x'`, status 1. A signal
+ends the sleep.
 
 ### Checksums
 
@@ -1203,22 +1298,26 @@ Web Crypto; MD5 uses `@noble/hashes`. There is no check mode (`-c`); errors are 
 `ps` takes no options and prints `PID PPID CMD` for every running process (kernel programs and Node.js
 processes).
 
-`kill [-SIGNAL | -NUMBER] PID...`: the default signal is SIGTERM; `-9`, `-KILL` and `-SIGKILL` are
-equivalent. A negative pid signals a process group (`kill -TERM -123`). `kill -l` lists
-`HUP INT QUIT ILL TRAP ABRT BUS FPE KILL USR1 SEGV USR2 PIPE ALRM TERM`. `-s SIGNAL` is not supported.
-Failure: `kill: (PID) - No such process`, status 1. The signals themselves are described in
-[Processes](processes.md).
+`kill [-s SIGNAL | -n NUMBER | -SIGNAL | -NUMBER] [--] PID...`: the default signal is SIGTERM; `-9`,
+`-KILL`, `-SIGKILL`, `-s kill` are equivalent. Signal `0` sends nothing and only checks that the process
+exists (status 0, or 1 with `No such process`). PID `0` is the caller's process group, `-1` every
+process except `kill` itself, `-N` process group `N` (write `kill -TERM -123` or `kill -- -123`).
+`kill -l` lists the signal names, `kill -L` a table with numbers, `kill -l 15` / `kill -l 143` (an exit
+status) print `TERM`, `kill -l TERM` prints `15`. An unknown signal prints `kill: X: invalid signal
+specification`, status 1; a process that doesn't exist (or has ended) `kill: (PID) - No such process`,
+status 1. The signals themselves are described in [Processes](processes.md).
 
 ### env
 
 ```text
-env [-i | -] [-u NAME]... [-S STRING] [NAME=VALUE]... [command [arg...]]
+env [-i | -] [-u NAME]... [-C DIR] [-S STRING] [NAME=VALUE]... [command [arg...]]
 ```
 
 Without a command, prints the resulting environment as `NAME=VALUE` lines. `-i`/`-` starts from an empty
-environment (only the `NAME=VALUE` operands are kept). `-u` removes a variable. `-S STRING` splits the
-rest of the line at whitespace (used by `#!/usr/bin/env -S`). A command that cannot be started prints
-`env: 'cmd': No such file or directory`, status 127.
+environment (only the `NAME=VALUE` operands are kept). `-u` removes a variable (also `-uNAME`,
+`--unset=NAME`). `-C DIR` runs the command in `DIR`. `-S STRING` splits the rest of the line at
+whitespace (used by `#!/usr/bin/env -S`). A command that cannot be started prints
+`env: 'cmd': No such file or directory`, status 127 (126 for another error).
 
 ### time and timeout
 
@@ -1226,11 +1325,17 @@ rest of the line at whitespace (used by `#!/usr/bin/env -S`). A command that can
 not a keyword), then writes `real\tMmS.SSSs` preceded by an empty line to stderr. There are no `user` and
 `sys` lines. Status: the command's.
 
-`timeout DURATION command [arg...]` runs the command and sends SIGTERM after `DURATION` seconds
-(`parseFloat`, so suffixes such as `m` are ignored: `1m` is one second); status 124 if the time ran out,
-else the command's status. `timeout` drops **every** argument that starts with `-`, including the
-command's own options, so `-s`, `-k`, `--preserve-status` are not available and
-`timeout 5 sh -c '...'` loses `-c`. Wrap such commands in a script file.
+```text
+timeout [-s SIGNAL] [-k DURATION] [--preserve-status] [-v] DURATION command [arg...]
+```
+
+Runs the command and sends `SIGNAL` (default SIGTERM) after `DURATION` (a number with an optional
+`s`, `m`, `h`, `d` suffix; `0` disables the timeout). Options end at `DURATION`: the command keeps its own
+options (`timeout 5 sh -c '…'`). `-k` sends SIGKILL that long after the first signal if the command is
+still running; `-v` reports the signals sent on stderr. Status: 124 if the time ran out (137 if the
+command had to be killed with SIGKILL), with `--preserve-status` the command's own status instead;
+otherwise the command's status; 125 for an invalid duration or signal; 127 / 126 if the command can't be
+found / run.
 
 ### curl and wget
 
@@ -1246,19 +1351,26 @@ curl [options] URL
 |---|---|
 | `-X M`, `--request M` | HTTP method |
 | `-H "K: V"`, `--header` | add a request header |
-| `-d S`, `--data`, `--data-raw`, `--data-binary` | request body (the literal string; `@file` is not read). Changes `GET` to `POST`. |
-| `-o FILE`, `--output` | write the body to `FILE` |
-| `-O`, `--remote-name` | write the body to the URL's base name (`index.html` if empty) |
+| `-d S`, `--data`, `--data-ascii`, `--data-binary`, `--data-raw` | request body; several are joined with `&`. `@file` reads a file (not with `--data-raw`); `-d` drops newlines, `--data-binary` keeps them. Changes `GET` to `POST` and sets `Content-Type: application/x-www-form-urlencoded` unless given. |
+| `-G`, `--get` | send the `-d` data as the query string of a `GET` |
+| `-A S`, `-e URL`, `-u USER:PW` | `User-Agent`, `Referer` (dropped by the browser), basic `Authorization` header |
+| `-o FILE`, `--output` | write the output to `FILE` (`-` for stdout) |
+| `-O`, `--remote-name` | write the output to the URL's base name (`index.html` if empty) |
 | `-I`, `--head` | `HEAD` request; print the status line and headers only |
 | `-i`, `--include` | print the status line and headers before the body |
+| `-D FILE`, `--dump-header` | write the status line and headers to `FILE` (`-` for stdout) |
+| `-w FMT`, `--write-out` | print `FMT` after the transfer: `%{http_code}`, `%{response_code}`, `%{url_effective}`, `%{content_type}`, `%{size_download}`, `%{method}`, `\n` |
+| `-m S`, `--max-time` | give up after `S` seconds (status 28) |
 | `-f`, `--fail` | status 22 and `curl: (22) The requested URL returned error: N` for HTTP status ≥ 400 |
-| `-s`, `--silent`, `-S`, `-L`, `--location`, `-k`, `--insecure`, `--compressed` | accepted; no effect (there is no progress meter, redirects are always followed) |
+| `-s`, `--silent` | no error messages (unless `-S`) |
+| `-S`, `-L`, `--location`, `-k`, `--insecure`, `-v`, `--compressed` and other long options | accepted; no effect (there is no progress meter, redirects are always followed) |
 
-- Short flags may be combined only from `s S L f k` (`-fsSL`).
+- Short options combine, the one taking a value last (`-fsSLo out.tgz`, `-XPOST`). An unknown short
+  option is an error (status 2).
 - A URL without a scheme gets `http://`. Only one URL is used (the last non-option argument).
-- `-i`/`-I` print `HTTP/1.1 <code> <text>` and the headers of the proxy's response without its internal
-  `x-ov-*` headers: that is `content-type` and `cache-control: no-store`, not the server's full header set.
-  The reason phrase may be empty.
+- `-i`/`-I`/`-D` print `HTTP/1.1 <code> <text>` and the origin server's response headers (as far as the
+  browser exposes them), passed on by the proxy in its `x-ov-*` headers. The reason phrase is the
+  server's, or the standard one for the code when the server sends none (as over HTTP/2).
 - Request headers that browsers don't allow scripts to set (`Cookie`, `Origin`, `Referer`, `Host`,
   `Accept-Encoding`, `Sec-*`, `Proxy-*`, …) are dropped by the proxy. Cookies are never sent.
 - No URL: `curl: no URL specified!`, status 2. A network error or a denied request: `curl: (7) <message>`,
