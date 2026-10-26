@@ -273,7 +273,7 @@ The default environment:
 | `LANG` | `en_US.UTF-8` |
 | `TMPDIR` | `/tmp` |
 | `HOSTNAME` | `openvessel` |
-| `NAPI_RS_FORCE_WASI` | `1` |
+| `NAPI_RS_FORCE_WASI` | `true` |
 
 Each spawned process starts its own process group, so `kill()` also reaches the children that stay in
 that group. With `terminal`, the process is the terminal's foreground group.

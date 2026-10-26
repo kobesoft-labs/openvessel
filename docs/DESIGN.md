@@ -97,7 +97,7 @@ Node の CJS の読み込み（`Module._load`・`_resolveFilename`・`_extension
 | `esbuild` | `esbuild-wasm`（同じ版） |
 | `rollup`（4 以降） | `@rollup/wasm-node`（同じ版） |
 | `lightningcss` | `lightningcss-wasm` の Node 版（同期で使える） |
-| napi-rs の物（`rolldown`・`@astrojs/compiler-rs`・`@tailwindcss/oxide` など。wasm32-wasi 版が任意の依存に無ければ、同じ版を足す） | 任意の依存の `*-wasm32-wasi` を入れ、`NAPI_RS_FORCE_WASI=1` で読ませる。`node:wasi`・`worker_threads`・共有メモリが要る |
+| napi-rs の物（`rolldown`・`@astrojs/compiler-rs`・`@tailwindcss/oxide` など。wasm32-wasi 版が任意の依存に無ければ、同じ版を足す） | 任意の依存の `*-wasm32-wasi` を入れ、`NAPI_RS_FORCE_WASI=true` で読ませる。`node:wasi`・`worker_threads`・共有メモリが要る |
 | `sharp`（0.34） | `@img/sharp-wasm32` |
 | `@astrojs/compiler` | 元から WASM（そのまま） |
 | WASM 版が無いもの（`sass-embedded`・`@parcel/watcher`・`fsevents` など） | JS 版（`sass`）・JS の代わり（watch はカーネルの通知）・入れない |

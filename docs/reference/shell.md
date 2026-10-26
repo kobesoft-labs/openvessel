@@ -39,7 +39,7 @@ default environment is:
 | `LANG` | `en_US.UTF-8` |
 | `TMPDIR` | `/tmp` |
 | `HOSTNAME` | `openvessel` |
-| `NAPI_RS_FORCE_WASI` | `1` |
+| `NAPI_RS_FORCE_WASI` | `true` |
 
 ## Invoking sh
 

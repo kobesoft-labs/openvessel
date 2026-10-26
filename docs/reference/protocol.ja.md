@@ -147,7 +147,7 @@ await call('ping'); // 'pong'
 | `debug.esm` | `pathname`・`search?` | `{ status, body, type }`。その `/__ov/…` のパスにランタイムの Service Worker が返すもの |
 
 既定の環境変数は `PATH=/usr/local/bin:/usr/bin:/bin`・`HOME=/home/user`・`USER=user`・`LOGNAME=user`・`SHELL=/bin/sh`・
-`TERM=xterm-256color`・`LANG=en_US.UTF-8`・`TMPDIR=/tmp`・`HOSTNAME=<カーネルのホスト名>`・`NAPI_RS_FORCE_WASI=1` です。
+`TERM=xterm-256color`・`LANG=en_US.UTF-8`・`TMPDIR=/tmp`・`HOSTNAME=<カーネルのホスト名>`・`NAPI_RS_FORCE_WASI=true` です。
 [カーネル](kernel.ja.md) と [ホスト API](host-api.ja.md) も見てください。
 
 ### イベント

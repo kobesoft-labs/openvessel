@@ -263,7 +263,7 @@ spawn(command: string, args?: string[], opts?: SpawnOptions): Promise<Process>
 | `LANG` | `en_US.UTF-8` |
 | `TMPDIR` | `/tmp` |
 | `HOSTNAME` | `openvessel` |
-| `NAPI_RS_FORCE_WASI` | `1` |
+| `NAPI_RS_FORCE_WASI` | `true` |
 
 起動したプロセスはそれぞれ自分のプロセスグループを始めます。なので `kill()` は、同じグループにいる子にも届きます。
 `terminal` を付けると、そのプロセスが端末の前面のグループになります。
