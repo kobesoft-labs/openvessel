@@ -246,7 +246,7 @@ umask はプロセスごとです。ホストが起動したプロセスは 0o02
 | `/dev/null` | 読むと何も返らず、書いたものは捨てる（rdev 0x103） |
 | `/dev/zero` | 読むと 0 が返る。1 回で最大 64 KiB（rdev 0x105） |
 | `/dev/random`・`/dev/urandom` | 読むと `crypto.getRandomValues` のバイトが返る。1 回で最大 64 KiB（rdev 0x108・0x109） |
-| `/dev/tty` | 呼んだプロセスの制御端末。無ければ `ENXIO`。inode ではなく、開くと TTY そのものが手に入る |
+| `/dev/tty` | 呼んだプロセスの制御端末。無ければ `ENXIO`。`stat` のための文字デバイス（5,0）があり、開くと呼んだプロセスの TTY が手に入る |
 | `/dev/stdin`・`/dev/stdout`・`/dev/stderr` | `/proc/self/fd/0`・`1`・`2` へのシンボリックリンク |
 | `/dev/fd/N`・`/proc/self/fd/N`・`/proc/<自分の pid>/fd/N` | プロセスの fd N。通常のファイルは開き直す（自分の位置、新しい open のフラグ）。パイプ・ソケット・TTY は共有する。fd N が開いていなければ `ENOENT` |
 | `/proc/self` | `lstat` ではシンボリックリンク（大きさ = pid の桁数）、`readlink` は pid を返す、`stat` ではディレクトリ（mode 0o555） |

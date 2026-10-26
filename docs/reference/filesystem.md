@@ -261,7 +261,7 @@ Errors of each operation besides the path lookup errors (`ENOENT`, `ENOTDIR`, `E
 | `/dev/null` | Reads return nothing, writes are discarded (rdev 0x103) |
 | `/dev/zero` | Reads return zeros, at most 64 KiB per read (rdev 0x105) |
 | `/dev/random`, `/dev/urandom` | Reads return `crypto.getRandomValues` bytes, at most 64 KiB per read (rdev 0x108, 0x109) |
-| `/dev/tty` | The calling process's controlling terminal; `ENXIO` when it has none. Not an inode: opening it gives the TTY itself |
+| `/dev/tty` | The calling process's controlling terminal; `ENXIO` when it has none. A character device node (5,0) exists for `stat`; opening it gives the calling process's TTY |
 | `/dev/stdin`, `/dev/stdout`, `/dev/stderr` | Symlinks to `/proc/self/fd/0`, `1`, `2` |
 | `/dev/fd/N`, `/proc/self/fd/N`, `/proc/<own pid>/fd/N` | The process's fd N: a regular file is opened anew (own offset, the new open's flags); a pipe, socket or TTY is shared. `ENOENT` if fd N is not open |
 | `/proc/self` | `lstat`: a symlink (size = digits of the pid); `readlink` returns the pid; `stat`: a directory (mode 0o555) |

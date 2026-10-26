@@ -107,6 +107,8 @@ export class Kernel {
     v.mknodChar('/dev/zero', zeroDev, 0x105);
     v.mknodChar('/dev/random', randDev, 0x108);
     v.mknodChar('/dev/urandom', randDev, 0x109);
+    // stat and `test -e` see the controlling terminal; opening it goes to the process's TTY (openFile)
+    v.mknodChar('/dev/tty', nullDev, 0x500);
     v.mkdir('/dev/fd', 0o755);
     v.symlink('/proc/self/fd/0', '/dev/stdin');
     v.symlink('/proc/self/fd/1', '/dev/stdout');

@@ -858,7 +858,7 @@ parsed by a small getopt in `src/kernel/coreutils.ts`:
 | `tr` | `-d`, `-s`, `-c`, `-t` | See [tr](#tr). |
 | `true` | — | Status 0. |
 | `truncate` | `-s N` | Sets each file to `N` bytes (default 0), creating it if missing. Only a plain byte count is accepted (no `K`/`M` suffix, no `+`/`-`). |
-| `tty` | `-s` | `/dev/tty` if stdin is a TTY (the path the kernel gives a terminal), else `not a tty` and status 1. `-s`: status only. There is no device node for it in the file system (`stat /dev/tty` fails). |
+| `tty` | `-s` | `/dev/tty` if stdin is a TTY (the path the kernel gives a terminal), else `not a tty` and status 1. `-s`: status only. |
 | `uname` | `-a -s -n -r -v -m -p -o` | `Linux`, `openvessel`, `6.1.0-openvessel`, `#1 SMP`, `x86_64` (`-m` and `-p`), `GNU/Linux`. No option: `-s`. `-a` prints them in the order s n r v m o. |
 | `uniq` | `-c`, `-d`, `-u`, `-i` | See [uniq](#uniq). |
 | `wc` | `-l`, `-w`, `-c`, `-m` | See [wc](#wc). |
