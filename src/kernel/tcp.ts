@@ -11,13 +11,33 @@ import type { HttpRequestInit, HttpResponder } from './net.ts';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
-let nextPeerPort = 40000;
+// Linux's net.ipv4.ip_local_port_range: where the connecting side of a connection gets its port
+const EPHEMERAL_LOW = 32768;
+const EPHEMERAL_HIGH = 60999;
 
 export class TcpBridge {
   constructor(private kernel: Kernel) {}
 
-  /** Opens a connection to a raw listener; returns the connecting side's end. */
-  connect(rec: ListenRecord, from?: { address: string; port: number }, accept = 'tcp-accept'): OpenFile | null {
+  /** Ephemeral ports of open connections (the connecting ends') */
+  private portsInUse = new Set<number>();
+  private nextPort = EPHEMERAL_LOW + Math.floor(Math.random() * (EPHEMERAL_HIGH - EPHEMERAL_LOW + 1));
+
+  /** A free ephemeral port (not listened on, not used by another connection); 0 when all are taken. */
+  private ephemeralPort(): number {
+    for (let i = 0; i <= EPHEMERAL_HIGH - EPHEMERAL_LOW; i++) {
+      const p = this.nextPort;
+      this.nextPort = p >= EPHEMERAL_HIGH ? EPHEMERAL_LOW : p + 1;
+      if (!this.portsInUse.has(p) && !this.kernel.ports.has(p)) return p;
+    }
+    return 0;
+  }
+
+  /**
+   * Opens a connection to a listener; returns the connecting side's end and its port. The connecting
+   * side gets an ephemeral port (`from.port` given: that one, e.g. 0 for a Unix domain socket), which
+   * the accepting side sees as remotePort and which is free again once the connecting end is closed.
+   */
+  connect(rec: ListenRecord, from: { address: string; port?: number } = { address: '127.0.0.1' }, accept = 'tcp-accept'): { end: OpenFile; port: number } | null {
     // a listening socket shared by several processes: they take turns accepting
     let owner: { pid: number; tid: number } = rec;
     if (rec.acceptors?.length) {
@@ -26,13 +46,29 @@ export class TcpBridge {
     }
     const proc = this.kernel.procs.get(owner.pid);
     if (!proc || proc.state !== 'running') return null;
+    const port = from.port ?? this.ephemeralPort();
+    if (from.port === undefined && !port) return null;
     const [serverEnd, clientEnd] = createSocketPair();
-    const fd = proc.allocFd(serverEnd, 3);
+    let fd: number;
+    try {
+      fd = proc.allocFd(serverEnd, 3);
+    } catch {
+      // the listener's process has no descriptor left (EMFILE): the connection can't be accepted
+      clientEnd.unref();
+      return null;
+    }
+    if (from.port === undefined) {
+      this.portsInUse.add(port);
+      const close = clientEnd.onClose;
+      clientEnd.onClose = () => {
+        close?.();
+        this.portsInUse.delete(port);
+      };
+    }
     const thread = proc.threads.get(owner.tid) ?? proc.threads.values().next().value;
-    const peerPort = from?.port ?? (nextPeerPort = nextPeerPort >= 60000 ? 40000 : nextPeerPort + 1);
-    thread?.worker.postMessage({ t: accept, port: rec.port, fd, remoteAddress: from?.address ?? '127.0.0.1', remotePort: peerPort });
+    thread?.worker.postMessage({ t: accept, port: rec.port, fd, remoteAddress: from.address, remotePort: port });
     this.lastAcceptor = { pid: proc.pid, tid: thread?.tid ?? 0 };
-    return clientEnd;
+    return { end: clientEnd, port };
   }
 
   /** Who was handed the last connection made by connect(). */
@@ -40,7 +76,7 @@ export class TcpBridge {
 
   /** NetRouter.request for raw listeners: HTTP message ⇄ HTTP/1.1 bytes. */
   request(rec: ListenRecord, init: HttpRequestInit, responder: HttpResponder) {
-    const conn = this.connect(rec);
+    const conn = this.connect(rec)?.end;
     if (!conn) {
       responder.error(`connect ECONNREFUSED 127.0.0.1:${rec.port}`);
       return null;

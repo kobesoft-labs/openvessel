@@ -40,8 +40,7 @@ function topUp(url: string) {
   warm.set(url, list);
   while (list.length < WARM) list.push(new Worker(url, { type: 'module', name: 'node (idle)' }));
 }
-function takeWorker(name: string): Worker {
-  const url = processScript();
+function takeWorker(name: string, url = processScript()): Worker {
   const list = warm.get(url);
   const w = list?.shift();
   setTimeout(() => topUp(url), 0);
@@ -49,7 +48,8 @@ function takeWorker(name: string): Worker {
 }
 
 const kernel = new Kernel({
-  createWorker: (name) => takeWorker(name),
+  createWorker: (name, runtime) => takeWorker(name, runtime),
+  runtime: processScript,
   onListen: (port, pid) => emit({ ev: 'server-ready', port, pid }),
   onUnlisten: (port) => emit({ ev: 'port-closed', port }),
   log: (m) => console.warn('[openvessel]', m),

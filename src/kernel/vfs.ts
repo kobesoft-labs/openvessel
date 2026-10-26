@@ -1,6 +1,6 @@
 // In-memory POSIX-like virtual file system.
 
-import { KernelError, kerr } from '../shared/errno.ts';
+import { type ErrnoCode, KernelError, kerr } from '../shared/errno.ts';
 
 export const S_IFMT = 0o170000;
 export const S_IFSOCK = 0o140000;
@@ -86,6 +86,19 @@ export function isLink(n: Inode) {
   return (n.mode & S_IFMT) === S_IFLNK;
 }
 
+/** The user and group processes run as (`user`, not root: permission bits apply to them). */
+export const PROC_UID = 1000;
+export const PROC_GID = 1000;
+
+/**
+ * Whether a process may access the inode with `want` (4 = read, 2 = write, 1 = execute/search, or
+ * a sum): the owner bits when it owns the inode, else the group bits for its group, else the others'.
+ */
+export function permits(n: Inode, want: number): boolean {
+  const shift = n.uid === PROC_UID ? 6 : n.gid === PROC_GID ? 3 : 0;
+  return ((n.mode >> shift) & want) === want;
+}
+
 export function splitPath(p: string): string[] {
   const out: string[] = [];
   for (const part of p.split('/')) {
@@ -101,6 +114,12 @@ export class VFS {
   private watchers = new Set<(ev: WatchEvent) => void>();
   /** Bumped on every mutation; lets callers cache lookups cheaply. */
   generation = 0;
+  /**
+   * The file mode creation mask that mkdir() and file creation apply when the caller passes none:
+   * 0o022 for the host API and the kernel's own files. System calls pass the process's umask, and
+   * builtin programs get a view that applies theirs (forProcess()).
+   */
+  umask = 0o022;
 
   constructor() {
     this.root = this.newInode(S_IFDIR | 0o755);
@@ -128,6 +147,34 @@ export class VFS {
   onChange(fn: (ev: WatchEvent) => void): () => void {
     this.watchers.add(fn);
     return () => this.watchers.delete(fn);
+  }
+
+  /**
+   * The same file system for a builtin program, creating files with the process's umask. (Builtins
+   * call the VFS synchronously, so the mask is swapped in for the length of each call only.)
+   */
+  forProcess(proc: { umask: number }): VFS {
+    const wrapped = new Map<PropertyKey, unknown>();
+    return new Proxy(this, {
+      get: (t, k) => {
+        const v = Reflect.get(t, k);
+        if (typeof v !== 'function') return v;
+        let w = wrapped.get(k);
+        if (!w) {
+          w = (...args: unknown[]) => {
+            const prev = t.umask;
+            t.umask = proc.umask ?? prev;
+            try {
+              return v.apply(t, args);
+            } finally {
+              t.umask = prev;
+            }
+          };
+          wrapped.set(k, w);
+        }
+        return w;
+      },
+    });
   }
 
   private emit(type: WatchEvent['type'], path: string) {
@@ -191,10 +238,11 @@ export class VFS {
   }
 
   /** Returns the parent directory inode and the final name component. */
-  lookupParent(path: string): { dir: Inode; name: string; dirPath: string } {
+  lookupParent(path: string, rootError: ErrnoCode = 'EEXIST'): { dir: Inode; name: string; dirPath: string } {
     const parts = splitPath(path);
     checkNames(path, parts);
-    if (parts.length === 0) throw kerr('EEXIST');
+    // the root is no entry of a directory: mkdir('/') is EEXIST, rmdir('/') EBUSY, unlink('/') EISDIR
+    if (parts.length === 0) throw kerr(rootError);
     const name = parts[parts.length - 1];
     const dirPath = '/' + parts.slice(0, -1).join('/');
     const dir = this.lookup(dirPath, true);
@@ -238,7 +286,7 @@ export class VFS {
 
   // ---------- directories ----------
 
-  mkdir(path: string, mode = 0o777, recursive = false): string | undefined {
+  mkdir(path: string, mode = 0o777, recursive = false, umask = this.umask): string | undefined {
     if (recursive) {
       const parts = splitPath(path);
       let cur = '';
@@ -250,14 +298,14 @@ export class VFS {
           if (!isDir(existing)) throw kerr('ENOTDIR');
           continue;
         }
-        this.mkdir(cur, mode, false);
+        this.mkdir(cur, mode, false, umask);
         first ??= cur;
       }
       return first;
     }
     const { dir, name } = this.lookupParent(path);
     if (dir.entries!.has(name)) throw kerr('EEXIST');
-    const node = this.newInode(S_IFDIR | (mode & 0o7777 & ~0o022));
+    const node = this.newInode(S_IFDIR | (mode & 0o1777 & ~umask));
     node.entries = new Map();
     node.parent = dir;
     node.nlink = 2;
@@ -285,12 +333,11 @@ export class VFS {
   }
 
   rmdir(path: string) {
-    const { dir, name } = this.lookupParent(path);
+    const { dir, name } = this.lookupParent(path, 'EBUSY');
     const node = dir.entries!.get(name);
     if (!node) throw kerr('ENOENT');
     if (!isDir(node)) throw kerr('ENOTDIR');
     if (node.entries!.size > 0) throw kerr('ENOTEMPTY');
-    if (node === this.root) throw kerr('EBUSY');
     dir.entries!.delete(name);
     dir.nlink--;
     node.nlink = 0;
@@ -305,6 +352,8 @@ export class VFS {
       if (force) return;
       throw kerr('ENOENT');
     }
+    // the root can't be removed: fail before anything below it is gone
+    if (node === this.root) throw kerr('EBUSY');
     if (isDir(node)) {
       for (const name of [...node.entries!.keys()]) this.rmrf(path.replace(/\/$/, '') + '/' + name, true);
       this.rmdir(path);
@@ -322,8 +371,8 @@ export class VFS {
   // ---------- files ----------
 
   /** Creates (or truncates/opens) a regular file; returns its inode. */
-  createFile(path: string, mode = 0o666, opts: { excl?: boolean; trunc?: boolean } = {}): Inode {
-    const { dir, name } = this.lookupParent(path);
+  createFile(path: string, mode = 0o666, opts: { excl?: boolean; trunc?: boolean; umask?: number } = {}): Inode {
+    const { dir, name } = this.lookupParent(path, 'EISDIR');
     let node = dir.entries!.get(name);
     if (node && isLink(node)) {
       // follow symlink for creation
@@ -342,7 +391,7 @@ export class VFS {
       if (opts.trunc && isFile(node)) this.truncateNode(node, 0, path);
       return node;
     }
-    node = this.newInode(S_IFREG | (mode & 0o7777 & ~0o022));
+    node = this.newInode(S_IFREG | (mode & 0o7777 & ~(opts.umask ?? this.umask)));
     node.data = new Uint8Array(0);
     dir.entries!.set(name, node);
     this.touchDir(dir);
@@ -373,9 +422,9 @@ export class VFS {
   }
 
   /** Writes a whole file (creating parents is the caller's job). */
-  writeFile(path: string, data: Uint8Array | string, mode = 0o666): Inode {
+  writeFile(path: string, data: Uint8Array | string, mode = 0o666, umask = this.umask): Inode {
     const bytes = typeof data === 'string' ? textEncoder.encode(data) : data;
-    const node = this.createFile(path, mode, {});
+    const node = this.createFile(path, mode, { umask });
     if (node.device) {
       node.device.write(bytes);
       return node;
@@ -390,10 +439,10 @@ export class VFS {
   }
 
   /** Writes and creates missing parent directories. */
-  writeFileP(path: string, data: Uint8Array | string, mode = 0o666): Inode {
+  writeFileP(path: string, data: Uint8Array | string, mode = 0o666, umask = this.umask): Inode {
     const parts = splitPath(path);
-    if (parts.length > 1) this.mkdir('/' + parts.slice(0, -1).join('/'), 0o777, true);
-    return this.writeFile(path, data, mode);
+    if (parts.length > 1) this.mkdir('/' + parts.slice(0, -1).join('/'), 0o777, true, umask);
+    return this.writeFile(path, data, mode, umask);
   }
 
   readAt(node: Inode, buf: Uint8Array, position: number): number {
@@ -461,7 +510,7 @@ export class VFS {
   }
 
   unlink(path: string) {
-    const { dir, name } = this.lookupParent(path);
+    const { dir, name } = this.lookupParent(path, 'EISDIR');
     const node = dir.entries!.get(name);
     if (!node) throw kerr('ENOENT');
     if (isDir(node)) throw kerr('EISDIR');
@@ -473,10 +522,10 @@ export class VFS {
   }
 
   rename(from: string, to: string) {
-    const src = this.lookupParent(from);
+    const src = this.lookupParent(from, 'EBUSY');
     const node = src.dir.entries!.get(src.name);
     if (!node) throw kerr('ENOENT');
-    const dst = this.lookupParent(to);
+    const dst = this.lookupParent(to, 'EBUSY');
     if (isDir(node)) {
       // cannot move a directory into itself
       let p: Inode | undefined = dst.dir;
@@ -548,6 +597,12 @@ export class VFS {
     this.emit('change', path);
   }
 
+  /** The attributes of an inode were changed through a descriptor (fchmod, futimes): watchers of its path see a 'change'. */
+  touched(path?: string) {
+    if (path) this.emit('change', path);
+    else this.generation++;
+  }
+
   chown(path: string, uid: number, gid: number, follow = true) {
     const node = this.lookup(path, follow);
     if (uid >= 0) node.uid = uid;
@@ -583,7 +638,7 @@ export class VFS {
   }
 
   /** bind(2) of a Unix domain socket: a socket inode at `path` (EADDRINUSE if the name exists). */
-  mknodSock(path: string, mode = 0o755): Inode {
+  mknodSock(path: string, mode = 0o777 & ~this.umask): Inode {
     const { dir, name } = this.lookupParent(path);
     if (dir.entries!.has(name)) throw kerr('EADDRINUSE');
     const node = this.newInode(S_IFSOCK | mode);

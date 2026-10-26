@@ -1,8 +1,10 @@
 // Serves files from the VFS as browser ES modules for the process workers.
 //
-// URL layout (on the runtime origin, intercepted by the service worker):
+// URL layout (under the runtime's base, intercepted by the service worker):
 //   /__ov/esm/<abs path>[?query]   a file as an ES module (ESM rewritten, CJS facade, JSON)
 //   /__ov/builtin/<name>           a facade over a builtin module (node:fs etc.)
+//   /__ov/esm-error?code&msg&names a module standing in for an import that can't be resolved
+//   /__ov/mw/<pid>/<id>.mjs        a source registered by a process
 
 import { init as initLexer, parse as parseEsm } from 'es-module-lexer';
 // @ts-ignore - pure JS build, synchronous
@@ -10,6 +12,7 @@ import { parse as parseCjs } from 'cjs-module-lexer/lexer.js';
 import builtinExports from '../shared/builtin-exports.json';
 import * as path from '../shared/path.ts';
 import { ESM_CONDITIONS, ResolveError, Resolver, builtinName, encodePathForUrl, pathToFileURLString } from '../shared/resolve.ts';
+import { RUNTIME_BASE } from './base.ts';
 import type { Kernel } from './kernel.ts';
 import { isDir } from './vfs.ts';
 
@@ -23,12 +26,19 @@ const dec = new TextDecoder();
 const ID = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const RESERVED = new Set(['break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'return', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield', 'let', 'static', 'enum', 'await', 'implements', 'package', 'protected', 'interface', 'private', 'public', 'null', 'true', 'false', 'arguments', 'eval']);
 
+// The URLs written into generated modules are absolute and start with the runtime's base, which may
+// be a sub-path (https://example.com/demo/runtime): a root-relative /__ov/… would miss the runtime.
 export function esmUrlFor(p: string, query = ''): string {
-  return ESM_PREFIX + encodePathForUrl(p) + query;
+  return RUNTIME_BASE + ESM_PREFIX + encodePathForUrl(p) + query;
 }
 
 export function builtinUrlFor(name: string): string {
-  return BUILTIN_PREFIX + encodeURIComponent(name);
+  return RUNTIME_BASE + BUILTIN_PREFIX + encodeURIComponent(name);
+}
+
+/** A module that declares the imported names and throws the resolution error when it is evaluated. */
+export function errorUrlFor(code: string, msg: string, names: string[]): string {
+  return `${RUNTIME_BASE}${ERROR_PREFIX}?code=${encodeURIComponent(code)}&msg=${encodeURIComponent(msg)}&names=${encodeURIComponent(names.join(','))}`;
 }
 
 export interface ModuleResponse {
@@ -88,7 +98,8 @@ export class EsmService {
     await this.ready;
     if (pathname === ERROR_PREFIX) {
       const q = new URLSearchParams(search);
-      const names = (q.get('names') ?? '').split(',').filter(Boolean);
+      // each name once: `import { a, a as b }` lists a twice, and a duplicate export is a SyntaxError
+      const names = [...new Set((q.get('names') ?? '').split(',').filter(Boolean))];
       let body = throwingModule(q.get('code') ?? 'ERR_MODULE_NOT_FOUND', q.get('msg') ?? 'module not found');
       const ids = names.filter((n) => n !== 'default');
       if (ids.length) body += `let ${ids.map((n, i) => `__x${i}`).join(', ')};\nexport { ${ids.map((n, i) => `__x${i} as ${ID.test(n) && !RESERVED.has(n) ? n : JSON.stringify(n)}`).join(', ')} };\n`;
@@ -218,7 +229,7 @@ export class EsmService {
         // keep linking intact: point at an error module that declares the imported names and throws when evaluated
         const names = importedNames(src.slice(imp.importStart, imp.start));
         const msg = `${e?.message ?? e}`;
-        url = `${ERROR_PREFIX}?code=${encodeURIComponent(e?.code ?? 'ERR_MODULE_NOT_FOUND')}&msg=${encodeURIComponent(msg)}&names=${encodeURIComponent(names.join(','))}`;
+        url = errorUrlFor(e?.code ?? 'ERR_MODULE_NOT_FOUND', msg, names);
       }
       edits.push({ s: imp.start, e: imp.end, text: url.replace(/['"\\\n]/g, (c) => '\\' + c) });
       if (imp.attributesStart != null && imp.attributesStart >= 0) {
