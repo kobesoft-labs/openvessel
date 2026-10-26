@@ -12,6 +12,7 @@ import { bare } from './bindings/util.ts';
 import { NativeProxy, installProxyTracking } from './proxies.ts';
 import { installIteratorTracking } from './iterators.ts';
 import { moduleUrlForServed } from './bindings/module_wrap.ts';
+import { installCallSites } from './callsites.ts';
 import { fromShape } from './bindings/shape.ts';
 import * as loop from './loop.ts';
 import { createEnvProxy } from './env.ts';
@@ -238,6 +239,7 @@ function patchCallSites() {
 }
 
 function installStackTraceHook() {
+  installCallSites();
   patchCallSites();
   const nodePrepare = (Error as any).prepareStackTrace as (e: Error, t: any[]) => unknown;
   const runtimeFile = new URL(import.meta.url).pathname;
