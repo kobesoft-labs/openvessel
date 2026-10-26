@@ -1,13 +1,16 @@
 // Walks the ESM graph served by the runtime SW and reports modules that don't load.
-//   node test/e2e/esm-graph.mjs <project dir> <entry path in VFS> [install command]
-import { startServer, openBrowser, exec } from './harness.mjs';
+//   node test/e2e/esm-graph.mjs [--port] <project dir> <entry path in VFS> [install command]
+// The graph is the kernel's ESM service, which only the legacy runtime loads modules from; --port runs
+// the install on the ported runtime.
+import { startServer, openBrowser, exec, usePortedRuntime } from './harness.mjs';
 import { mountProject } from './project.mjs';
 
-const [dir, entry, install = 'npm install'] = process.argv.slice(2);
+const [dir, entry, install = 'npm install'] = process.argv.slice(2).filter((a) => a !== '--port');
 const srv = await startServer();
 const { browser, page } = await openBrowser();
 try {
   await page.evaluate(() => window.ovReady);
+  if (process.argv.includes('--port')) await usePortedRuntime(page);
   await mountProject(page, dir);
   const inst = await exec(page, `${install} >/dev/null 2>&1; echo $?`);
   console.log('install exit', inst.output.trim());
@@ -24,8 +27,9 @@ try {
       console.log(`[${r.status}] ${p}\n    ${String(r.body).slice(0, 400).replace(/\n/g, '\n    ')}`);
       continue;
     }
-    for (const m of String(r.body).matchAll(/["'](\/__ov\/esm(\/[^"'?]+))/g)) {
-      const next = decodeURIComponent(m[2]);
+    // import specifiers are absolute URLs under the runtime's base (…/__ov/esm/<path>)
+    for (const m of String(r.body).matchAll(/["'][^"'\s]*?\/__ov\/esm(\/[^"'?]+)/g)) {
+      const next = decodeURIComponent(m[1]);
       if (!seen.has(next)) queue.push(next);
     }
   }

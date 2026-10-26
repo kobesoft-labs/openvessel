@@ -43,6 +43,11 @@ export async function exec(page, cmd, { cwd = '/home/user/app', timeout = 600000
   );
 }
 
+/** Selects the ported runtime (src/nodejs) for the node processes started after this, as /etc/openvessel/node = port does. */
+export async function usePortedRuntime(page) {
+  await exec(page, 'mkdir -p /etc/openvessel && echo port > /etc/openvessel/node', { cwd: '/' });
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const cmd = process.argv[2] ?? 'echo hello; node -e "console.log(process.version)"';
   const srv = await startServer();
