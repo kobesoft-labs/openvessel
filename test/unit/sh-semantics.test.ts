@@ -163,6 +163,14 @@ re='^([a-z]+)-([0-9]{2,})$'; [[ foo-123 =~ $re ]] && echo "\${BASH_REMATCH[0]} \
   assert.equal(r.stdout, 'lit1\nlit2\nfoo-123 foo 123 3\nclass\nbs\nquoted-bs\nquoted-paren\nbad 2\n');
 });
 
+test('[[ =~ ]]: unquoted ( ) | belong to the regex, blanks too inside ( )', async () => {
+  const r = await sh(`[[ foo123 =~ ([a-z]+)([0-9]+) ]] && echo "\${BASH_REMATCH[1]} \${BASH_REMATCH[2]}"
+[[ xb =~ ^(a|x)b$ ]] && echo alt
+[[ 'a b' =~ (a b) ]] && echo blank
+[[ (ab =~ a) && -n x ]] && echo group`);
+  assert.equal(r.stdout, 'foo 123\nalt\nblank\ngroup\n');
+});
+
 test('umask: octal and symbolic', async () => {
   const r = await sh('umask 022; umask u=rwx,g=rx,o=; umask; umask -S; umask g+w; umask; umask a-w; umask; umask 077; (umask 0); umask; umask 022; umask -p');
   assert.equal(r.stdout, '0027\nu=rwx,g=rx,o=\n0007\n0227\n0077\numask 0022\n');

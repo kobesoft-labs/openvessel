@@ -500,7 +500,8 @@ export class Parser {
         break;
       }
       const c = this.ch();
-      if (c === '&' && this.ch(1) === '&') {
+      if (words.length && wordToLiteral(words[words.length - 1]) === '=~') words.push(this.readRegexWord());
+      else if (c === '&' && this.ch(1) === '&') {
         this.i += 2;
         words.push([{ t: 'lit', v: '&&' }]);
       } else if (c === '|' && this.ch(1) === '|') {
@@ -513,6 +514,34 @@ export class Parser {
       else words.push(this.readWord(true));
     }
     return { t: 'dbracket', words, redirs: [] };
+  }
+
+  /**
+   * The regex operand of `[[ s =~ re ]]`: as in bash, `( ) | < >` are part of it, and blanks too
+   * inside parentheses.
+   */
+  private readRegexWord(): Word {
+    const parts: WordPart[] = [];
+    let depth = 0;
+    while (!this.eof()) {
+      const c = this.ch();
+      if ((c === ' ' || c === '\t') && depth > 0) {
+        parts.push({ t: 'lit', v: c });
+        this.i++;
+      } else if ('()|<>'.includes(c)) {
+        if (c === ')' && depth === 0) break;
+        if (c === '(') depth++;
+        else if (c === ')') depth--;
+        parts.push({ t: 'lit', v: c });
+        this.i++;
+      } else {
+        const at = this.i;
+        const w = this.readWord(true);
+        if (this.i === at) break;
+        parts.push(...w);
+      }
+    }
+    return parts;
   }
 
   private parseSimple(): Node {
