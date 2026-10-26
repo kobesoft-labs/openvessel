@@ -53,7 +53,7 @@ OpenVessel はクリーンルームで作っています（ほかのブラウザ
 | Node.js | v22.23.4（`src/node/version.ts`） |
 | Node 自身の試験 | 対象モジュールの 1271 本のうち、ブラウザで通せる 1237 本すべて（100%）が通る。残り 34 本は理由つきで対象外。[docs/compatibility.ja.md](docs/compatibility.ja.md) |
 | Astro のサイト | 実際のサイト 147 本の中で 131 本がビルドできる（Astro 5・6・7）。[docs/compatibility.ja.md](docs/compatibility.ja.md) |
-| ブラウザ | Chromium 系。クロスオリジン分離（`SharedArrayBuffer`）が必要 |
+| ブラウザ | Chromium 系。Firefox（現行版）でも移植版ランタイムが動き、シェル・npm・Astro のビルドと開発サーバー・プレビューが使え、Node のテストは 1237 本中 1200 本が通る（[注意点](docs/compatibility.ja.md#firefox)）。クロスオリジン分離（`SharedArrayBuffer`）が必要 |
 
 ブラウザでは動かせないものと、その理由は [docs/compatibility.ja.md](docs/compatibility.ja.md) にまとめています。
 
@@ -114,7 +114,7 @@ await vessel.spawn('npm', ['run', 'dev'], { cwd: '/home/user/app' });
 
 ```bash
 npm test                                                   # 単体の試験（バインディングは本物の Node と突き合わせ）
-node test/e2e/harness.mjs 'echo hi; node -v'               # ヘッドレスの Chrome で 1 行実行
+node test/e2e/harness.mjs 'echo hi; node -v'               # ヘッドレスの Chrome で 1 行実行（OV_BROWSER=firefox で Firefox）
 node test/e2e/project.mjs <dir> 'npm install && npm run build'
 node test/node-compat/run.mjs --port [モジュール…]           # Node 自身の試験を OpenVessel で
 node test/node-compat/run.mjs --port --report              # モジュールごとの 通過 / 目標

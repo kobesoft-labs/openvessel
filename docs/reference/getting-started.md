@@ -12,7 +12,7 @@ call used here is specified in [Host API](host-api.md); serving in production is
 
 | Requirement | Why |
 |---|---|
-| A Chromium-based browser | The browsers OpenVessel is tested in ([README](../../README.md)). |
+| A Chromium-based browser, or Firefox | The browsers OpenVessel is tested in ([README](../../README.md)). In Firefox, use the ported Node.js runtime; a few things differ there ([Compatibility](../compatibility.md#firefox)). |
 | Cross-origin isolation on the host page (`Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp` or `credentialless`) | The kernel and the processes talk through `SharedArrayBuffer` and `Atomics.wait`, which a browser only enables in a cross-origin isolated page. `OpenVessel.boot()` checks `crossOriginIsolated` first and rejects without it. |
 | Three origins: your page, the runtime, the preview | The runtime (kernel, processes, network gate) and the preview (the site being developed) must not share an origin with your page or with each other ([how it works](../how-it-works.md#three-origins)). |
 

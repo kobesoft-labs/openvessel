@@ -12,6 +12,7 @@ import { bare } from './bindings/util.ts';
 import { NativeProxy, installProxyTracking } from './proxies.ts';
 import { installIteratorTracking } from './iterators.ts';
 import { moduleUrlForServed } from './bindings/module_wrap.ts';
+import { installCallSites } from './callsites.ts';
 import { fromShape } from './bindings/shape.ts';
 import * as loop from './loop.ts';
 import { createEnvProxy } from './env.ts';
@@ -407,6 +408,8 @@ function boot(init: InitMsg) {
   // per-context scripts (node_realm / node_context_data)
   const util = getInternalBinding('util');
   const symbols = getInternalBinding('symbols');
+  // before the primordials copy Error.captureStackTrace
+  installCallSites();
   const primordials: Record<string, unknown> = Object.create(null);
   const perContext: Record<string, any> = Object.create(null);
   for (const id of ['internal/per_context/primordials', 'internal/per_context/domexception', 'internal/per_context/messageport']) {

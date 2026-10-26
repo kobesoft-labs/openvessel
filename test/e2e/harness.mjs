@@ -1,7 +1,9 @@
 // Drives the playground in headless Chrome. Usage:
 //   node test/e2e/harness.mjs 'echo hi && node -v'      (runs a command line, prints output)
-import { chromium } from 'playwright-core';
+// OV_BROWSER=firefox uses Playwright's Firefox instead (`npx playwright-core install firefox` once).
+import { chromium, firefox } from 'playwright-core';
 import { spawn } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
 
 const root = new URL('../..', import.meta.url).pathname;
 
@@ -13,9 +15,14 @@ export async function startServer() {
 
 // OV_PORT_BASE selects the dev server ports (see scripts/serve.mjs) and a matching browser profile
 const PORT_BASE = Number(process.env.OV_PORT_BASE ?? 5170);
+const FIREFOX = process.env.OV_BROWSER === 'firefox';
 
-export async function openBrowser({ headless = true, profile = root + 'node_modules/.cache/ov-chrome' + (PORT_BASE === 5170 ? '' : `-${PORT_BASE}`) } = {}) {
-  const ctx = await chromium.launchPersistentContext(profile, { channel: 'chrome', headless, args: ['--js-flags=--stack-size=4000'] });
+export async function openBrowser({ headless = true, profile = root + 'node_modules/.cache/ov-' + (FIREFOX ? 'firefox' : 'chrome') + (PORT_BASE === 5170 ? '' : `-${PORT_BASE}`) } = {}) {
+  if (FIREFOX) mkdirSync(profile + '/appdata', { recursive: true }); // Firefox won't create the profile folder
+  const ctx = FIREFOX
+    ? // MOZ_APP_DATA: keeps Firefox out of ~/Library/Application Support/Firefox (a sandbox may not allow it)
+      await firefox.launchPersistentContext(profile, { headless, env: { ...process.env, MOZ_APP_DATA: profile + '/appdata', MOZ_LOCAL_APP_DATA: profile + '/appdata' } })
+    : await chromium.launchPersistentContext(profile, { channel: 'chrome', headless, args: ['--js-flags=--stack-size=4000'] });
   const browser = { close: () => ctx.close() };
   const page = ctx.pages()[0] ?? (await ctx.newPage());
   page.on('console', (m) => {

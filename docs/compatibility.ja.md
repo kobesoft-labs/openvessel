@@ -68,6 +68,30 @@ OpenVessel は Node.js 自身の JavaScript（`lib/`）を動かし、ネイテ�
 （表は `test/node-compat/results/port/REPORT.md` に出ます）。
 <!-- numbers: updated with each full run -->
 
+## Firefox
+
+移植版ランタイム（`/etc/openvessel/node` に `port`）は、現行の Firefox で動きます。起動、シェル、`node`
+（CommonJS・ES モジュール・TypeScript・`worker_threads`・`child_process`・zlib・crypto）、`npm install`、
+`npx`、プレビューでの HTTP サーバー、Astro のビルドと、WebSocket でホットリロードする `astro dev` を
+確認しています。Node 自身のテストは、Chrome で通る 1237 本のうち 1200 本が通ります（2026-10-26、
+Playwright の Firefox 157）。残りが通らない理由は次のとおりです。
+
+- エラーメッセージが V8 ではなく SpiderMonkey のものになります（`Cannot convert a Symbol value to a string`
+  ではなく `can't convert symbol to string`、スタックオーバーフローは `RangeError: Maximum call stack size
+  exceeded` ではなく `InternalError: too much recursion`）。メッセージを比べるテストは失敗し、
+  スタックオーバーフローを `instanceof RangeError` で見分けるコードは判定できません。
+- V8 のスタックトレース API は Firefox のスタック文字列から組み立てています。`Error.prepareStackTrace`、
+  `Error.captureStackTrace`、V8 形式のスタックは使えますが、CallSite にはレシーバーと型名
+  （`getThis()`・`getTypeName()`）がありません。そのため `util.inspect` は null プロトタイプのオブジェクトの
+  クラス名を出せず、非同期のフレームやメソッド名の表記も少し変わります。
+- ワーカーの最後のメッセージ、`exit` イベント、ハンドルのクローズの届く順番に依存するテストがあり、
+  Firefox ではこの順番が変わります。
+- 一部の crypto のテスト（Diffie-Hellman の鍵生成、暗号の多数回の繰り返し）が 30 秒の制限を超えます。
+  また、プロキシや変更できないプロパティについて V8 とまったく同じ動きを期待する `vm` のテストがあります。
+
+旧ランタイムも起動して簡単なプログラムは動きますが、スタックトレースは Firefox の形式のままです。
+E2E テストは `OV_BROWSER=firefox` で Firefox でも実行できます（README を参照）。
+
 ## ブラウザでは動かせないものと、その理由
 
 作業が足りないのではなく、場の制約です。どれにも、ブラウザのタブが課す理由があります。

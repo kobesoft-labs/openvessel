@@ -54,7 +54,7 @@ in-browser runtimes. It is open source under the [Apache License 2.0](LICENSE).
 | Node.js | v22.23.4 (`src/node/version.ts`) |
 | Node's own test suite | 1237 of 1237 (100%) of the tests a browser can pass, across 1271 tests of the targeted modules; the other 34 are listed with the reason — see [docs/compatibility.md](docs/compatibility.md) |
 | Astro sites | 131 of a corpus of 147 real sites build (Astro 5, 6 and 7); see [docs/compatibility.md](docs/compatibility.md) |
-| Browsers | Chromium-based browsers; cross-origin isolation (`SharedArrayBuffer`) is required |
+| Browsers | Chromium-based browsers. Firefox (current release) runs the ported runtime: the shell, npm, Astro build and dev server with the preview, and 1200 of the 1237 Node tests ([notes](docs/compatibility.md#firefox)). Cross-origin isolation (`SharedArrayBuffer`) is required |
 
 What can't work in a browser, and why, is listed in [docs/compatibility.md](docs/compatibility.md).
 
@@ -133,7 +133,8 @@ node test/node-compat/run.mjs --port --report              # pass / target per m
 node corpus/run.mjs --port [filter]                        # build the Astro site corpus
 ```
 
-The end-to-end tests drive the system Chrome through `playwright-core`. Set `HEADED=1` to watch,
+The end-to-end tests drive the system Chrome through `playwright-core` (`OV_BROWSER=firefox` uses
+Playwright's Firefox, installed once with `npx playwright-core install firefox`). Set `HEADED=1` to watch,
 `OV_CONSOLE=1` for browser console output, `OV_PORT_BASE=<port>` to run several suites side by side.
 
 ## License
