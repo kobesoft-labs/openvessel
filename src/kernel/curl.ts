@@ -48,7 +48,7 @@ async function curl(ctx: ProgramContext): Promise<number> {
   if (!/^[a-z]+:\/\//i.test(url)) url = 'http://' + url;
   void silent;
   try {
-    const res = await getNetFetch()(url, { method, headers, body: data ?? undefined });
+    const res = await getNetFetch()(url, { method, headers, body: data ?? undefined, initiator: `${ctx.proc.pid} ${ctx.argv.slice(0, 3).join(' ')}`.slice(0, 200) });
     if (fail && res.status >= 400) {
       ctx.err(`curl: (22) The requested URL returned error: ${res.status}\n`);
       return 22;

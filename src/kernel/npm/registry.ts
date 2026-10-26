@@ -30,26 +30,58 @@ export interface Packument {
   time?: Record<string, string>;
 }
 
-export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
+/** `initiator` labels the request in the permission prompt (default `npm`). */
+export type FetchFn = (url: string, init?: RequestInit & { initiator?: string }) => Promise<Response>;
 
-/** Fetch through the runtime service worker's policy-checked proxy. */
-export function proxiedFetch(origin: string): FetchFn {
+const isLocalUrl = (url: string, isLoopback: (host: string) => boolean) => {
+  try {
+    return isLoopback(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Fetch through the runtime service worker's policy-checked proxy. `token` proves to the kernel that the
+ * request comes from the kernel itself (so its `initiator` label is believed); URLs whose host is loopback
+ * go to `loopback` (the kernel's virtual ports), never to the gate.
+ */
+export function proxiedFetch(origin: string, opts: { token?: string; isLoopback?: (host: string) => boolean; loopback?: FetchFn } = {}): FetchFn {
   return async (url, init = {}) => {
+    if (opts.loopback && opts.isLoopback && isLocalUrl(url, opts.isLoopback)) return opts.loopback(url, init);
     const headers = new Headers(init.headers);
     const pairs: [string, string][] = [...headers];
+    const ov: Record<string, string> = { 'x-ov-h': encodeURIComponent(JSON.stringify(pairs)), 'x-ov-by': encodeURIComponent(init.initiator ?? 'npm'), 'x-ov-method': init.method ?? 'GET' };
+    if (opts.token) ov['x-ov-k'] = opts.token;
+    if (init.redirect === 'error') ov['x-ov-redirect'] = 'error';
     const res = await fetch(`${origin}/__ov/net?url=${encodeURIComponent(url)}`, {
       method: init.method === 'GET' || !init.method || init.method === 'HEAD' ? (init.method ?? 'GET') : 'POST',
-      headers: { 'x-ov-h': encodeURIComponent(JSON.stringify(pairs)), 'x-ov-by': encodeURIComponent('npm'), 'x-ov-method': init.method ?? 'GET' },
+      headers: ov,
       body: init.body,
       signal: init.signal,
     });
     const err = res.headers.get('x-ov-error');
     if (err) {
       const msg = decodeURIComponent(res.headers.get('x-ov-message') ?? err);
-      throw Object.assign(new Error(msg), { code: err === 'denied' ? 'EACCES' : 'ECONNREFUSED' });
+      throw Object.assign(new Error(msg), { code: err === 'denied' ? 'EACCES' : err === 'timeout' ? 'ETIMEDOUT' : 'ECONNREFUSED' });
     }
     const status = Number(res.headers.get('x-ov-status') ?? res.status);
-    return new Response(res.body, { status, statusText: res.statusText, headers: res.headers });
+    // the real response headers (as far as the browser exposes them) instead of the proxy's
+    let rh: [string, string][] | null = null;
+    try {
+      rh = JSON.parse(decodeURIComponent(res.headers.get('x-ov-rh') ?? 'null'));
+    } catch {}
+    const out = new Headers();
+    for (const [k, v] of rh ?? [...res.headers].filter(([k]) => !k.startsWith('x-ov-'))) {
+      try {
+        out.append(k, v);
+      } catch {}
+    }
+    const nullBody = status === 204 || status === 205 || status === 304 || init.method === 'HEAD';
+    if (nullBody) void res.body?.cancel();
+    const r = new Response(nullBody ? null : res.body, { status: status || 200, statusText: decodeURIComponent(res.headers.get('x-ov-status-text') ?? ''), headers: out });
+    Object.defineProperty(r, 'url', { value: decodeURIComponent(res.headers.get('x-ov-url') ?? encodeURIComponent(url)) });
+    return r;
   };
 }
 
