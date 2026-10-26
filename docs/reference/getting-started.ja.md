@@ -29,7 +29,7 @@
 ダウンロードしたファイルからインストールしてください。
 
 ```bash
-npm install https://github.com/kobesoft-labs/openvessel/releases/download/v1.2.0/openvessel-1.2.0.tgz
+npm install https://github.com/kobesoft-labs/openvessel/releases/download/v1.2.1/openvessel-1.2.1.tgz
 ```
 
 パッケージは ES モジュールで、エントリポイントは 1 つです。`package.json` の主な項目は次のとおりです。

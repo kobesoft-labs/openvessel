@@ -3,6 +3,13 @@
 OpenVessel follows [Semantic Versioning](https://semver.org). Each release states the Node.js
 version it ports; see [docs/NODE-VERSION.md](docs/NODE-VERSION.md) for how that version is tracked.
 
+## 1.2.1 — 2026-10-26 · Node.js v22.23.4
+
+- The preview relay accepts a host on the same origin again when the host page is outside the preview's
+  scope, as in one-origin deployments (GitHub Pages). 1.2.0 refused every same-origin parent, so
+  `createPreview()` failed there with `OpenVessel: preview relay did not start`. A preview page that frames
+  the relay is still refused.
+
 ## 1.2.0 — 2026-10-26 · Node.js v22.23.4
 
 ### Node.js runtime

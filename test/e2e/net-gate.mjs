@@ -108,6 +108,27 @@ try {
   check('the preview reaches http://localhost:<port> as a virtual port', pr.local === 'virtual 4321 /from-preview', pr.local);
   check('tunnelled sockets are instanceof WebSocket', pr.wsInstance === true, pr.wsInstance);
   check('a non-101 answer to an upgrade fails the socket', pr.wsRefused === 'error,close 1006', pr.wsRefused);
+  // a preview page that frames the relay can't hand it a channel
+  const framedRelay = await pa.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const f = document.createElement('iframe');
+        f.src = '/__ov/relay.html';
+        const seen = [];
+        addEventListener('message', (ev) => {
+          if (ev.source !== f.contentWindow) return;
+          seen.push(ev.data?.t);
+          if (ev.data?.t === 'openvessel-preview-loaded') {
+            const ch = new MessageChannel();
+            f.contentWindow.postMessage({ t: 'openvessel-preview-connect', port: ch.port2, defaultPort: 4321 }, '*', [ch.port2]);
+            setTimeout(() => resolve(seen.join(',')), 3000);
+          }
+        });
+        document.body.appendChild(f);
+        setTimeout(() => resolve(seen.join(',') || 'not loaded'), 20000);
+      }),
+  );
+  check('a relay framed by a preview page takes no channel', framedRelay === 'openvessel-preview-loaded', framedRelay);
   await page.evaluate(() => document.getElementById('pa').remove());
 
   // --- a second runtime on the same origin ---------------------------------

@@ -45,8 +45,9 @@ OpenVessel ─ creates ─▶ relay iframe (__ov/relay.html)
 3. ホストが `MessageChannel` を作り、一方をカーネルに（カーネルとのチャネルで `{ t: 'preview-port', port }`）、もう一方を
    中継に（`defaultPort` 付きの `openvessel-preview-connect`）送ります。
 4. 中継がそのポートをアクティブな Service Worker に渡し（`kernel-port`）、`openvessel-preview-ready` を送ると、ホストの
-   promise が解決します。中継がこれらのメッセージを受け付けるのは親からだけで、しかも親が別のオリジン（ホスト）の
-   場合だけです（中継を iframe に埋め込んだプレビューのページからは受け付けません）。新しいチャネルは古いチャネルを
+   promise が解決します。中継がこれらのメッセージを受け付けるのは親からだけです。親がプレビューのスコープの中のページ
+   （中継を iframe に埋め込んだプレビューのページ）のときは受け付けません。別オリジンのホストと、同じオリジンでも
+   スコープの外にあるホスト（1 つのオリジンにまとめた構成）からは受け付けます。新しいチャネルは古いチャネルを
    置き換え、Service Worker は古いほうを閉じます。カーネルは、そのチャネルでまだ開いていたリクエストとソケットを中断します。
 
 20000 ms 以内に中継の準備ができなければ、`OpenVessel: preview relay did not start` で reject します。2 回目以降の

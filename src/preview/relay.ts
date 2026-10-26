@@ -23,11 +23,14 @@ navigator.serviceWorker.addEventListener('message', (ev) => {
   if (ev.data?.t === 'need-kernel-port') window.parent.postMessage({ t: 'openvessel-preview-need-port' }, '*');
 });
 
-// only the host page (another origin) hands over channels, not a preview page that opened the relay in
-// a frame of its own
+// only the host page hands over channels, not a preview page that opened the relay in a frame of its
+// own. A preview page is under the service worker's scope; a host on the same origin (one-origin
+// deployments such as GitHub Pages, where previews can reach the host anyway) is outside it.
+const scope = new URL('../', location.href).pathname;
 let fromHost = window.parent !== window;
 try {
-  if (window.parent.location.origin === location.origin) fromHost = false;
+  const parent = window.parent.location;
+  if (parent.origin === location.origin && parent.pathname.startsWith(scope)) fromHost = false;
 } catch {
   // another origin: the host
 }

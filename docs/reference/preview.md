@@ -47,8 +47,9 @@ The first call creates the relay, and later calls reuse it:
    kernel channel) and the other to the relay (`openvessel-preview-connect` with `defaultPort`).
 4. The relay passes the port to the active service worker (`kernel-port`) and posts
    `openvessel-preview-ready`, and the host's promise resolves. The relay only takes these messages from
-   its parent, and only when the parent is of another origin (the host) rather than a preview page that
-   framed it. A new channel replaces the old one, which the service worker closes. The kernel then aborts
+   its parent, and not when the parent is a page under the preview's scope (a preview page that framed
+   it). A host on another origin, or on the same origin outside that scope (a one-origin deployment), is
+   accepted. A new channel replaces the old one, which the service worker closes. The kernel then aborts
    the requests and sockets that were still open on it.
 
 If the relay isn't ready within 20000 ms, the call rejects with `OpenVessel: preview relay did not start`.
