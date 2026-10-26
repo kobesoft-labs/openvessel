@@ -1,4 +1,4 @@
-# ネイティブのモジュール
+# ネイティブモジュール
 
 [English](native-modules.md)
 

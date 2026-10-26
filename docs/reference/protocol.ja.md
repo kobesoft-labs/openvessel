@@ -1,4 +1,4 @@
-# 通信の形式
+# 通信プロトコル
 
 [English](protocol.md)
 
