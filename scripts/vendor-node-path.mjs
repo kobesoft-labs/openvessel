@@ -1,10 +1,10 @@
 // Generates src/shared/node-path.ts from Node.js's lib/path.js (MIT, Joyent and Node contributors).
-//   node scripts/vendor-node-path.mjs [path/to/node/lib/path.js]
+//   node scripts/vendor-node-path.mjs [path/to/node/lib/path.js]   (default: vendor/node/lib/path.js, the pinned version's)
 // Primordials become plain method calls; process.cwd/env and minimatch are wired to OpenVessel.
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const root = new URL('..', import.meta.url).pathname;
-const src = readFileSync(process.argv[2] ?? root + 'test/node-compat/.node/lib/path.js', 'utf8');
+const src = readFileSync(process.argv[2] ?? root + 'vendor/node/lib/path.js', 'utf8');
 
 const license = src.slice(0, src.indexOf("'use strict';"));
 let body = src.slice(src.indexOf('function isPathSeparator('));
