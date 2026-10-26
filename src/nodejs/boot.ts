@@ -517,6 +517,12 @@ function boot(init: InitMsg) {
   }
 
   shapeGlobal();
+  // V8 has WebAssembly.compileStreaming/instantiateStreaming only when the embedder handles wasm
+  // streaming, which Node sets up with fetch (setupFetch in pre_execution)
+  if (!S.optionValues['--experimental-fetch']) {
+    delete (WebAssembly as any).compileStreaming;
+    delete (WebAssembly as any).instantiateStreaming;
+  }
   mark('web + switches');
   // node.cc runs the task before it creates an environment, so the env files don't apply to it
   if (S.isMainThread && S.optionValues['--run']) {

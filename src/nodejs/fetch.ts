@@ -129,7 +129,7 @@ async function proxyFetch(url: string, req: Request, body: ArrayBuffer | null): 
     outHeaders = JSON.parse(decodeURIComponent(res.headers.get('x-ov-rh') ?? '[]'));
   } catch {}
   const nullBody = status === 204 || status === 205 || status === 304 || req.method === 'HEAD';
-  const r = new NativeResponse(nullBody ? null : countedBody(res.body), { status: status || 200, statusText: decodeURIComponent(res.headers.get('x-ov-status-text') ?? ''), headers: outHeaders });
+  const r = new NodeResponse(nullBody ? null : countedBody(res.body), { status: status || 200, statusText: decodeURIComponent(res.headers.get('x-ov-status-text') ?? ''), headers: outHeaders });
   Object.defineProperty(r, 'url', { value: decodeURIComponent(res.headers.get('x-ov-url') ?? url), configurable: true });
   Object.defineProperty(r, 'redirected', { value: res.headers.get('x-ov-redirected') === '1', configurable: true });
   return r;
@@ -217,7 +217,7 @@ function loopbackRequest(url: URL, req: Request, body: Uint8Array | null, willFo
         const outHeaders: [string, string][] = [];
         for (let i = 0; i < res.rawHeaders.length; i += 2) outHeaders.push([res.rawHeaders[i], res.rawHeaders[i + 1]]);
         const nullBody = NULL_BODY_STATUS.has(res.statusCode) || req.method === 'HEAD';
-        const response = new NativeResponse(nullBody ? null : stream, { status: res.statusCode, statusText: res.statusMessage, headers: outHeaders });
+        const response = new NodeResponse(nullBody ? null : stream, { status: res.statusCode, statusText: res.statusMessage, headers: outHeaders });
         Object.defineProperty(response, 'url', { value: url.href, configurable: true });
         resolve(response);
       },
@@ -239,7 +239,8 @@ const BODY_HEADERS = ['content-encoding', 'content-language', 'content-location'
 /** undici's main fetch and HTTP-redirect fetch, for one request (and the redirects it follows). */
 async function route(req: Request, redirects: number): Promise<Response> {
   const url = new NativeURL(req.url);
-  if (url.protocol === 'data:' || url.protocol === 'blob:') return nativeFetch(req);
+  // a Response of the global class (lib's Response is NodeResponse), as instanceof checks expect
+  if (url.protocol === 'data:' || url.protocol === 'blob:') return Object.setPrototypeOf(await nativeFetch(req), NodeResponse.prototype);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') throw fetchFailed(`unsupported URL scheme ${url.protocol}`, 'ERR_INVALID_URL');
   if (BAD_PORTS.has(Number(url.port))) throw fetchFailed('bad port');
   const body = req.method === 'GET' || req.method === 'HEAD' ? null : new Uint8Array(await req.arrayBuffer());
