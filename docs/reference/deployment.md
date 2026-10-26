@@ -107,13 +107,19 @@ site can't use the paths `__ov-sw.js`, `__ov/relay.html`, `__ov/relay.js`, `__ov
 | Header | Host page | Runtime (`dist/runtime/`) | Preview (`dist/preview/`) |
 |---|---|---|---|
 | `Cross-Origin-Opener-Policy` | `same-origin` (required) | `same-origin` | `same-origin` |
-| `Cross-Origin-Embedder-Policy` | `require-corp` or `credentialless` (required) | `require-corp` | `require-corp` |
+| `Cross-Origin-Embedder-Policy` | `require-corp` or `credentialless` (required) | `require-corp` | `require-corp`; **`credentialless` on `__ov-sw.js`** |
 | `Cross-Origin-Resource-Policy` | as your app needs (`scripts/serve.mjs` uses `same-origin`) | `cross-origin` | `cross-origin` |
 | `Content-Security-Policy` | your own | the runtime CSP below, on every file **except `sw.js`** | not required |
 | `Content-Security-Policy: frame-ancestors` | — | the host origin(s) | — |
 | `Service-Worker-Allowed` | — | not required | not required |
 
 This is the header set `scripts/serve.mjs` uses. The same headers are sent on error responses there, too.
+
+The preview's `__ov-sw.js` is served with `credentialless` because the service worker passes the page's
+`no-cors` loads (images, classic scripts from other servers) through with its own `fetch()`. Under
+`require-corp` such a load fails unless the other server sends `Cross-Origin-Resource-Policy`; under
+`credentialless` it is sent without credentials and needs no CORP. A browser without `credentialless`
+(Safari) refuses those loads.
 
 ### Why each header is needed
 

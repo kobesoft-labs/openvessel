@@ -106,13 +106,18 @@ await vessel.mount({ node: 'port' }, { path: '/etc/openvessel' });
 | ヘッダー | ホストのページ | ランタイム（`dist/runtime/`） | プレビュー（`dist/preview/`） |
 |---|---|---|---|
 | `Cross-Origin-Opener-Policy` | `same-origin`（必須） | `same-origin` | `same-origin` |
-| `Cross-Origin-Embedder-Policy` | `require-corp` か `credentialless`（必須） | `require-corp` | `require-corp` |
+| `Cross-Origin-Embedder-Policy` | `require-corp` か `credentialless`（必須） | `require-corp` | `require-corp`。**`__ov-sw.js` だけ `credentialless`** |
 | `Cross-Origin-Resource-Policy` | アプリに合わせて（`scripts/serve.mjs` は `same-origin`） | `cross-origin` | `cross-origin` |
 | `Content-Security-Policy` | アプリのもの | 下のランタイムの CSP を、**`sw.js` を除く**すべてのファイルに | 要らない |
 | `Content-Security-Policy: frame-ancestors` | — | ホストのオリジン | — |
 | `Service-Worker-Allowed` | — | 要らない | 要らない |
 
 `scripts/serve.mjs` が使うヘッダーの組と同じです。serve.mjs はエラーの応答にも同じヘッダーを付けます。
+
+プレビューの `__ov-sw.js` だけを `credentialless` で配るのは、Service Worker がページの `no-cors` の読み込み（ほかの
+サーバーの画像やふつうのスクリプト）を自分の `fetch()` でそのまま通すためです。`require-corp` のもとでは、相手のサーバーが
+`Cross-Origin-Resource-Policy` を返さない限り失敗します。`credentialless` なら資格情報なしで送られ、CORP は要りません。
+`credentialless` の無いブラウザー（Safari）では、こうした読み込みは失敗します。
 
 ### それぞれのヘッダーが要る理由
 

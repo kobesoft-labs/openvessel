@@ -65,7 +65,7 @@ try {
       // redirects: the host the request ended at is checked too
       out.redirectAllowed = await ov.exec(`node -e "fetch('${r}').then(r=>console.log(r.status, r.url)).catch(e=>console.log('ERR', e.cause?.code))"`);
       out.redirectDenied = await ov.exec(`node -e "fetch('${r2}').then(r=>console.log(r.status, r.url)).catch(e=>console.log('ERR', e.cause?.code))"`);
-      out.curlRedirectDenied = await ov.exec(`curl -s '${r2}'; echo " exit=$?"`);
+      out.curlRedirectDenied = await ov.exec(`curl -sS '${r2}'; echo " exit=$?"`);
       // initiators come from the kernel: curl is named by its pid and command line, node by its own
       await ov.network.setPolicy({ mode: 'ask', presets: [] });
       const asked = [];
@@ -173,13 +173,16 @@ try {
   const redirectNoCors = await get(redirectTo(U), { mode: 'no-cors' });
   const plainNoCors = await get('https://httpbin.org/get', { mode: 'no-cors' });
   const nonCors = await get('https://example.com/', { mode: 'no-cors' });
-  check('a no-cors load from a server without CORS is refused', nonCors === '403', nonCors);
+  const deniedNoCors = await get(DENIED, { mode: 'no-cors' });
+  check('a no-cors load from a server without CORS works', nonCors === '0 opaque', nonCors);
+  check('a no-cors load from a denied host is refused', deniedNoCors === '403', deniedNoCors);
   check('a preview redirect to a denied host is refused', redirectCors === '403', redirectCors);
-  check('a no-cors preview redirect to a denied host is refused', redirectNoCors === '403', redirectNoCors);
-  check('a no-cors load from an allowed host works', plainNoCors === '200', plainNoCors);
+  // opaque responses don't show where a redirect ended: a no-cors load is only checked at its first URL
+  check('a no-cors preview redirect is checked at its first URL only', redirectNoCors === '0 opaque', redirectNoCors);
+  check('a no-cors load from an allowed host works', plainNoCors === '0 opaque', plainNoCors);
   await page.evaluate(() => window.ovB.network.setPolicy({ mode: 'allowlist', presets: ['npm'], allow: ['httpbin.org'] }));
   const redirectOk = await get(redirectTo(U), { mode: 'no-cors' });
-  check('a no-cors preview redirect to an allowed host works', redirectOk === '200', redirectOk);
+  check('a no-cors preview redirect to an allowed host works', redirectOk === '0 opaque', redirectOk);
 } catch (e) {
   results.push(false);
   console.log('error:', e.message);

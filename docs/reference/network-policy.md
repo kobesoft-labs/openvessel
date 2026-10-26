@@ -255,8 +255,9 @@ preview iframes and the relay):
 - Another origin, `http:` or `https:`: checked with the kernel (`source: 'preview'`); if allowed, the
   service worker fetches the original request unchanged (same mode and credentials as the page asked
   for), so the page's own CORS rules apply as usual. A `no-cors` request (`<img>`, a classic
-  `<script>`…) is the exception: it is made as a CORS request without credentials, because an opaque
-  response doesn't show where redirects led. A server that doesn't allow CORS is refused for such loads.
+  `<script>`…) works from any server, CORS or not, but its response is opaque and doesn't show where a
+  redirect led: for these only the first URL is checked, and a redirect from an allowed host to a
+  denied one is not caught. Every other redirected response is checked again at the URL it ended at.
 - Other schemes (`data:`, `blob:`, …): not intercepted.
 
 Differences from the runtime side:

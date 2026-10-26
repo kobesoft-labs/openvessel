@@ -60,6 +60,9 @@ for (const site of sites) {
       const headers = { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream', 'cache-control': 'no-cache', ...site.headers };
       // the runtime service worker is the single gate to the network: it must not inherit connect-src 'self'
       if (site.dir === 'runtime' && p === '/sw.js') delete headers['content-security-policy'];
+      // the preview service worker passes no-cors loads (images, classic scripts) through: under
+      // credentialless they go out without credentials and need no CORP from the other server
+      if (site.dir === 'preview' && p === '/__ov-sw.js') headers['cross-origin-embedder-policy'] = 'credentialless';
       res.writeHead(200, headers);
       res.end(body);
     } catch {

@@ -342,24 +342,14 @@ function blocked(v: NetVerdict | null, why = 'Blocked by OpenVessel network poli
 /**
  * An outside request of a preview page. The browser follows redirects inside fetch() without showing
  * the hops, so every response that was redirected is checked again at the URL it ended at, and nothing
- * from a host the policy refuses is handed to the page. A no-cors load (<img>, classic <script>…) would be
- * opaque and not show where it ended (and no-cors can't use redirect: 'manual'), so it is made as a CORS
- * request without credentials; a server that doesn't allow CORS is refused.
+ * from a host the policy refuses is handed to the page. A no-cors load (<img>, classic <script>…) is
+ * passed through as it is, so pages show images from servers that don't send CORS headers: its response
+ * is opaque and doesn't show where a redirect ended, so for these only the first URL is checked.
  */
 async function outside(req: Request): Promise<Response> {
   const first = await netCheck(req.url);
   if (!first.allow) return blocked(first);
-  let res: Response;
-  if (req.mode === 'no-cors') {
-    const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : await req.arrayBuffer();
-    try {
-      res = await fetch(req.url, { method: req.method, headers: req.headers, body, mode: 'cors', credentials: 'omit', redirect: 'follow', referrer: req.referrer, referrerPolicy: req.referrerPolicy, cache: req.cache === 'only-if-cached' ? 'default' : req.cache, signal: req.signal });
-    } catch {
-      return blocked(null, 'Blocked by OpenVessel: the server does not allow CORS, so its redirects cannot be checked');
-    }
-  } else {
-    res = await fetch(req);
-  }
+  const res = await fetch(req);
   if (res.redirected && res.url && res.url !== req.url) {
     const final = await netCheck(res.url);
     if (!final.allow) {
