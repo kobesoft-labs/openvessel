@@ -273,11 +273,28 @@ export function createProcess(init: ProcessInit) {
       throw err;
     }
   };
-  let umask = 0o022;
+  // the kernel keeps the mask (it applies it to files and directories it creates)
   proc.umask = (m?: number | string) => {
-    const old = umask;
-    if (m !== undefined) umask = typeof m === 'string' ? parseInt(m, 8) : m;
-    return old;
+    if (m === undefined) return sys<number>('umask');
+    // internal/validators.js parseFileMode
+    let mask: unknown = m ?? undefined;
+    if (typeof mask === 'string') {
+      if (!/^[0-7]+$/.test(mask)) {
+        throw Object.assign(new TypeError(`The argument 'mask' must be a 32-bit unsigned integer or an octal string. Received '${mask}'`), { code: 'ERR_INVALID_ARG_VALUE' });
+      }
+      mask = parseInt(mask, 8);
+    }
+    if (typeof mask !== 'number') {
+      const got = mask === undefined ? 'undefined' : typeof mask === 'object' ? `an instance of ${(mask as object).constructor?.name ?? 'Object'}` : `type ${typeof mask} (${String(mask)})`;
+      throw Object.assign(new TypeError(`The "mask" argument must be of type number. Received ${got}`), { code: 'ERR_INVALID_ARG_TYPE' });
+    }
+    if (!Number.isInteger(mask)) {
+      throw Object.assign(new RangeError(`The value of "mask" is out of range. It must be an integer. Received ${mask}`), { code: 'ERR_OUT_OF_RANGE' });
+    }
+    if (mask < 0 || mask > 0xffffffff) {
+      throw Object.assign(new RangeError(`The value of "mask" is out of range. It must be >= 0 && <= 4294967295. Received ${mask}`), { code: 'ERR_OUT_OF_RANGE' });
+    }
+    return sys<number>('umask', { mask });
   };
   proc.getuid = () => 1000;
   proc.geteuid = () => 1000;
@@ -339,8 +356,17 @@ export function createProcess(init: ProcessInit) {
     throw new Error(`No such module: ${name}`);
   };
   proc._linkedBinding = proc.binding;
-  proc.dlopen = () => {
-    throw new Error('process.dlopen is not supported in OpenVessel (native addons cannot run in the browser)');
+  proc.dlopen = (_module: unknown, filename: string) => {
+    // what glibc's dlopen says about a file that isn't a shared object; a real one can't load here
+    let message = 'Native addons (.node files) cannot run in OpenVessel. Use the WebAssembly build of the package.';
+    try {
+      const head = sys<Uint8Array>('readFile', { p: String(filename) });
+      if (head.length < 64) message = `${filename}: file too short`;
+      else if (head[0] !== 0x7f || head[1] !== 0x45 || head[2] !== 0x4c || head[3] !== 0x46) message = `${filename}: invalid ELF header`;
+    } catch {
+      message = `${filename}: cannot open shared object file: No such file or directory`;
+    }
+    throw Object.assign(new Error(message), { code: 'ERR_DLOPEN_FAILED' });
   };
   proc.emitWarning = (warning: string | Error, type?: any, code?: string) => {
     let name = 'Warning';
