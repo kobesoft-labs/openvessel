@@ -1,26 +1,30 @@
 # Node の移植（方針 A）
 
-2026-10-23 決定。手書きの組み込みモジュール（旧 `src/node/`）をやめ、**Node v22.20.0 の `lib/` をそのまま動かす**。
+2026-10-23 決定。手書きの組み込みモジュール（旧 `src/node/`）をやめ、**Node の `lib/` をそのまま動かす**（決めたときは v22.20.0、いまは v22.23.4。版は [NODE-VERSION.md](NODE-VERSION.md)）。
 本来 C++ で書かれている部分（`internalBinding`）を、OpenVessel のカーネル（OS の層）の上に TypeScript で書く。
+実装は `src/nodejs/`（移植したランタイム）。旧 `src/node/`（旧ランタイム）はまだ残っていて、既定はこちら。VFS の `/etc/openvessel/node` に `port` と書くと移植したランタイムで動く。
 
 ```
-Node の lib/*.js（変更しない）         ← vendor/node（版を固定して取ってくる）
+Node の lib/*.js（変更しない）         ← vendor/node/natives.json（版を固定して取ってくる）
   ├ primordials・realm・bootstrap/node・main/*
-internalBinding（ここを書く）           ← src/node/bindings/*.ts
+internalBinding（ここを書く）           ← src/nodejs/bindings/*.ts
   ├ fs・buffer・process_methods・timers・task_queue・stream_wrap・pipe_wrap・tty_wrap
   ├ process_wrap・spawn_sync・tcp_wrap・module_wrap・contextify・url・util・types …
-差し替え（最小限・一覧で管理）          ← src/node/overrides/*.js
-  ├ fetch（undici でなく関所つきの fetch）・TypeScript の型の除去（amaro でなく sucrase）
+起動とループ（node.cc・libuv の代わり） ← src/nodejs/boot.ts・loop.ts
+差し替え（最小限・一覧で管理）          ← src/nodejs/overrides/**/*.js
+  ├ internal/deps/undici: fetch は src/nodejs/fetch.ts（仮想ポートは node:http、外へは許可を確かめるプロキシ）
+  ├ internal/deps/amaro: Node の amaro（swc の WASM）を、初めて型を除くときにランタイムから取る
 OS の層（カーネル・残す）               ← src/kernel/
-  ├ VFS・プロセス・パイプ・TTY・socketpair・仮想ポート・sh・npm・ESM の配信・通信の関所
+  ├ VFS・プロセス・パイプ・TTY・socketpair・仮想ポート・sh・npm・ESM の配信・通信の許可
 ```
 
 ## 決めたこと
 
-- **lib は書き換えない**。動かないものはバインディング側で合わせる。どうしても無理なものだけ `overrides/` に置き、理由を書く
-- 版は `src/node/version.ts` の 1 か所。`scripts/fetch-node.mjs` が `vendor/node`（git の外）に取る。ライセンスは Node の LICENSE を dist に同梱
-- 定数の表（オプションの既定値・uv の errno・各種 constants・http のメソッド・crypto/zlib の定数など）は、本物の Node（`npx node@22.20.0 --expose-internals`）から `scripts/gen-node-data.mjs` で吸い出して `src/node/data/*.json` にする。手で書かない
-- 起動の速さ: lib 全体をビルド時に 1 つのファイルに束ね（各モジュールは関数のまま、評価は使う時）、Worker の読み込みに V8 のコードキャッシュを効かせる。起動時間を計り続ける（目標: `node -e 0` が 30ms 以内）
+- **lib は書き換えない**。動かないものはバインディング側で合わせる。どうしても無理なものだけ `src/nodejs/overrides/` に置き、ファイルの頭に理由を書く
+- 版は `src/node/version.ts` の 1 か所。`scripts/gen-node-data.mjs` が公式の Docker イメージ（`node:<版>-bookworm-slim`、linux/amd64）の Node から、lib と deps のソースを `vendor/node/natives.json`（git の外。読む用に `vendor/node/lib/` にも同じものを置く）に取る。ライセンスは Node の LICENSE を dist に同梱
+- 定数の表（オプションの既定値・uv の errno・各種 constants・http のメソッド・crypto/zlib の定数など）とバインディングの形は、同じ `scripts/gen-node-data.mjs` が同じイメージの Node（`--expose-internals`）から吸い出して `src/node/data/*.json` にする。手で書かない
+- 起動の速さ: lib 全体をビルド時に 1 つのファイル（`scripts/gen-nodelib.mjs` が作る `dist/runtime/nodelib.js`）に束ね（各モジュールは関数のまま、評価は使う時）、Worker の読み込みに V8 のコードキャッシュを効かせる。起動時間を計り続ける（目標: `node -e 0` が 30ms 以内）
+- TypeScript の型の除去は Node と同じ amaro（swc の WASM、3 MB）。`nodelib.js` には入れず `amaro.js` として別に置き、初めて使うときに読む。sucrase は `require(esm)` の ESM → CommonJS の書き換えにだけ使う（`ts-strip.js`）
 
 ## 実行のモデル（libuv の代わり）
 
@@ -33,15 +37,15 @@ OS の層（カーネル・残す）               ← src/kernel/
 
 | 部分 | 方針 |
 |---|---|
-| ESM（`module_wrap`） | `ModuleWrap` を JS で書く。ソースはカーネルに登録し、R の SW がブラウザの本物の ESM として配る。リンクは import の指定子をリンク先の URL に書き換えて表す。合成モジュール（`node:fs` など）は `export let` と setter で生きた束縛を作る。`import.meta` と動的 import は Node のコールバックへつなぐ。同期の評価（`require(esm)`）は ESM→CJS 変換で |
-| CJS（`contextify.compileFunctionForCJSLoader`） | 関数で包んで評価。`sourceURL` を付ける。ESM の構文の検出は es-module-lexer |
+| ESM（`module_wrap`） | `ModuleWrap` を JS で書く。ソースはカーネルに登録し、ランタイムの SW が `/__ov/mw/<pid>/<id>.mjs` でブラウザの本物の ESM として配る。リンクは import の指定子をリンク先の URL に書き換えて表す。合成モジュール（`node:fs` など）は `var` と `setExport()` で生きた束縛を作る。`import.meta` と動的 import は Node のコールバックへつなぐ。同期の評価（`require(esm)`）は sucrase で ESM→CJS に書き換えて |
+| CJS（`contextify.compileFunctionForCJSLoader`） | 関数で包んで間接 `eval` で評価。`sourceURL` を付ける。中の動的 `import()` は es-module-lexer で見つけて Node のコールバックへ回す |
 | ストリーム（`stream_wrap`・`pipe_wrap`・`tty_wrap`） | カーネルの fd の読み（readStart/readStop）と書きに載せる。`streamBaseState` と `onread` は Node と同じ形 |
 | 子プロセス（`process_wrap`・`spawn_sync`） | カーネルの spawn。IPC は socketpair（`NODE_CHANNEL_FD`）。親子の JSON のやり取りは lib の JS がそのまま行う |
-| ネット（`tcp_wrap`・`cares_wrap`） | 仮想ポート（listen/accept/connect）。外への TCP は張れないので、HTTP の中身を読んで関所の fetch に読み替える（後の段） |
+| ネット（`tcp_wrap`・`cares_wrap`） | 仮想ポート（listen/accept/connect）。外への TCP は張れないので、カーネル（`src/kernel/outbound.ts`）が HTTP/1.1 の要求を読み、許可を確かめるプロキシ経由の fetch に読み替える。TLS は線の上ではやらない |
 | `worker` | カーネルのスレッド（Web Worker）。その中で `main/worker_thread.js` を起こす。MessagePort はブラウザの物に Node の口を付ける |
-| `zlib` | pako の zlib の移植（z_stream 単位で Node と同じ）。Brotli は WASM |
-| `crypto` | ハッシュ・HMAC・乱数・PBKDF2/scrypt/HKDF・AES は @noble。WebCrypto はブラウザの物。鍵の生成・署名は段階的に |
-| `vm` | 新しい realm は作れないので、`with` とプロキシで近似。範囲を文書に書く |
+| `zlib` | pako の zlib の移植（z_stream 単位で Node と同じ）。Brotli と Zstd は WASM |
+| `crypto` | @noble/hashes・@noble/ciphers・@noble/curves の上に書く（ハッシュ・HMAC・乱数・PBKDF2/scrypt/HKDF・暗号・鍵・署名・X.509）。同期のものは同期のまま、非同期のジョブはループの次のターンで終わる |
+| `vm` | 新しい realm は作れないので、`with` とプロキシで近似（`contextify.ts`）。範囲を文書に書く |
 | `util`（Promise の状態・Proxy の中身・反復子の中身） | ブラウザから見えないので「分からない」を返す（inspect の表示が Node と違う箇所として一覧に残す） |
 
 ## 段階

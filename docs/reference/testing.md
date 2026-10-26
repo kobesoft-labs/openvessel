@@ -88,11 +88,16 @@ open the playground at `http://localhost:<base>/`, wait for `window.ovReady`, an
 | `run-file.mjs` | `<local file> <vfs path> '<command>'` | runs `SETUP` if set, writes the local file into the VFS, runs the command |
 | `watch.mjs` | `[--mount <dir>] '<command>' [seconds=20]` | spawns `/bin/sh -c <command>` (cwd `/home/user`, or `/home/user/app` with `--mount`, which copies a local project there first), streams the output every 200 ms, prints `[exit <code>]`, or `[still running after <n>s] ps:` and the process list when time runs out |
 | `project.mjs` | `<dir> ['<command>']` (default `npm install && npm run build`) | replaces `/home/user/app` with a local project and runs the command (15-minute timeout). Skips `node_modules`, `.git`, `dist`, `.astro`, `.vercel`, `.netlify`, `.cache`, `.turbo`, `.output` and files over 64 MiB; keeps symlinks. Exports `collectFiles()` and `mountProject()` |
-| `dev.mjs` | — | `npm install` in `/home/user/app`, spawns `npm run dev`, waits for `server-ready`, checks the preview's `<h1>`, edits `src/pages/index.astro` and waits up to 30 s for the HMR update |
+| `dev.mjs` | `[--port]` | `npm install` in `/home/user/app`, spawns `npm run dev`, waits for `server-ready`, checks the preview's `<h1>`, edits `src/pages/index.astro` and waits up to 30 s for the HMR update |
 | `preview-port.mjs` | — | on the ported runtime: starts an `http` server on port 4000, loads it in the preview iframe (a 70000-byte chunked body) and POSTs to it from the iframe; prints `OK` or `FAIL` and exits 0/1 |
-| `port-fs.mjs` | `[scenario…]` | on the ported runtime: runs the fs scenarios `dir`, `watch`, `watch2`, `cp`, `cp2`, `misc`, `misc2` (opendir/Dir, `fs.watch`, `fs.watchFile`, `fs.cp`/`cpSync`, readv/writev, FileHandle) and compares each output with the expected output recorded from Node v22.20.0 on Linux; prints `ok`/`FAIL` with a line diff, `all passed` or `<n> failed`, exits 0/1 |
-| `esm-graph.mjs` | `<project dir> <entry path in VFS> [install command='npm install']` | mounts a project, installs, then walks the ES module graph the kernel serves under `/__ov/esm` (the legacy runtime's ESM service) and reports modules that don't load |
-| `debug-esm.mjs` | `<vfs path…>` | runs `npm install`, then prints the first 3000 characters of `/__ov/esm<path>` for each path |
+| `port-fs.mjs` | `[scenario…]` | on the ported runtime: runs the fs scenarios `dir`, `watch`, `watch2`, `cp`, `cp2`, `misc`, `misc2` (opendir/Dir, `fs.watch`, `fs.watchFile`, `fs.cp`/`cpSync`, readv/writev, FileHandle) and compares each output with the expected output recorded from Node v22.23.4 on Linux (`node:22.23.4-bookworm-slim` in Docker); prints `ok`/`FAIL` with a line diff, `all passed` or `<n> failed`, exits 0/1 |
+| `esm-graph.mjs` | `[--port] <project dir> <entry path in VFS> [install command='npm install']` | mounts a project, installs, then walks the ES module graph the kernel serves under `/__ov/esm` (the legacy runtime's ESM service) and reports modules that don't load |
+| `debug-esm.mjs` | `[--port] <vfs path…>` | runs `npm install`, then prints the first 3000 characters of `/__ov/esm<path>` for each path |
+
+`--port` (in `dev.mjs`, `esm-graph.mjs`, `debug-esm.mjs`) selects the ported runtime before anything runs,
+with `usePortedRuntime(page)` from `harness.mjs` (it writes `port` to `/etc/openvessel/node`). The ESM
+service that `esm-graph.mjs` and `debug-esm.mjs` read is only used by the legacy runtime; with `--port`
+the install runs on the ported runtime.
 
 ```bash
 OV_PORT_BASE=5270 node test/e2e/harness.mjs \
@@ -143,8 +148,9 @@ A selected test is skipped when its source matches any of: `expose-internals`/`e
 
 ### How a run works
 
-- Only tests that passed in `results/baseline.json` run (when the file exists); a test missing from the
-  baseline is not run until `--baseline` is run again.
+- Only tests that passed in `results/baseline.json` run (when the file exists). A selected test missing
+  from the baseline is not run until `--baseline` is run again; the run starts with
+  `warning: <n> selected tests are not in results/baseline.json and are skipped (run --baseline to add them): <files>`.
 - The harness mounts at `/node` in the VFS: `package.json`, every file under `test/common` and
   `test/fixtures` up to 8 MiB, and the selected tests — in batches of about 4 MB per page evaluation.
 - The policy is set to `allow-all`, and `window.ovNoAutoPreview` is set so the playground doesn't open a
@@ -214,24 +220,34 @@ An array of sites. Official examples:
 { "id": "astro-5-examples__blog", "repo": "withastro/astro", "ref": "astro@5.18.2", "path": "examples/blog", "astro": 5 }
 ```
 
-Community sites have `id` `<owner>__<repo>`, `repo`, `ref` (the default branch), `sha` (`null`),
-`astro` (the major version) and `stars`. Each site's files are in `corpus/sites/<id>/` (not in git).
+Community sites have `id` `<owner>__<repo>`, `repo`, `ref` (the default branch), `sha` (the commit that
+was downloaded; `null` for sites collected before it was recorded), `astro` (the major version) and
+`stars`. Each site's files are in `corpus/sites/<id>/` (not in git; see `--restore` below).
 
 ### corpus/collect.mjs
 
 `node corpus/collect.mjs [target=100] [majors=5,6,7]` needs an authenticated `gh`. It adds sites until the
 list holds `target` entries:
 
-1. the `examples/*` with a `build` script from the Astro release tags `astro@7.4.2`, `astro@6.4.8` and
+1. the `examples/*` with a `build` script and an `astro.config.*` from the Astro release tags `astro@7.4.2`, `astro@6.4.8` and
    `astro@5.18.2` (ids `astro-<major>-examples__<name>`);
 2. community repositories from GitHub searches (`topic:astro-theme`, `topic:astro-template`,
    `topic:astro-blog`, `topic:astro language:Astro`, `astro theme in:name,description language:Astro`,
    `astro portfolio language:Astro`, `starlight docs language:MDX`, each with `pushed:>2025-03-01`,
    sorted by stars, up to five pages of 50), skipping archived repositories, forks, repositories over
-   200 MB, those without a `build` script and those whose `astro` dependency's major is not in `majors`.
+   200 MB, those without a `build` script, those whose `astro` dependency's major is not in `majors` and
+   those without an `astro.config.*` at the root. The download is the default branch's current commit,
+   recorded as `sha`.
 
-`sites.json` is rewritten after every addition. Ids already in `sites.json` are skipped, so the script
-only adds sites; it does not download the files of sites already listed.
+A directory without an `astro.config.*` is not a site (`examples/toolbar-app` is a toolbar integration),
+so it is never added. `sites.json` is rewritten after every addition. Ids already in `sites.json` are
+skipped, so this form only adds sites.
+
+`node corpus/collect.mjs --restore` downloads every listed site that `corpus/sites/` lacks — after a
+fresh clone, all of them: official examples from one tarball per release tag, community sites at `sha`
+(or the current head of `ref` when `sha` is `null`, which may differ from the files the results were
+measured on). It prints `<restored> of <missing> missing sites restored (<listed> listed)` and exits 1 if
+any failed. Directories in `corpus/sites/` that `sites.json` doesn't list are left alone and not run.
 
 ### corpus/run.mjs
 
@@ -267,8 +283,8 @@ and the run ends with `build ok: <x>/<total>, install ok: <y>`. `corpus/results/
   `compareFixtures(run(createX()), fixture.results, known)`. List accepted differences in `known`, with
   the reason as the key.
 - **An end-to-end check**: write a script in `test/e2e/` using `startServer`, `openBrowser` and `exec` from
-  `harness.mjs`; select the ported runtime with
-  `mkdir -p /etc/openvessel && echo port > /etc/openvessel/node`; print a clear result and exit non-zero
+  `harness.mjs`; select the ported runtime with `usePortedRuntime(page)` (or
+  `mkdir -p /etc/openvessel && echo port > /etc/openvessel/node`); print a clear result and exit non-zero
   on failure, as `port-fs.mjs` and `preview-port.mjs` do.
 - **A Node test that can't pass in a browser**: add it to `test/node-compat/limits/<module>.json` with the
   reason; it then no longer counts toward the target. Remove it when the report lists it as passing.

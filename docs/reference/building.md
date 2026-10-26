@@ -11,13 +11,13 @@ are cut. Running the tests is in [Testing](testing.md).
 | Tool | Needed for |
 |---|---|
 | Node.js and npm | everything. The unit-test bundle targets `node22`; `npx -y node@<pinned version>` is fetched by the fixture and baseline scripts, so they need network access to the npm registry |
-| Docker (able to run `linux/amd64` images) | `scripts/gen-node-data.mjs` and `scripts/node-upgrade-check.mjs` — once per Node version, to create `vendor/node/` and `src/node/data/` |
+| Docker (able to run `linux/amd64` images) | `scripts/gen-node-data.mjs`, `scripts/gen-builtins.mjs` and `scripts/node-upgrade-check.mjs` — once per Node version, to create `vendor/node/`, `src/node/data/` and `src/shared/builtin-exports.json` |
 | `curl` | `gen-node-data.mjs` (downloads Node's `LICENSE`), the zlib WebAssembly build |
 | Rust (`cargo`) with `rustup target add wasm32-wasip1` | rebuilding the Pagefind compat package when `vendor/compat/pagefind/` is missing |
 | LLVM `clang` with the wasm32 target and `wasm-ld` | only to rebuild the brotli/zstd WebAssembly (`src/nodejs/bindings/zlib/wasm/build.mjs`) |
 | Google Chrome | the end-to-end tests, Node's test suite and the corpus (driven through `playwright-core` with `channel: 'chrome'`) |
 | `git` | `test/node-compat/fetch.mjs` (sparse clone of nodejs/node) |
-| GitHub CLI `gh`, authenticated | `corpus/collect.mjs`, and `gh release create` when releasing |
+| GitHub CLI `gh`, authenticated | `corpus/collect.mjs` (also to restore `corpus/sites/` in a fresh clone), and `gh release create` when releasing |
 
 A fresh checkout builds like this:
 
@@ -139,8 +139,8 @@ Sources are kept as strings and compiled one at a time on first use; see
 
 | Script | Reads | Writes | When |
 |---|---|---|---|
-| `scripts/gen-builtins.mjs` | the **host** Node's `module.builtinModules` and each module's export names | `src/shared/builtin-exports.json` (named exports of builtin facades, used by the kernel's ESM service for the legacy runtime) | when the builtin list changes |
-| `scripts/vendor-node-path.mjs [path/to/lib/path.js]` | Node's `lib/path.js` (default `test/node-compat/.node/lib/path.js`, which the sparse checkout of `test/node-compat/fetch.mjs` does not contain, so pass `vendor/node/lib/path.js`) | `src/shared/node-path.ts` (primordials turned into plain calls; `process.cwd()`/`process.env` and `glob` wired to OpenVessel) | after a Node upgrade if `lib/path.js` changed |
+| `scripts/gen-builtins.mjs` | the pinned version's `module.builtinModules` plus the `node:`-only modules (`sea`, `sqlite`, `test`, `test/reporters`) and each module's export names, from Node in the official `node:<version>-bookworm-slim` image (linux/amd64, Docker) like `gen-node-data.mjs` | `src/shared/builtin-exports.json` (named exports of builtin facades, used by the kernel's ESM service for the legacy runtime) | after a Node upgrade |
+| `scripts/vendor-node-path.mjs [path/to/lib/path.js]` | Node's `lib/path.js` (default `vendor/node/lib/path.js`, the pinned version's, written by `gen-node-data.mjs`) | `src/shared/node-path.ts` (primordials turned into plain calls; `process.cwd()`/`process.env` and `glob` wired to OpenVessel) | after a Node upgrade if `lib/path.js` changed |
 | `scripts/regen-fixtures.mjs [name…]` | real Node of the pinned version (`npx -y node@<version>`) | `test/unit/fixtures/*.json`, the ICU width table in `src/nodejs/bindings/icu.ts`, `src/nodejs/bindings/crypto/tables.ts` | after a Node upgrade ([Testing](testing.md)) |
 | `src/nodejs/bindings/zlib/wasm/build.mjs` | brotli 1.1.0 and zstd 1.5.7 release tarballs (sha256-checked), `node-brotli.patch` | `src/nodejs/bindings/zlib/brotli-wasm.ts`, `zstd-wasm.ts` (raw-deflated, base64; committed) | only to change library versions or build flags. Needs `clang`/`wasm-ld`; override with `CLANG`, `WASM_LD`; work directory `WORK_DIR` (default `<tmp>/ov-zlib-wasm`) |
 
@@ -213,6 +213,8 @@ the current version and the history.
 3. Regenerate the data and expectations:
    ```bash
    node scripts/gen-node-data.mjs     # vendor/node, src/node/data (Docker)
+   node scripts/gen-builtins.mjs      # src/shared/builtin-exports.json (Docker)
+   node scripts/vendor-node-path.mjs  # src/shared/node-path.ts, if lib/path.js changed
    node scripts/regen-fixtures.mjs    # binding fixtures from real Node of the new version
    node test/node-compat/fetch.mjs    # Node's tests at the same version
    ```

@@ -9,13 +9,13 @@ OpenVessel をソースからビルドし、新しく保つ方法です。要る
 | 道具 | 何に要るか |
 |---|---|
 | Node.js と npm | すべて。単体の試験の束は `node22` 向けにビルドする。記録と基準のスクリプトは `npx -y node@<固定した版>` を取ってくるので、npm のレジストリへの通信が要る |
-| Docker（`linux/amd64` のイメージを動かせること） | `scripts/gen-node-data.mjs` と `scripts/node-upgrade-check.mjs`。Node の版ごとに 1 回、`vendor/node/` と `src/node/data/` を作る |
+| Docker（`linux/amd64` のイメージを動かせること） | `scripts/gen-node-data.mjs`・`scripts/gen-builtins.mjs`・`scripts/node-upgrade-check.mjs`。Node の版ごとに 1 回、`vendor/node/`・`src/node/data/`・`src/shared/builtin-exports.json` を作る |
 | `curl` | `gen-node-data.mjs`（Node の `LICENSE` を取る）、zlib の WebAssembly のビルド |
 | Rust（`cargo`）と `rustup target add wasm32-wasip1` | `vendor/compat/pagefind/` が無いときの、Pagefind の互換パッケージのビルド |
 | wasm32 向けの LLVM の `clang` と `wasm-ld` | brotli／zstd の WebAssembly を作り直すときだけ（`src/nodejs/bindings/zlib/wasm/build.mjs`） |
 | Google Chrome | 端から端までの試験・Node の試験・コーパス（`playwright-core` から `channel: 'chrome'` で動かす） |
 | `git` | `test/node-compat/fetch.mjs`（nodejs/node の一部だけの clone） |
-| ログイン済みの GitHub CLI `gh` | `corpus/collect.mjs`、リリースの `gh release create` |
+| ログイン済みの GitHub CLI `gh` | `corpus/collect.mjs`（取ってきたばかりのリポジトリで `corpus/sites/` を取り直すときも）、リリースの `gh release create` |
 
 取ってきたばかりのリポジトリは、次のようにビルドします。
 
@@ -114,8 +114,8 @@ export const sources = { 'fs': '…ソースの文字列…', /* … */ };
 
 | スクリプト | 読むもの | 書くもの | いつ |
 |---|---|---|---|
-| `scripts/gen-builtins.mjs` | **手元の** Node の `module.builtinModules` と、各モジュールの export の名前 | `src/shared/builtin-exports.json`（組み込みの殻の名前つき export。旧ランタイムのためのカーネルの ESM の配信が使う） | 組み込みの一覧が変わったとき |
-| `scripts/vendor-node-path.mjs [lib/path.js のパス]` | Node の `lib/path.js`（既定は `test/node-compat/.node/lib/path.js`。ただし `test/node-compat/fetch.mjs` の一部だけの取り出しには入っていないので、`vendor/node/lib/path.js` を渡す） | `src/shared/node-path.ts`（primordials をふつうの呼び出しにし、`process.cwd()`／`process.env` と `glob` を OpenVessel につなぐ） | Node を上げて `lib/path.js` が変わったとき |
+| `scripts/gen-builtins.mjs` | 固定した版の `module.builtinModules` と `node:` だけのモジュール（`sea`・`sqlite`・`test`・`test/reporters`）、各モジュールの export の名前。`gen-node-data.mjs` と同じく公式の `node:<版>-bookworm-slim` イメージ（linux/amd64、Docker）の Node から取る | `src/shared/builtin-exports.json`（組み込みの殻の名前つき export。旧ランタイムのためのカーネルの ESM の配信が使う） | Node を上げたとき |
+| `scripts/vendor-node-path.mjs [lib/path.js のパス]` | Node の `lib/path.js`（既定は `gen-node-data.mjs` が書く `vendor/node/lib/path.js`。固定した版のもの） | `src/shared/node-path.ts`（primordials をふつうの呼び出しにし、`process.cwd()`／`process.env` と `glob` を OpenVessel につなぐ） | Node を上げて `lib/path.js` が変わったとき |
 | `scripts/regen-fixtures.mjs [name…]` | 固定した版の本物の Node（`npx -y node@<version>`） | `test/unit/fixtures/*.json`、`src/nodejs/bindings/icu.ts` の中の ICU の幅の表、`src/nodejs/bindings/crypto/tables.ts` | Node を上げたあと（[試験](testing.ja.md)） |
 | `src/nodejs/bindings/zlib/wasm/build.mjs` | brotli 1.1.0 と zstd 1.5.7 のリリースの tarball（sha256 を確かめる）、`node-brotli.patch` | `src/nodejs/bindings/zlib/brotli-wasm.ts`・`zstd-wasm.ts`（raw deflate と base64。git に入れる） | ライブラリの版かビルドのフラグを変えるときだけ。`clang`／`wasm-ld` が要る。`CLANG`・`WASM_LD` で置き換えられる。作業のディレクトリは `WORK_DIR`（既定は `<tmp>/ov-zlib-wasm`） |
 
@@ -166,6 +166,8 @@ OpenVessel が移植する Node の版は、`src/node/version.ts` の `NODE_VERS
 3. データと期待値を作り直します。
    ```bash
    node scripts/gen-node-data.mjs     # vendor/node・src/node/data（Docker）
+   node scripts/gen-builtins.mjs      # src/shared/builtin-exports.json（Docker）
+   node scripts/vendor-node-path.mjs  # src/shared/node-path.ts（lib/path.js が変わったとき）
    node scripts/regen-fixtures.mjs    # 新しい版の本物の Node でバインディングの記録を取り直す
    node test/node-compat/fetch.mjs    # Node の試験も同じ版に
    ```
