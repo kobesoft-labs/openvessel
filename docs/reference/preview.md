@@ -45,7 +45,10 @@ The first call creates the relay (later calls reuse it):
 3. The host creates a `MessageChannel`, sends one end to the kernel (`{ t: 'preview-port', port }` on its
    kernel channel) and the other to the relay (`openvessel-preview-connect` with `defaultPort`).
 4. The relay passes the port to the active service worker (`kernel-port`) and posts
-   `openvessel-preview-ready`. The host's promise resolves.
+   `openvessel-preview-ready`. The host's promise resolves. The relay only takes these messages from its
+   parent, and only when the parent is of another origin (the host), not a preview page that framed it.
+   A new channel replaces the old one, which the service worker closes; the kernel then aborts the
+   requests and sockets that were still open on it.
 
 If the relay isn't ready within 20000 ms the call rejects with `OpenVessel: preview relay did not start`.
 Each later `previewUrl()` / `createPreview()` sends `openvessel-preview-default-port` with its port, which
@@ -98,16 +101,17 @@ origin, which the service worker needs in order to control it.
 | Navigation to `__ov/open` | `port` from the URL (recorded for the resulting page) |
 | Other navigation in a preview iframe (link, form, `location` change, reload) | the port of the page that started the navigation, else the default port |
 | Subresource (`fetch`, XHR, script, image…) | the port recorded for the requesting page, else the default port |
-| WebSocket to a local URL | the requesting page's port, else the port in the URL, else the default port |
+| Request to `http://localhost:<port>/…` (or another loopback name) | `port` from the URL; without one, the requesting page's port, else the default port |
+| WebSocket to a local URL | the port in the URL when its host is a loopback name with an explicit port, else the requesting page's port, else the default port |
 
 Navigating inside an iframe opened at port 4000 stays on port 4000, and two previews of different ports
 can be open at the same time. The default port is the `port` of the most recent `previewUrl()` /
 `createPreview()` call.
 
-The port records, the default port and the cache of allowed hosts live in the service worker's memory.
-When the browser restarts an idle service worker, the relay gives it the default port again with the new
-kernel channel, but the per-page records start empty, so requests from an already open page then go to
-the default port.
+The port records and the default port are kept in memory and also in the preview origin's Cache Storage
+(cache `openvessel-preview-ports`), so when the browser restarts an idle service worker, open pages keep
+their port. Records of pages that are gone are dropped when the service worker starts. The cache of
+allowed hosts is only in memory.
 
 ## HTTP requests
 
@@ -186,8 +190,8 @@ buffered except for HTML navigations and request bodies.
 A `3xx` from the server is returned to the page as it is; the service worker never follows redirects. The
 browser follows them as usual (a `fetch()` with `redirect: 'manual'` sees an `opaqueredirect`). A
 root-relative `Location` stays on the preview origin. An absolute `Location` such as
-`http://localhost:4321/x` points at another origin and is treated as an outside request (see
-[below](#outbound-requests-and-the-network-policy)).
+`http://localhost:4321/x` is a loopback URL and goes to that virtual port; a `Location` in a response to
+a request for such a URL is passed on unchanged.
 
 ### Errors
 
@@ -211,14 +215,18 @@ Start a dev server (for example npm run dev) and reload.
 ## WebSockets
 
 Service workers can't intercept WebSockets, so `inject.js` replaces `window.WebSocket` in every HTML page
-the preview serves. A URL is tunnelled when its host is the page's own host, or its host name is
-`localhost`, `127.0.0.1` or `[::1]` (any port, `ws:` or `wss:`). Other URLs use the browser's own
-`WebSocket`.
+the preview serves. A URL (`ws:`, `wss:`, or `http:`/`https:` turned into `ws:`/`wss:` as the browser
+does) is tunnelled when its host is the page's own host or a loopback name (`localhost`, `*.localhost`,
+`127.0.0.0/8`, `[::1]`…, any port). For other URLs the socket first asks the service worker whether the
+network policy allows the host (`ws-check`, see
+[below](#outbound-requests-and-the-network-policy)) and then opens the browser's own `WebSocket`, whose
+events and members it passes through. URLs the browser's `WebSocket` would reject (other schemes, a
+fragment) are handed to it as they are, so they throw its usual `SyntaxError`.
 
 1. The page posts `{ t: 'ws-connect', port, path, protocols, vport, origin }` to its controlling service
-   worker with a new `MessagePort` (`vport` is the URL's port when its host name differs from the page's,
+   worker with a new `MessagePort` (`vport` is the URL's port when its host differs from the page's,
    else 0).
-2. The service worker picks the port (the page's port, else `vport`, else the default port) and asks the
+2. The service worker picks the port (`vport`, else the page's port, else the default port) and asks the
    kernel to open it (`ws-open`) with the headers `sec-websocket-protocol` (the requested protocols joined
    with `, `), `host: localhost:<port>` and `origin` (the preview origin); empty ones are left out.
 3. Ported runtime: the kernel sends an HTTP/1.1 upgrade request with `Connection: Upgrade`,
@@ -229,9 +237,9 @@ the preview serves. A URL is tunnelled when its host is the page's own host, or 
    kernel masks frames it sends, answers pings with pongs, and reads the close code from a close frame
    (`1005` if it has none).
 
-Because the page's port comes first, a socket to `ws://localhost:<other port>/` from a page opened for
-port 4000 goes to port 4000. The URL's port is only used by pages that have no port and when there is no
-default port.
+So a dev server whose HMR socket listens on its own port (`ws://localhost:24678/`) is reached on that
+port, while `new WebSocket('/socket')` or a URL on the page's own host goes to the page's port. With a
+`vport`, the path is sent as it is; otherwise the scope is removed as for HTTP requests.
 
 ### The tunnelled `WebSocket` object
 
@@ -240,8 +248,8 @@ default port.
 | `url` | the absolute URL |
 | `readyState` | `0` until open, `1` open, `2` after `close()`, `3` closed |
 | `protocol` | the protocol the server chose, `''` before open |
-| `extensions` | always `''` |
-| `bufferedAmount` | always `0` |
+| `extensions` | always `''` (for an outside socket, the browser socket's) |
+| `bufferedAmount` | always `0` (for a policy-checked outside socket, the browser socket's) |
 | `binaryType` | `'blob'` (default) or `'arraybuffer'`; binary messages arrive as `Blob` or `ArrayBuffer` |
 | `send(data)` | strings as text frames; `ArrayBuffer`, views and `Blob` as binary (a `Blob` is sent after it has been read). Throws `InvalidStateError` (`WebSocket is not open`) unless open |
 | `close(code = 1000, reason = '')` | sends the close and reports `close` right away, without waiting for the server |
@@ -253,9 +261,11 @@ default port.
 Without a controlling service worker the socket closes with `1006` and reason `no service worker`. If the
 kernel can't connect (no listener), it closes with `1006` and the error message as reason; when the
 connection to the server ends without a close frame, the code is `1006`. If the server answers the upgrade
-with an ordinary HTTP response instead of `101`, the socket never opens and never closes.
+with an ordinary HTTP response instead of `101`, the socket fails: `error`, then `close` with `1006` and
+the reason `Unexpected server response: <status>`.
 
-`window.WebSocket.prototype` stays the browser's, but tunnelled sockets are not `instanceof WebSocket`.
+`window.WebSocket.prototype` stays the browser's, and `instanceof WebSocket` is true for tunnelled
+sockets as well as for the browser's own.
 
 ## The injected script
 
@@ -269,7 +279,7 @@ The service worker inserts, into every HTML navigation response:
 
 | Does | When |
 |---|---|
-| Replaces `window.WebSocket` with a constructor that tunnels local URLs (above) | always |
+| Replaces `window.WebSocket` with a constructor that tunnels local URLs and checks other URLs with the network policy (above) | always |
 | Wraps `window.fetch` and `XMLHttpRequest.prototype.open` so that string URLs starting with a single `/` and not already under the scope get the scope prepended | only when the preview is served under a path |
 
 It does nothing else: no error overlay, no messages to the host, no access to the runtime.
@@ -278,27 +288,39 @@ It does nothing else: no error overlay, no messages to the host, no access to th
 
 Requests from preview pages to other origins (`http:` and `https:` only; other schemes are left to the
 browser) are checked against the host's network policy ([Network policy](network-policy.md)) before the
-service worker makes them:
+service worker makes them. Loopback URLs are not outside requests: they go to virtual ports (see
+[Which port a request goes to](#which-port-a-request-goes-to)).
 
-1. If the host (host name and port) was allowed before in this service worker's lifetime, the request goes
-   out at once. Allows are remembered; denials are asked again next time.
+1. If the origin was allowed before with a lasting answer (by the policy, or "for this session"), the
+   request goes out at once. That cache is emptied when the host calls `network.setPolicy()` or
+   `network.clearSession()` (the kernel sends `net-flush`) and when the service worker gets a new kernel
+   channel. Denials and "allow once" answers are not cached: "once" allows that one request.
 2. Otherwise the service worker asks the kernel (`net`). The kernel decides from the policy and, in `ask`
    mode, emits `permission-request` with `initiator: 'preview'` and `source: 'preview'` (the built-in
    dialog says "The preview page wants to connect to:"). Questions about the same host name are merged;
    unanswered questions are denied after 5 minutes.
-3. Allowed: the service worker `fetch`es the original request. Denied: `403` with status text
-   `Blocked by OpenVessel network policy` and an empty body.
+3. Allowed: the service worker `fetch`es the original request; a `no-cors` request (`<img>`, a classic
+   `<script>`, CSS `url()`…) is made as a `cors` request without credentials instead, so that the final URL
+   after redirects is visible. A server that doesn't allow CORS fails such a load (`403`, status text
+   `Blocked by OpenVessel: the server does not allow CORS, so its redirects cannot be checked`).
+4. If the response was redirected, the final URL is checked the same way; if it is refused, the response
+   is dropped.
+5. Denied: `403` with status text `Blocked by OpenVessel network policy` (with ` (not answered in time)`
+   after a timeout) and an empty body.
 
-If the service worker can't get a kernel channel (none within 15 s), the check is skipped and the request
-is made.
+If the service worker can't get a kernel channel (none within 15 s), the request is refused; the next
+request asks the relay for a channel again.
+
+A WebSocket to an outside host is checked the same way before it connects: the page's `WebSocket` posts
+`{ t: 'ws-check', url, port }` to the service worker, which answers `{ allow }` on the port. A refused
+socket fails with `error` and `close` (`1006`, `blocked by OpenVessel network policy`).
 
 Points to be aware of:
 
-- An absolute URL to `localhost`, `127.0.0.1` etc. is another origin, not a virtual port: a `fetch` to
-  `http://localhost:4321/` from the preview is an outside request and goes through the policy (and, if
-  allowed, to the real machine). Use root-relative URLs to reach the dev server.
-- WebSockets to hosts that aren't tunnelled use the browser's `WebSocket`, which a service worker can't
-  see, so they are not checked by the policy.
+- The redirect hops before the final URL are contacted by the browser; only what the final host sends
+  is withheld when it is refused.
+- The checks are made by the service worker and by the replaced `WebSocket`. Code that gets the browser's
+  own `WebSocket` some other way (a worker the page starts, for instance) is not checked.
 
 ## Cookies and storage
 
@@ -320,8 +342,9 @@ processes, change the network policy or answer permission requests; those method
 host's channel. The relay iframe runs on the preview origin too, so taking it over gives no more than
 the same channel.
 
-The preview service worker only accepts `kernel-port` and `default-port` from a client whose URL path
-ends in `/relay.html`; `ws-connect` is accepted from any page it controls.
+The preview service worker only accepts `kernel-port` and `default-port` from the relay: a window in a
+frame whose URL path is exactly `<scope>__ov/relay.html`. `ws-connect` and `ws-check` are accepted from
+any page it controls.
 
 ## Related source files
 

@@ -23,7 +23,7 @@ OpenVessel の部品どうしのやり取りの形です。ホスト ↔ ラン�
 | ホストのページ ↔ プレビューの中継の iframe | `window.postMessage` | `{ t: 'openvessel-preview-…' }` | `src/host/index.ts`・`src/preview/relay.ts` |
 | 中継 ↔ プレビューの Service Worker | `ServiceWorker.postMessage` | `{ t: 'kernel-port' \| 'default-port' \| 'need-kernel-port' }` | `src/preview/relay.ts`・`src/preview/sw.ts` |
 | プレビューの Service Worker ↔ カーネル | `MessagePort` | `{ id, k: 'req' \| 'body' \| … }` | `src/preview/sw.ts`・`src/kernel/index.ts` |
-| プレビューのページ ↔ プレビューの Service Worker | `postMessage` と、WebSocket ごとの `MessagePort` | `{ t: 'ws-connect' }`、`{ t: 'open' \| 'msg' \| 'close' \| 'send' }` | `src/preview/inject.ts` |
+| プレビューのページ ↔ プレビューの Service Worker | `postMessage` と、WebSocket ごとの `MessagePort` | `{ t: 'ws-connect' \| 'ws-check' }`、`{ t: 'open' \| 'msg' \| 'close' \| 'send' }` | `src/preview/inject.ts` |
 | カーネル ↔ プロセスの Worker | `Worker.postMessage` | `{ t: … }` | `src/kernel/kernel.ts`・`src/kernel/syscalls.ts`・`src/kernel/net.ts` |
 | プロセスの Worker → カーネル（システムコール） | `SharedArrayBuffer` と `Atomics` | JSON とバイナリ | `src/shared/syncchan.ts` |
 
@@ -35,10 +35,10 @@ host page                                   runtime.html (runtime origin)
 append <iframe src=".../runtime.html" allow="cross-origin-isolated">
                               ◀──────────── { t: 'openvessel-runtime-loaded' }            (to '*')
 new MessageChannel()
-{ t: 'openvessel-connect', port, init } ──▶  checks; registers sw.js; starts kernel.js
+{ t: 'openvessel-connect', port, init } ──▶  checks; starts __ov/k/<kid>/kernel.js
    (to the runtime origin, port transferred)  kernel ◀ { t: 'policy', policy }   (if init.policy)
                                               kernel ◀ { t: 'sw-port', port }
-                                              sw.js  ◀ { t: 'kernel-port', port }
+                                              sw.js  ◀ { t: 'kernel-port', port, kid }
                                               kernel ◀ { t: 'host-port', port }
 port ◀──────────────────────────────────────  { ev: 'ready' }                    (from the kernel)
 ```
@@ -59,8 +59,8 @@ port ◀────────────────────────
 |---|---|---|
 | 1 | `ev.origin` が `<meta name="openvessel-allowed-hosts">` にある（空白かカンマで区切る。`*` はどこでも） | `origin <origin> is not allowed to use this runtime` |
 | 2 | `location.ancestorOrigins` が（あれば）1 つ以下 | `the runtime must be embedded directly by the host page` |
-| 3 | `crossOriginIsolated` | `OpenVessel needs a cross-origin isolated page (COOP: same-origin and COEP: require-corp/credentialless on the host page, and allow="cross-origin-isolated" on the iframe).` |
-| 4 | Service Worker の登録 | `service worker registration failed: <message>` |
+| 3 | Service Worker の登録 | `service worker registration failed: <message>` |
+| 4 | `crossOriginIsolated`（Worker がフレームを制御したあと） | `OpenVessel needs a cross-origin isolated page (COOP: same-origin and COEP: require-corp/credentialless on the host page, and allow="cross-origin-isolated" on the iframe).` |
 | あと | カーネルの Worker の `error` イベント | `kernel failed: <message>` |
 
 1 か 2 で失敗したあとも、ランタイムは次の `openvessel-connect` を受け付けます。ホストは最初の `openvessel-error` で
@@ -71,13 +71,21 @@ port ◀────────────────────────
 `runtime.js` の Service Worker の立ち上げ: `register('./sw.js', { scope: './', updateViaCache: 'none' })` のあと
 `reg.update()`。Worker が installing か waiting のあいだは `controllerchange` を待ち、続いて `navigator.serviceWorker.ready`
 を待ちます。それでもページに controller が無ければ `controllerchange` を待ちます（Worker は activate で `clients.claim()` を呼びます）。
+これは `runtime.html` を読み込んだとき、`openvessel-runtime-loaded` を送る前にもう行います。Worker が制御したあともフレームが
+cross-origin isolated でなければ、`runtime.js` は 1 回だけ読み直します（`sessionStorage` の印 `openvessel-coi-reload`）。
+Worker が付ける分離のヘッダーを効かせるためです。それでも isolated でないフレームは確認 4 で知らせます。
+
+ランタイムのフレームはそれぞれ、でたらめなカーネルの id `<kid>`（16 桁の 16 進数）を選び、カーネルを
+`__ov/k/<kid>/kernel.js` として起動します。カーネルとそのプロセスの Worker が自分の URL からの相対で求めるものはすべてこの
+前置きの下にあり、Service Worker はそれを、その `kid` で通り道を登録したカーネルに送ります
+（[ランタイムの Service Worker](#ランタイムの-service-worker)）。
 
 ### カーネルの Worker へのメッセージ
 
 | メッセージ | 送り手 | はたらき |
 |---|---|---|
 | `{ t: 'policy', policy }` | `runtime.js`。`init.policy` があれば `host-port` の前に | 通信の方針を（整えて）設定する |
-| `{ t: 'sw-port', port }` | `runtime.js`。起動時と、`controllerchange`・`need-kernel-port` のたびに | ランタイムの Service Worker への通り道をつなぐ |
+| `{ t: 'sw-port', port }` | `runtime.js`。起動時と、`controllerchange` のたびと、自分の `kid` を指す（か指さない）`need-kernel-port` のたびに | ランタイムの Service Worker への通り道をつなぐ |
 | `{ t: 'host-port', port }` | `runtime.js` | ホストへの通り道をつなぎ（前のものは置き換える）、そこに `{ ev: 'ready' }` を送る |
 
 ## ホストの RPC
@@ -89,13 +97,17 @@ port ◀────────────────────────
 | 呼び出し（ホスト → カーネル） | `{ id: number, m: string, a: object }` |
 | 結果（カーネル → ホスト） | `{ id, r: any }`。結果が `Uint8Array` なら（その `buffer` を）transfer する |
 | エラー（カーネル → ホスト） | `{ id, e: { message: string, code?: string } }` |
-| 知らないメソッド | `{ id, e: { message: 'unknown method <m>', code: 'ENOSYS' } }` |
+| 知らないメソッド | `{ id, e: { message: 'unknown method <m>', code: 'ENOSYS' } }`（カーネル自身のメソッドの名前だけを数えるので、`toString` のような受け継いだ名前は知らないメソッド） |
 | イベント（カーネル → ホスト） | `{ ev: string, … }`（`id` は無い） |
 | プレビューの通り道の受け渡し（ホスト → カーネル。呼び出しではない） | `{ t: 'preview-port', port: MessagePort }` |
 
 メソッドは同期のものも promise を返すものもあり、終わった順に答えます。ファイルシステムが投げるエラーは、errno の
 `code`（`ENOENT`・`EEXIST`・`ENOTDIR`・`EISDIR`・`ENOTEMPTY` など）と errno の文（たとえば `no such file or directory`）を
-`message` に持つ `KernelError` です。`dist/host` は `e` を `code` 付きの `Error` にします。
+`message` に持つ `KernelError` です。呼び出しの前に、カーネルは要る引数（`path`・`from`/`to`・`files`・`argv`・`pid`・
+`cols`/`rows`・`id`）を確かめ、Node と同じ `ERR_INVALID_ARG_TYPE`（`The "path" argument must be of type string. Received …`）か、
+空の `argv` には `ERR_INVALID_ARG_VALUE` を投げます。エラーにはいつも `code` があります。`code` の無いほかのエラーには
+`ERR_INVALID_ARG_TYPE`（`TypeError`）・`ERR_OUT_OF_RANGE`（`RangeError`）・`ERR_INVALID_ARG_VALUE` を付けます。
+`dist/host` は `e` を `code` 付きの `Error` にします。
 
 ```js
 // a minimal call over the host port
@@ -161,7 +173,7 @@ await call('ping'); // 'pong'
 | `port-closed` | `port` | その待ち受けが無くなった |
 | `fs-change` | `id`・`type: 'rename' \| 'change'`・`path` | 監視しているパスの下の変更 |
 | `permission-request` | `id`・`url`・`host`・`initiator`・`source: 'runtime' \| 'preview'` | あるホストについて方針が `ask` と言った。`permission.respond` で答える |
-| `permission-settled` | `id`・`host`・`allowed: boolean` | 許可の問い合わせに答えが出た、または時間切れになった |
+| `permission-settled` | `id`・`host`・`allowed: boolean`・`decision: 'once' \| 'session' \| 'deny' \| 'deny-session' \| 'timeout'` | 許可の問い合わせに答えが出た、または 5 分で時間切れになった |
 
 許可の問い合わせ: カーネルは、同じホスト名への同時の問い合わせを 1 つにまとめ（待っている全員に同じ答えを返す）、
 5 分のうちに答えが無ければ拒否し、ホストへの通り道がつながっていなければすぐに拒否します。`session`／`deny-session` の
@@ -191,14 +203,18 @@ await call('ping'); // 'pong'
 
 | メッセージ | 向き | フィールド | 受け付ける条件 |
 |---|---|---|---|
-| `kernel-port` | 中継 → SW | `port: MessagePort`・`defaultPort: number` | 送り手の URL のパスが `/relay.html` で終わる。0 でない `defaultPort` は既定のポートを置き換える |
-| `default-port` | 中継 → SW | `port: number` | 送り手のパスが `/relay.html` で終わる |
-| `need-kernel-port` | SW → パスが `/relay.html` で終わるすべての window のクライアント | — | SW に通り道が要るのに無い。最大 15 秒待つ（`preview is not connected to OpenVessel`） |
+| `kernel-port` | 中継 → SW | `port: MessagePort`・`defaultPort: number` | 送り手が中継（URL のパスがちょうど `<スコープ>__ov/relay.html` の、iframe の中のウィンドウ）。0 でない `defaultPort` は既定のポートを置き換える。前の通り道は閉じる |
+| `default-port` | 中継 → SW | `port: number` | 送り手が中継 |
+| `need-kernel-port` | SW → 中継のすべての window のクライアント | — | SW に通り道が要るのに無い。最大 15 秒待つ（`preview is not connected to OpenVessel`。そのあいだ外への要求は断る） |
+
+中継自身は、`openvessel-preview-connect` と `openvessel-preview-default-port` を親からだけ、それも親が中継と別の
+オリジンのときだけ受け取ります。
 
 ### プレビューのページ ↔ プレビューの Service Worker（WebSocket）
 
 | メッセージ | 向き | フィールド |
 |---|---|---|
+| `ws-check` | ページ → SW | `url`（外の `ws:`／`wss:` の URL）・`port: MessagePort`（transfer）。SW は `http:`／`https:` の URL と同じくカーネルに尋ね、そのポートに `{ allow: boolean }` で答える |
 | `ws-connect` | ページ → SW（`navigator.serviceWorker.controller`） | `port: MessagePort`（transfer）・`path`（パスとクエリ）・`protocols: string[]`・`vport: number`・`origin` |
 | `open` | SW → ページ（そのポートで） | `protocol` |
 | `msg` | SW → ページ | `data: string \| Uint8Array`・`binary: boolean` |
@@ -227,9 +243,13 @@ Service Worker が決める数の `id` と文字列の `k` を持ちます。カ
 | `ws-opened` | カーネル → SW | `id`・`protocol: string \| null` | サーバーが upgrade を受けた |
 | `ws-msg` | 両方 | `id`・`data: string \| Uint8Array`・`binary` | メッセージ |
 | `ws-close` | SW → カーネル | `id`・`code`（`Number(code) \|\| 1000`）・`reason` | ページから閉じる |
-| `ws-closed` | カーネル → SW | `id`・`code`・`reason` | サーバーが閉じた、または開けなかった（`1006`、理由はエラーのメッセージ） |
+| `ws-closed` | カーネル → SW | `id`・`code`・`reason` | サーバーが閉じた、または開けなかった（`1006`、理由はエラーのメッセージ。サーバーが upgrade にふつうの応答を返したときは `Unexpected server response: <status>`） |
 | `net` | SW → カーネル | `id`・`url` | プレビューがこの外の URL を取ってよいか（initiator `preview`、source `preview`） |
-| `net-result` | カーネル → SW | `id`・`allow: boolean` | 答え |
+| `net-result` | カーネル → SW | `id`・`allow: boolean`・`cache: boolean`・`timeout: boolean` | 答え。`cache` は方針か「このセッション中は許可」から決まったとき true（SW が使い回してよい）。`timeout` は問い合わせに答えが無かったとき |
+| `net-flush` | カーネル → SW | —（`id` なし） | 方針かセッション中の判断が変わった。覚えた許可を捨てる |
+
+Service Worker が通り道を取り替えたりなくしたりすると（ポートの `close` のイベント）、カーネルはそこでまだ開いていた要求と
+WebSocket を打ち切ります。
 
 この通り道でカーネルにできることは、これだけです。ファイルシステム・プロセス・方針のメソッドは、ホストの通り道にしか
 ありません。
@@ -237,7 +257,10 @@ Service Worker が決める数の `id` と文字列の `k` を持ちます。カ
 ## ランタイムの Service Worker
 
 `dist/runtime/sw.js` は、スコープの中の同じオリジンへの要求を扱います。下のパスはランタイムのディレクトリからの相対です
-（照らし合わせる前にスコープを取り除きます）。
+（照らし合わせる前にスコープを取り除きます）。その下のカーネルの前置き `/__ov/k/<kid>/` からの相対でもよく、前置きの下の
+要求はカーネル `<kid>` へ行きます。前置きの無い `/__ov/…` への要求（旧ランタイムの一番上からの URL）は、参照元
+（あるカーネルの前置きの下のファイルか、そのカーネルが返したモジュール）が指すカーネルへ、分からなければ最後につながった
+カーネルへ行きます。
 
 ### 窓口
 
@@ -246,8 +269,10 @@ Service Worker が決める数の `id` と文字列の `k` を持ちます。カ
 | `/__ov/esm/<VFS の絶対パス>[?query]` | どれでも | カーネルが VFS のファイルから作る ES モジュール（[下](#モジュールの窓口)）。旧ランタイムが使う |
 | `/__ov/builtin/<name>[.mjs]` | どれでも | 組み込みモジュール（`node:fs` など）をかぶせた ES モジュール。旧ランタイムが使う |
 | `/__ov/mw/<pid>/<id>.mjs` | どれでも | 移植ランタイムが `esmRegister` のシステムコールで登録したモジュールのソース |
-| `/__ov/net?url=<エンコードした URL>` | どれでも | 通信の関所（[下](#__ovnet)） |
+| `/__ov/esm-error?…` | どれでも | カーネルが解決できなかった import のエラーを投げるモジュール（カーネルが答える） |
+| `/__ov/net?url=<エンコードした URL>` | どれでも | 通信の出口（[下](#__ovnet)） |
 | `/__ov/ping` | どれでも | `pong`（`text/plain`） |
+| `/__ov/k/<kid>/<file>`（窓口でないもの） | `GET`・`HEAD` | ランタイムのディレクトリの `<file>` を、求められた URL のまま分離のヘッダーを付けた新しい応答として返す（`kernel.js`・`process.js`・チャンク・`compat/` が前置きの下でも動くように） |
 | ほかのすべて | `GET` | サーバーから取り、分離のヘッダーが無ければ足す |
 | ほかのすべて | ほか | 扱わない（サーバーへ行く） |
 
@@ -275,8 +300,9 @@ Service Worker が決める数の `id` と文字列の `k` を持ちます。カ
 ### `/__ov/net`
 
 ランタイムからネットワークへの唯一の道です。使うのは、移植ランタイムの `fetch` と旧ランタイムの通信の層（プロセスの
-Worker から）、カーネルの npm のクライアント（`initiator` は `npm`）、そしてカーネルの外向きの TCP の橋渡し（ソケットに
-書かれた HTTP/1.1 をこの要求に変える。`src/kernel/outbound.ts`）です。
+Worker から）、カーネルの npm のクライアントと `curl`・`wget`、そしてカーネルの外向きの TCP の橋渡し（ソケットに
+書かれた HTTP/1.1 をこの要求に変える。`src/kernel/outbound.ts`）です。カーネル自身のクライアントは、ループバックの URL を
+ここへは送らず仮想ポートへ送ります（[通信の方針](network-policy.ja.md#localhost-と仮想ポート)）。
 
 要求:
 
@@ -286,14 +312,15 @@ Worker から）、カーネルの npm のクライアント（`initiator` は `
 | メソッド | `GET` と `HEAD` はそのまま。ほかはすべて本文付きの `POST` で送る |
 | `x-ov-method` | 本当のメソッド（既定は要求のメソッド） |
 | `x-ov-h` | `encodeURIComponent(JSON.stringify([[name, value], …]))`: 送るヘッダー |
-| `x-ov-by` | 許可の確認に出す `encodeURIComponent(initiator)`（既定 `process`） |
+| `x-ov-by` | `encodeURIComponent(initiator)`。プロセスは `<pid> <コマンド行>` を送る。カーネルはそこから pid だけを取り、プロセス表からプロセスの名前を出す（[通信の方針](network-policy.ja.md#許可の問い合わせ)） |
+| `x-ov-k` | カーネルの秘密の合言葉。カーネル自身のクライアント（`npm` とほかのパッケージマネージャ・`curl`・`wget`）だけが送る。これがあれば `x-ov-by` の名前をそのまま出す |
 | `x-ov-redirect` | `error` ならリダイレクトで失敗させる。ほか（または無し）はリダイレクトをたどる |
 
-Service Worker はカーネルに尋ね（`{ k: 'net', url, initiator }`）、ブラウザが決めるヘッダー（`host`・`connection`・
+Service Worker はカーネルに尋ね（`{ k: 'net', url, initiator, token }`）、ブラウザが決めるヘッダー（`host`・`connection`・
 `content-length`・`keep-alive`・`transfer-encoding`・`upgrade`・`te`・`trailer`・`expect`・`cookie`・`cookie2`・`origin`・
 `referer`・`accept-encoding`・`access-control-request-headers`・`access-control-request-method`・`date`・`dnt`・`via`・
 `proxy-connection`・`sec-*`・`proxy-*`）を除いて、`credentials: 'omit'`・`mode: 'cors'`・`cache: 'no-store'` で相手を
-`fetch` します。
+`fetch` します。応答がリダイレクトを経ていれば、最後の URL をもう一度カーネルに尋ね、断られたら下のように答えます。
 
 要求をしたときの応答（ステータスはいつも `200`）:
 
@@ -311,24 +338,25 @@ Service Worker はカーネルに尋ね（`{ k: 'net', url, initiator }`）、�
 
 | ステータス | `x-ov-error` | `x-ov-message`（URI エンコード。プレーンテキストの本文も同じ） |
 |---|---|---|
-| `403` | `denied` | `OpenVessel: network access to <host> was denied by the network policy` |
+| `403` | `denied` | `OpenVessel: network access to <host> was denied by the network policy`（最初の URL でも最後の URL でも） |
+| `504` | `timeout` | `OpenVessel: network access to <host> was not answered in time`（許可の問い合わせが時間切れになった） |
 | `502` | `network` | `request to <host> failed: <message>. The server may not allow cross-origin requests (CORS) from the browser.` |
 | `502` | `network` | カーネルへの通り道を得られなかった（`OpenVessel kernel is not connected`） |
 
 移植ランタイムの `fetch` はこれらを `TypeError('fetch failed')` にし、その `cause` の `code` を `EACCES`（`denied`）・
-`ETIMEDOUT`（`timeout`）・`ECONNREFUSED`（ほか）にします。外向きの TCP の橋渡しは、HTTP の `403` か `502` をソケットに書き戻します。
+`ETIMEDOUT`（`timeout`）・`ECONNREFUSED`（ほか）にします。旧ランタイムとカーネルの npm のクライアントも同じです。外向きの TCP の橋渡しは、HTTP の `403` か `502` をソケットに書き戻します。
 
 ### Service Worker ↔ ランタイムのフレームとカーネル
 
 | メッセージ | 向き | フィールド |
 |---|---|---|
-| `kernel-port` | `runtime.html` → SW | `port: MessagePort`。URL のパスが `/runtime.html` で終わる window のクライアントからだけ受け付ける |
+| `kernel-port` | `runtime.html` → SW | `port: MessagePort`・`kid`（8〜32 桁の 16 進数）。URL のパスが `/runtime.html` で終わる window のクライアントからだけ受け付ける。同じ `kid` の新しい通り道は古いものに代わり、古いほうは待っている答えが届いたら閉じる |
 | `ping` | `runtime.html` → SW | 無視する（`clients.claim()` で `controllerchange` が起きるように送るもの） |
-| `need-kernel-port` | SW → パスが `/runtime.html` で終わるすべての window のクライアント | SW が通り道をなくした。`runtime.js` は新しい `sw-port`／`kernel-port` を送って答える |
+| `need-kernel-port` | SW → パスが `/runtime.html` で終わるすべての window のクライアント | `kid`（どのカーネルでもよければ `null`）。SW にそのカーネルへの通り道が無い。その `kid` のフレームが新しい `sw-port`／`kernel-port` を送って答える |
 | `{ id, k: 'esm', pathname, search }` | SW → カーネル | モジュールを読む |
 | `{ id, status, body, type }` | カーネル → SW | そのモジュール |
-| `{ id, k: 'net', url, initiator }` | SW → カーネル | `url` への方針の判断（`source` は `runtime`） |
-| `{ id, allow }` | カーネル → SW | 答え |
+| `{ id, k: 'net', url, initiator, token }` | SW → カーネル | `url` への方針の判断（`source` は `runtime`）。`initiator` と `token` は `x-ov-by` と `x-ov-k` のヘッダーから |
+| `{ id, allow, timeout }` | カーネル → SW | 答え。`timeout` は許可の問い合わせに答えが無かったとき |
 
 Service Worker は通り道を最大 15 秒待ちます。カーネルの答えには時間切れがありません。
 
