@@ -166,8 +166,8 @@ chmod +x hello
 
 ## Starting node processes
 
-1. The kernel takes a worker for the runtime selected by `/etc/openvessel/node` (`port` → the ported
-   runtime `node-process.js`, anything else or missing → the legacy runtime `process.js`; read when the
+1. The kernel takes a worker for the runtime selected by `/etc/openvessel/node` (`legacy` → the legacy
+   runtime `process.js`, anything else or missing → the ported runtime `node-process.js`, the default; read when the
    program starts and recorded in the process, whose worker threads get the same runtime). Two idle
    workers per runtime are kept loaded ([warm worker pool](kernel.md#warm-worker-pool)).
 2. It creates a 4 MiB `SharedArrayBuffer` channel for the thread's system calls.

@@ -374,7 +374,7 @@ has an entry for the package's real name (after `npm:` aliases) and the version 
 
 - the manifest is `pkg` with `name` and `version` set to the requested package's;
 - the tarball is `<runtime base>/compat/<file>`, fetched with a plain `fetch` from the runtime origin
-  (not through the network gate), checked against `integrity`, and cached like registry tarballs;
+  (without the network policy check), checked against `integrity`, and cached like registry tarballs;
 - the unpacked `package.json` gets the requested `name` and `version` and
   `"_openvesselSource": "<compat package name>@<version>"`, with the compat package's own version (the
   requested one if its `pkg` has none);

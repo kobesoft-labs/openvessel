@@ -128,7 +128,7 @@ Service Worker がその iframe を制御するのに必要です。
 
 | 待ち受け | 作るもの | 届け方 | `server-ready`・`ports()` に出るか |
 |---|---|---|---|
-| `raw` | 移植ランタイム: すべての TCP サーバー（`net.Server`・`http.Server` など） | `TcpBridge`: 要求ごとに socketpair の新しい接続を作り、HTTP/1.1 のバイト列で | 出る |
+| `raw` | 移植版ランタイム: すべての TCP サーバー（`net.Server`・`http.Server` など） | `TcpBridge`: 要求ごとに socketpair の新しい接続を作り、HTTP/1.1 のバイト列で | 出る |
 | `http`（記録のホストは待ち受けのアドレスか空） | 旧ランタイムの `http.Server` | プロセスへの `http-req`／`http-res` のメッセージ（[通信の形式](protocol.ja.md#カーネルとプロセスのメッセージ)） | 出る |
 | `tcp-only` | 旧ランタイムの `net.Server` | 届かない: `connect ECONNREFUSED 127.0.0.1:<port>` | 出ない |
 | 無い、またはプロセスが動いていない | — | `connect ECONNREFUSED 127.0.0.1:<port>` | — |
@@ -138,7 +138,7 @@ Service Worker がその iframe を制御するのに必要です。
 プロセスのあいだで共有した待ち受けのソケット（`cluster` のように IPC で渡したもの）は、接続を順番に（ラウンドロビンで）
 受け取ります。
 
-#### 移植ランタイム: ソケットの上の HTTP/1.1（`src/kernel/tcp.ts`）
+#### 移植版ランタイム: ソケットの上の HTTP/1.1（`src/kernel/tcp.ts`）
 
 待ち受けているプロセスに新しい接続（`tcp-accept`）が届きます。相手のアドレスは `127.0.0.1`、相手のポートは 40000 から
 60000 まで数え上げて一周します。カーネルが要求の頭を書きます。
@@ -170,7 +170,7 @@ Service Worker がその iframe を制御するのに必要です。
 | HTML への移動 | 要求が移動で、`content-type` に `text/html` を含み、本文があるときは、本文全体を文字列として（UTF-8 で）読み、スクリプトを差し込み、ひとまとめで返す |
 
 ページが本文を取り消すと（たとえば iframe がほかへ移動すると）、Service Worker は `abort` を送ります。カーネルは接続を
-閉じる（移植ランタイム）か、`http-abort` を送ります（旧ランタイム）。
+閉じる（移植版ランタイム）か、`http-abort` を送ります（旧ランタイム）。
 
 ブラウザのメモリのほかに、要求と応答の大きさの上限はありません。HTML への移動と要求の本文を除き、応答は溜めません。
 
@@ -187,7 +187,7 @@ Service Worker がその iframe を制御するのに必要です。
 |---|---|
 | ポートで誰も待ち受けていない、本文の無い要求 | 200 ms ごとに最大 15 回（約 3 秒）やり直してから、エラーのページ。Vite のような開発サーバーは、ポートを確かめるために一瞬だけ待ち受け、少しあとで本当に待ち受けるため |
 | 誰も待ち受けていない、本文のある要求 | すぐにエラーのページ |
-| 応答の頭より前のエラー（移植ランタイムの `socket hang up`、旧ランタイムの `server process exited`） | すぐにエラーのページ |
+| 応答の頭より前のエラー（移植版ランタイムの `socket hang up`、旧ランタイムの `server process exited`） | すぐにエラーのページ |
 | 頭のあとのエラー | 応答の本文のストリームが失敗する |
 | Service Worker にカーネルへの通り道が無く、15 秒のうちに得られない | 要求はネットワークのエラーで失敗する（`preview is not connected to OpenVessel`） |
 
@@ -214,10 +214,10 @@ Service Worker は WebSocket を横取りできません。そこで `inject.js`
 2. Service Worker はポートを選び（`vport`、無ければページのポート、無ければ既定のポート）、カーネルに開くよう頼む
    （`ws-open`）。ヘッダーは `sec-websocket-protocol`（求めたプロトコルを `, ` でつないだもの）・`host: localhost:<port>`・
    `origin`（プレビューのオリジン）で、空のものは省く。
-3. 移植ランタイム: カーネルは `Connection: Upgrade`・`Upgrade: websocket`・`Sec-WebSocket-Version: 13` と乱数の
+3. 移植版ランタイム: カーネルは `Connection: Upgrade`・`Upgrade: websocket`・`Sec-WebSocket-Version: 13` と乱数の
    `Sec-WebSocket-Key` を付けた HTTP/1.1 の upgrade の要求を送る。`101` の応答で、サーバーが選んだ
    `Sec-WebSocket-Protocol` のソケットが開く。旧ランタイム: `upgrade: true` の `http-req` を送り、`ws-open` で答えが来る。
-4. フレームはメッセージで運ぶ。テキストは文字列、バイナリは `Uint8Array`。移植ランタイムでは、カーネルは自分が送る
+4. フレームはメッセージで運ぶ。テキストは文字列、バイナリは `Uint8Array`。移植版ランタイムでは、カーネルは自分が送る
    フレームをマスクし、ping には pong で答え、close のフレームから閉じるコードを読む（無ければ `1005`）。
 
 なので、HMR のソケットを別のポートで待ち受ける開発サーバー（`ws://localhost:24678/`）にはそのポートで届き、
@@ -333,4 +333,4 @@ HTTP の要求と WebSocket の接続、それに外の URL が許されるか�
 | `src/kernel/net.ts` | `NetRouter`: ポート → プロセス、旧ランタイムのメッセージの橋渡し |
 | `src/kernel/tcp.ts` | `TcpBridge`: HTTP のメッセージ ⇄ HTTP/1.1 のバイト列、WebSocket のフレーム |
 | `src/host/index.ts` | `previewUrl`・`createPreview`・中継の準備 |
-| `test/e2e/preview-port.mjs` | エンドツーエンドのテスト: 移植ランタイムのサーバーにプレビューから届く |
+| `test/e2e/preview-port.mjs` | エンドツーエンドのテスト: 移植版ランタイムのサーバーにプレビューから届く |

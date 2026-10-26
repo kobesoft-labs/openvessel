@@ -23,7 +23,7 @@ contains two different scripts for that Worker:
 | ES modules | `module_wrap` binding, served at `/__ov/mw/<pid>/<id>.mjs` | the kernel's ESM service at `/__ov/esm/…` and `/__ov/builtin/…` |
 | `--loader` | Node's hooks machinery | ignored with a warning |
 | `node:http2` | loads; servers listen, but a session fails with `ERR_NOT_IMPLEMENTED` (`Http2Session`, see [Not implemented](#not-implemented)) | `createServer()`, `createSecureServer()` and `connect()` throw `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` (`HTTP/2 is not supported in OpenVessel`) |
-| Default | no | **yes** |
+| Default | **yes** | no (selected with `legacy`) |
 
 All numbers on the [Compatibility](../compatibility.md) page (Node's test suite and the Astro corpus) were
 measured with the ported runtime. The rest of this page describes the ported runtime unless it says
@@ -31,23 +31,27 @@ otherwise.
 
 ### Selecting the runtime
 
-The kernel picks the script each time it creates a Worker (`processScript()` in `src/kernel/index.ts`):
-if the VFS file `/etc/openvessel/node` exists and its contents, trimmed, are exactly `port`, it uses
-`node-process.js`; in every other case (no file, unreadable, any other text) it uses `process.js`.
-Because the file is read per Worker, the choice applies to processes and threads started after the file is
-written; running processes are not affected.
+The kernel picks the script each time a node program starts, a new process or an `execve` (`processScript()` in
+`src/kernel/index.ts`):
+if the VFS file `/etc/openvessel/node` exists and its contents, trimmed, are exactly `legacy`, it uses
+`process.js`; in every other case (no file, unreadable, `port`, any other text) it uses `node-process.js`.
+`port` is still accepted for compatibility with setups that selected the ported runtime explicitly before it
+became the default. The choice is recorded in the process: it applies to programs started after the file is
+written, running processes are not affected, and a process's `worker_threads` threads always use the same
+runtime as its main thread.
 
-From the shell:
+To switch to the legacy runtime from the shell:
 
 ```sh
-mkdir -p /etc/openvessel && echo port > /etc/openvessel/node
-node -p 'process.version'      # now runs on the ported runtime
+mkdir -p /etc/openvessel && echo legacy > /etc/openvessel/node
+node -p 'process.version'      # now runs on the legacy runtime
+rm /etc/openvessel/node        # back to the ported runtime for the next process
 ```
 
-From the host page (as the demo does):
+From the host page:
 
 ```ts
-vessel.mount({ node: 'port' }, { path: '/etc/openvessel' });
+vessel.mount({ node: 'legacy' }, { path: '/etc/openvessel' });
 ```
 
 The kernel keeps two pre-created Workers per script URL (`WARM = 2`) waiting for their `init` message, and
@@ -686,7 +690,8 @@ and the thread talk over a `MessageChannel` on which Node's lib speaks its own p
 - `worker.getHeapStatistics()` reports numbers derived from `performance.memory`; `worker.cpuUsage()`
   reports wall time since the thread started; `startCpuProfile()`/`stopCpuProfile()` return an empty
   profile in V8's format; `getHeapSnapshot()` is unavailable.
-- A thread uses whichever runtime `/etc/openvessel/node` selects when it is created.
+- A thread runs on the same runtime as its process's main thread, even if `/etc/openvessel/node` changed
+  after the process started.
 
 ## child_process
 

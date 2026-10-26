@@ -1,4 +1,4 @@
-# Node.js の層
+# Node.js ランタイム
 
 [English](nodejs-runtime.md)
 
@@ -19,26 +19,28 @@
 | ES モジュール | `module_wrap` バインディング。`/__ov/mw/<pid>/<id>.mjs` で配る | カーネルの ESM の配信（`/__ov/esm/…`・`/__ov/builtin/…`） |
 | `--loader` | Node のフックの仕組み | 警告を出して無視 |
 | `node:http2` | 読み込め、サーバーは待ち受けるが、セッションは `ERR_NOT_IMPLEMENTED`（`Http2Session`。[実装していないもの](#実装していないもの) を参照）で失敗する | `createServer()`・`createSecureServer()`・`connect()` が `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`（`HTTP/2 is not supported in OpenVessel`）を投げる |
-| 既定 | いいえ | **はい** |
+| 既定 | **はい** | いいえ（`legacy` で選ぶ） |
 
 [互換性](../compatibility.ja.md) のページの数字（Node の試験とAstro のコーパス）は、どれも移植版ランタイムで計ったものです。このページは、断りのない限り移植版ランタイムについて書いています。
 
 ### ランタイムの選び方
 
-カーネルは Worker を作るたびにスクリプトを選びます（`src/kernel/index.ts` の `processScript()`）。VFS の `/etc/openvessel/node` があり、中身の前後の空白を除いたものがちょうど `port` なら `node-process.js` を、それ以外（ファイルが無い・読めない・ほかの文字）なら `process.js` を使います。
-ファイルは Worker ごとに読むので、書いたあとに起動したプロセスとスレッドに効きます。動いているプロセスは変わりません。
+カーネルは node のプログラムが起動するたび（新しいプロセスと `execve`）にスクリプトを選びます（`src/kernel/index.ts` の `processScript()`）。VFS の `/etc/openvessel/node` があり、中身の前後の空白を除いたものがちょうど `legacy` なら `process.js` を、それ以外（ファイルが無い・読めない・`port`・ほかの文字）なら `node-process.js` を使います。
+`port` は、移植版ランタイムが既定になる前に明示的に選んでいた設定のために、いまも受け付けます（意味は既定と同じです）。
+選んだ結果はプロセスに記録されます。ファイルを書き込んだあとに起動したプログラムに効き、動いているプロセスは変わりません。プロセスの `worker_threads` のスレッドは、いつもメインスレッドと同じランタイムで動きます。
 
-シェルから:
+旧ランタイムに切り替えるには、シェルから次のようにします。
 
 ```sh
-mkdir -p /etc/openvessel && echo port > /etc/openvessel/node
-node -p 'process.version'      # ここから移植版ランタイムで動く
+mkdir -p /etc/openvessel && echo legacy > /etc/openvessel/node
+node -p 'process.version'      # ここから旧ランタイムで動く
+rm /etc/openvessel/node        # 次のプロセスから移植版ランタイムに戻る
 ```
 
-ホストのページから（デモと同じ）:
+ホストのページからは次のとおりです。
 
 ```ts
-vessel.mount({ node: 'port' }, { path: '/etc/openvessel' });
+vessel.mount({ node: 'legacy' }, { path: '/etc/openvessel' });
 ```
 
 カーネルはスクリプトの URL ごとに、`init` を待つ Worker を 2 つ先に作っておき（`WARM = 2`）、1 つ使うたびに補います。そのため、スクリプトの読み込みとコンパイルの大部分は、プロセスが要る前に済んでいます。
@@ -466,7 +468,7 @@ worker のスレッドは、同じプロセスの別の Web Worker で、カー�
 - `receiveMessageOnPort()` と同期の取り出しは、共有メモリの輪で動きます。`MessageChannel` のポートに来るメッセージは、`v8.serialize` で直列化して、向きごとの輪にも書きます。輪は 16 KiB から始まり 1 MiB まで伸びます（伸びる `SharedArrayBuffer` が無いときは 1 MiB 固定）。この形で直列化できないメッセージは、ふつうの道でだけ届きます。
 - `trackUnmanagedFds`（既定）のとき、スレッドが `fs.open` で開いた fd は、スレッドの終了時に閉じます。
 - `worker.getHeapStatistics()` は `performance.memory` から作った数を返します。`worker.cpuUsage()` はスレッドが始まってからの経過時間です。`startCpuProfile()`／`stopCpuProfile()` は V8 の形の空のプロファイルを返します。`getHeapSnapshot()` は使えません。
-- スレッドは、作られた時点で `/etc/openvessel/node` が選ぶランタイムで動きます。
+- スレッドは、プロセスのメインスレッドと同じランタイムで動きます。プロセスの起動後に `/etc/openvessel/node` が変わっても同じです。
 
 ## child_process
 

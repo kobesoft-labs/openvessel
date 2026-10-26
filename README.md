@@ -41,8 +41,8 @@ in-browser runtimes. It is open source under the [Apache License 2.0](LICENSE).
   bindings…). Where a package has no WebAssembly build, OpenVessel provides a compat package —
   usually the same project compiled to `wasm32-wasi` (Pagefind, for example).
 - **Nothing is reachable from outside.** Servers listen on virtual ports inside the kernel; the
-  preview iframe talks to them through a service worker. Outgoing traffic goes through one policy
-  gate that the embedding page controls.
+  preview iframe talks to them through a service worker. Outgoing traffic is checked against one
+  network policy that the embedding page controls.
 - **Isolated by origin.** The page, the runtime and the preview are three different origins, so code
   in a previewed site can't reach the runtime or the host page ([docs/SECURITY.md](docs/SECURITY.md)).
 
@@ -105,7 +105,7 @@ headers each of the three origins needs.
  ───────────────────────          ──────────────────────────────────            ──────────────
  OpenVessel API  ──postMessage──▶ kernel (Web Worker)                            iframe + service worker
                                    VFS · processes · pipes · TTY · sh · npm      ▲  HTTP / WebSocket
-                                   virtual ports · network gate                  │
+                                   virtual ports · network policy                │
                                      │ sync syscalls (SharedArrayBuffer+Atomics) │
                                    node processes (one Web Worker each) ─────────┘
                                    Node.js lib/ + TypeScript internalBinding()
@@ -115,7 +115,7 @@ headers each of the three origins needs.
 |---|---|
 | Kernel: in-memory file system, processes, pipes, TTY, sockets, `sh`, coreutils, npm client, virtual ports, outbound HTTP | `src/kernel/` |
 | Node.js: bootstrap, event loop, the `internalBinding()` modules | `src/nodejs/` |
-| Runtime origin: service worker (ES module delivery, network gate) | `src/runtime/` |
+| Runtime origin: service worker (ES module delivery, network policy checks) | `src/runtime/` |
 | Preview origin: service worker bridging HTTP/WebSocket to virtual ports | `src/preview/` |
 | Host API | `src/host/` |
 | Compat packages for native-only npm packages | `compat/`, `scripts/build-compat.mjs` |
@@ -130,7 +130,7 @@ node test/e2e/harness.mjs 'echo hi; node -v'               # one command in head
 node test/e2e/project.mjs <dir> 'npm install && npm run build'
 node test/node-compat/run.mjs --port [module…]             # Node's own tests in OpenVessel
 node test/node-compat/run.mjs --port --report              # pass / target per module
-node corpus/run.mjs --port [filter]                        # build the Astro site corpus
+node corpus/run.mjs [filter]                               # build the Astro site corpus
 ```
 
 The end-to-end tests drive the system Chrome through `playwright-core` (`OV_BROWSER=firefox` uses

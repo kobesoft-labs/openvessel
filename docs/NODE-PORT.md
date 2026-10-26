@@ -2,7 +2,7 @@
 
 2026-10-23 決定。手書きの組み込みモジュール（旧 `src/node/`）をやめ、**Node の `lib/` をそのまま動かす**（決めたときは v22.20.0、いまは v22.23.4。版は [NODE-VERSION.md](NODE-VERSION.md)）。
 本来 C++ で書かれている部分（`internalBinding`）を、OpenVessel のカーネル（OS の層）の上に TypeScript で書く。
-実装は `src/nodejs/`（移植したランタイム）。旧 `src/node/`（旧ランタイム）はまだ残っていて、既定はこちら。VFS の `/etc/openvessel/node` に `port` と書くと移植したランタイムで動く。
+実装は `src/nodejs/`（移植版ランタイム）で、これが既定のランタイム。旧 `src/node/`（旧ランタイム）もまだ残っていて、VFS の `/etc/openvessel/node` に `legacy` と書くと旧ランタイムで動く（`port` は既定と同じ意味で、いまも受け付ける）。
 
 ```
 Node の lib/*.js（変更しない）         ← vendor/node/natives.json（版を固定して取ってくる）

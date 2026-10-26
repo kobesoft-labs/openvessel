@@ -10,7 +10,7 @@
 
 このページのシェルとプログラムは*カーネルのプログラム*です。カーネルの worker の中で動く TypeScript の関数で、
 別の Web Worker ではありません。自分の worker で動くのは `node`（と、それが起動するもの）だけです
-（[プロセス](processes.ja.md) と [Node.js の層](nodejs-runtime.ja.md) を参照）。カーネルのプログラムも
+（[プロセス](processes.ja.md) と [Node.js ランタイム](nodejs-runtime.ja.md) を参照）。カーネルのプログラムも
 本物のプロセスです。pid・親・ファイル記述子・環境変数・終了ステータスを持ち、`ps` に表示されます。
 
 | 項目 | 値 |
@@ -502,8 +502,8 @@ operator`、ステータス 2）。それ以外のステータスは 0 か 1 で
 | `#!` なしで、名前が `.js`・`.cjs`・`.mjs` で終わる | Node.js にファイルを渡したもの |
 | `#!` なしで、それ以外 | `sh file`（POSIX の `ENOEXEC` の扱いと同じ） |
 
-どちらの Node.js ランタイム（移植したランタイムか、旧来のランタイムか）を起動するかは、プロセスを起動するたびに
-`/etc/openvessel/node` で決まります。[Node.js の層](nodejs-runtime.ja.md) を参照してください。
+Node.js は移植版ランタイムで起動します。プロセスの起動時に `/etc/openvessel/node` の中身が `legacy` のときだけ、
+旧ランタイムを使います。[Node.js ランタイム](nodejs-runtime.ja.md) を参照してください。
 
 ### 終了ステータス
 
@@ -850,7 +850,7 @@ shift $((OPTIND - 1))
 | `xargs` | `-n N`、`-L N`、`-I STR`、`-i`、`-0`、`-d DELIM`、`-a FILE`、`-r`、`-t`、`-P N` | [xargs](#xargs) を参照。 |
 | `yes` | — | 引数を空白でつないだもの（既定は `y`）を、止められるかパイプが閉じるまで繰り返します。 |
 | `curl`、`wget` | [curl と wget](#curl-と-wget) を参照 | `/usr/bin` にあります。 |
-| `node`、`nodejs` | — | `/usr/bin` にあります。[Node.js の層](nodejs-runtime.ja.md) を参照。 |
+| `node`、`nodejs` | — | `/usr/bin` にあります。[Node.js ランタイム](nodejs-runtime.ja.md) を参照。 |
 | `npm`、`npx`、`pnpm`、`pnpx`、`yarn`、`bun`、`bunx`、`corepack` | — | `/usr/bin` にあります。[パッケージマネージャ](package-managers.ja.md) を参照。 |
 
 `awk`・`od`・`xxd`・`tar`・`gzip`・`unzip`・`git`・`python`・`make`・エディタはありません。動かすと

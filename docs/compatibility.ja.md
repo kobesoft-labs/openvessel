@@ -70,7 +70,7 @@ OpenVessel は Node.js 自身の JavaScript（`lib/`）を動かし、ネイテ�
 
 ## Firefox
 
-移植版ランタイム（`/etc/openvessel/node` に `port`）は、現行の Firefox で動きます。起動、シェル、`node`
+移植版ランタイム（既定のランタイム）は、現行の Firefox で動きます。起動、シェル、`node`
 （CommonJS・ES モジュール・TypeScript・`worker_threads`・`child_process`・zlib・crypto）、`npm install`、
 `npx`、プレビューでの HTTP サーバー、Astro のビルドと、WebSocket でホットリロードする `astro dev` を
 確認しています。Node 自身のテストは、Chrome で通る 1237 本のうち 1200 本が通ります（2026-10-26、
@@ -89,7 +89,7 @@ Playwright の Firefox 157）。残りが通らない理由は次のとおりで
 - 一部の crypto のテスト（Diffie-Hellman の鍵生成、暗号の多数回の繰り返し）が 30 秒の制限を超えます。
   また、プロキシや変更できないプロパティについて V8 とまったく同じ動きを期待する `vm` のテストがあります。
 
-旧ランタイムも起動して簡単なプログラムは動きますが、スタックトレースは Firefox の形式のままです。
+旧ランタイム（`/etc/openvessel/node` に `legacy`）も起動して簡単なプログラムは動きますが、スタックトレースは Firefox の形式のままです。
 E2E テストは `OV_BROWSER=firefox` で Firefox でも実行できます（README を参照）。
 
 ## ブラウザでは動かせないものと、その理由
@@ -103,10 +103,10 @@ E2E テストは `OV_BROWSER=firefox` で Firefox でも実行できます（REA
 | インターネットへの、HTTP 以外のプロトコルの生の TCP（DB・SMTP・SSH・Redis など） | Web ページはソケットを開けない | 外への `net.connect` はカーネルが受け、HTTP/1.1 を `fetch` で話す。HTTP でなければ切る |
 | クロスオリジンの要求を許さないサーバー | 外への要求はブラウザの `fetch` で行い、CORS がかかる | `fetch failed`（`ECONNREFUSED`）になり、CORS と分かる文言を出す。Google Fonts の一覧や多くの RSS がこれ |
 | UDP（`dgram`）・生の DNS の問い合わせ | ブラウザに UDP は無い | ホスト名は仮の番地に解決し、HTTP の橋渡しが名前に戻す |
-| `net`/`tls` 経由の外への WebSocket | HTTP の橋渡しは要求と応答だけ | `501 Not Implemented` を返す（グローバルの `WebSocket` は使える） |
+| `net`/`tls` 経由の外への WebSocket | HTTP の橋渡しは要求と応答だけ | `501 Not Implemented` を返す。グローバルの `WebSocket` はブラウザのものだが、ランタイムの Content-Security-Policy（`connect-src 'self' data: blob:`）により接続先はランタイムのオリジン自身に限られ、外のホストにはつながらない（[詳細](reference/network-policy.ja.md#websocket)） |
 | 独自の CA・クライアント証明書・TLS の細部 | TLS とその確認はブラウザの `fetch` が行い、プロセスには平文が届く | ブラウザが証明書を受け入れれば `tls.connect` は `authorized: true` でつながる。`getPeerCertificate()` は本物の証明書ではなく要約を返す |
 | 実際のポートでの待ち受け | タブの外からはつなげない | サーバーは仮想ポートで待ち受け、プレビューの iframe は Service Worker 経由でつながる |
-| HTTP/2（`node:http2`） | ブラウザの制約ではなく未実装（nghttp2 の上の `node_http2.cc` の移植は、それだけで大きな仕事） | `require('node:http2')` は読み込める。移植版ランタイムでは `http2.createServer()` はサーバーを返し、セッションを作る（接続を受ける、`http2.connect()`）と `ERR_NOT_IMPLEMENTED`。旧ランタイムでは `createServer`・`createSecureServer`・`connect` が「HTTP/2 is not supported in OpenVessel」（`ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`）を投げる。HTTP/1.1 のサーバーとクライアントは動く |
+| HTTP/2（`node:http2`） | ブラウザの制約ではなく未実装（nghttp2 の上の `node_http2.cc` の移植は、それだけで大きな仕事） | 移植版ランタイムでは `node:http2` は読み込め、サーバーも待ち受けるが、セッション（接続を受ける、`http2.connect()`）はすべて `ERR_NOT_IMPLEMENTED`（`Http2Session`。[詳細](reference/nodejs-runtime.ja.md#実装していないもの)）で失敗する。旧ランタイムでは `createServer()`・`createSecureServer()`・`connect()` が `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`（`HTTP/2 is not supported in OpenVessel`）を投げる。HTTP/1.1 のサーバーとクライアントは動く |
 
 ### ネイティブのコード
 
@@ -149,7 +149,7 @@ OpenVessel が作る互換パッケージ（`compat/`・`scripts/build-compat.mj
 ## Astro のサイト集
 
 `corpus/` には、実際の Astro のサイト 147 本（Astro 5・6・7 の公式の例と、よく使われるテーマ）があります。
-`node corpus/run.mjs --port` で、それぞれ install と build を行います。
+`node corpus/run.mjs` で、それぞれ install と build を行います。
 
 ビルドできないサイトと、その理由:
 

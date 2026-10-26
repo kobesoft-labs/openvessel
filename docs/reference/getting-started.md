@@ -14,7 +14,7 @@ call used here is specified in [Host API](host-api.md); serving in production is
 |---|---|
 | A Chromium-based browser, or Firefox | The browsers OpenVessel is tested in ([README](../../README.md)). In Firefox, use the ported Node.js runtime; a few things differ there ([Compatibility](../compatibility.md#firefox)). |
 | Cross-origin isolation on the host page (`Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp` or `credentialless`) | The kernel and the processes talk through `SharedArrayBuffer` and `Atomics.wait`, which a browser only enables in a cross-origin isolated page. `OpenVessel.boot()` checks `crossOriginIsolated` first and rejects without it. |
-| Three origins: your page, the runtime, the preview | The runtime (kernel, processes, network gate) and the preview (the site being developed) must not share an origin with your page or with each other ([how it works](../how-it-works.md#three-origins)). |
+| Three origins: your page, the runtime, the preview | The runtime (kernel, processes, network policy) and the preview (the site being developed) must not share an origin with your page or with each other ([how it works](../how-it-works.md#three-origins)). |
 
 Locally the three origins can be three ports on `localhost`, which is what `npm run serve` in the
 OpenVessel repository does.
@@ -65,10 +65,10 @@ Copy the runtime and preview directories as they are: the files find each other 
 |---|---|
 | Host page | `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, `Cross-Origin-Resource-Policy: same-origin` |
 | Runtime | `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, `Cross-Origin-Resource-Policy: cross-origin`, and on every file except `sw.js`: `Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob: data:; connect-src 'self' data: blob:; worker-src 'self' blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors <host origin>` |
-| Preview | `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, `Cross-Origin-Resource-Policy: cross-origin`, `Service-Worker-Allowed: /` |
+| Preview | `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp` (`credentialless` on the service worker `__ov-sw.js`), `Cross-Origin-Resource-Policy: cross-origin` |
 
-`connect-src 'self'` on the runtime is what keeps code in a process from reaching the network except
-through the gate; `sw.js` must not get it, because the service worker is the gate. Static hosts that
+`connect-src 'self'` on the runtime is what keeps code in a process from reaching the network without
+the policy check; `sw.js` must not get it, because the service worker is where that check happens. Static hosts that
 can't set headers, origin restrictions and everything else about serving are in
 [Deployment](deployment.md).
 
@@ -131,15 +131,15 @@ The build contains two Node.js runtimes. The kernel picks one each time it start
 
 | Runtime | Script | Used when |
 |---|---|---|
-| The ported runtime | `dist/runtime/node-process.js` (`src/nodejs/`) — Node.js v22.23.4's own `lib/` on a TypeScript `internalBinding()` | The VFS file `/etc/openvessel/node` contains `port` (surrounding whitespace ignored). |
-| The legacy runtime | `dist/runtime/process.js` (`src/node/worker.ts`) — an older hand-written Node-compatible layer | Otherwise (the default). |
+| The ported runtime | `dist/runtime/node-process.js` (`src/nodejs/`) — Node.js v22.23.4's own `lib/` on a TypeScript `internalBinding()` | By default. |
+| The legacy runtime | `dist/runtime/process.js` (`src/node/worker.ts`) — an older hand-written Node-compatible layer | The VFS file `/etc/openvessel/node` contains `legacy` (surrounding whitespace ignored). |
 
-All compatibility numbers in [Compatibility](../compatibility.md) are measured on the ported runtime.
-Select it right after booting:
+All compatibility numbers in [Compatibility](../compatibility.md) are measured on the ported runtime, so
+there is nothing to set up. To run processes on the legacy runtime instead, write the file after booting:
 
 ```ts
-await vessel.mount({ node: 'port' }, { path: '/etc/openvessel' });
-// the same thing: await vessel.fs.writeFile('/etc/openvessel/node', 'port');
+await vessel.mount({ node: 'legacy' }, { path: '/etc/openvessel' });
+// the same thing: await vessel.fs.writeFile('/etc/openvessel/node', 'legacy');
 ```
 
 The file is read at every process start, so processes already running keep the runtime they started
@@ -181,7 +181,7 @@ if ((await install.exit) !== 0) throw new Error('npm install failed');
 ```
 
 `npm`, `pnpm`, `yarn` and `bun` are built into the kernel ([Package managers](package-managers.md)).
-Registry requests and tarballs go through the network gate, so the policy must allow the registry —
+Registry requests and tarballs are checked against the network policy, so it must allow the registry —
 the `npm` preset covers `registry.npmjs.org` and the usual mirrors. Packages that ship native binaries
 are installed as their WebAssembly builds ([Native modules](native-modules.md)).
 

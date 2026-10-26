@@ -160,7 +160,7 @@ const png = await sharp({ create: { width: 2, height: 2, channels: 3, background
 `require()` の解決は、`.js`・`.json` の次に `.node` も試します（両方の層）。そのため、ネイティブのファイルだけを
 持つパッケージは、ファイルを見つけたうえで読み込みに失敗します。
 
-| | 移植した層（`src/nodejs/bindings/process.ts`） | 旧来の層（`src/node/module.ts`・`src/node/process.ts`） |
+| | 移植版ランタイム（`src/nodejs/bindings/process.ts`） | 旧ランタイム（`src/node/module.ts`・`src/node/process.ts`） |
 |---|---|---|
 | `require('x.node')` | Node 自身の読み込みが `process.dlopen` を呼び、`ERR_DLOPEN_FAILED` を投げる | `ERR_DLOPEN_FAILED` を投げる: `Native addons are not supported in OpenVessel (tried to load <file>). Use the WebAssembly build of this package.` |
 | `process.dlopen()` | glibc の `dlopen` に似たメッセージ（下）で `ERR_DLOPEN_FAILED` を投げる | 同じ |
@@ -185,7 +185,7 @@ napi-rs の読み込み役はこれらのエラーを受け止めて次の候補
 
 ### API
 
-| | 移植した層 | 旧来の層 |
+| | 移植版ランタイム | 旧ランタイム |
 |---|---|---|
 | モジュール | `internalBinding('wasi')`（`src/nodejs/bindings/wasi.ts`）の上の、Node 自身の `lib/wasi.js` | `src/node/wasi.ts` の `WASI` クラスそのもの |
 | `version` | 必須。`'preview1'` か `'unstable'`。ない → `ERR_INVALID_ARG_TYPE`、ほかの値 → `ERR_INVALID_ARG_VALUE` | 同じ |
@@ -357,8 +357,8 @@ napi-rs のパッケージが生成した読み込み役（`index.js`）は、�
 たどった後）の項目が一覧にあり、版がその `range` に合えば（プレリリースも含む）:
 
 - manifest は `pkg` に、頼まれたパッケージの `name` と `version` を入れたものです。
-- tarball は `<ランタイムの基点>/compat/<file>` です。ランタイムのオリジンからふつうの `fetch` で取り（関所は
-  通りません）、`integrity` で確かめ、レジストリの tarball と同じようにキャッシュします。
+- tarball は `<ランタイムの基点>/compat/<file>` です。ランタイムのオリジンからふつうの `fetch` で取得し（ネットワークポリシーの
+  確認は通りません）、`integrity` で確かめ、レジストリの tarball と同じようにキャッシュします。
 - 展開した `package.json` には、頼まれた `name` と `version`、`"_openvesselSource": "<互換パッケージの名前>@<version>"`
   が入ります。この版は互換パッケージ自身の版です（`pkg` に版がなければ頼まれた版）。
 - [WebAssembly 版への置き換え](#webassembly-版への置き換え)はしません。

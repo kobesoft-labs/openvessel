@@ -275,7 +275,7 @@ a module that kernel served — else to the kernel that connected last.
 | `/__ov/builtin/<name>[.mjs]` | any | an ES module facade over a builtin (`node:fs` etc.). Used by the legacy runtime |
 | `/__ov/mw/<pid>/<id>.mjs` | any | a module source the ported runtime registered with the `esmRegister` syscall |
 | `/__ov/esm-error?…` | any | a module that throws the error of an import the kernel couldn't resolve (answered by the kernel) |
-| `/__ov/net?url=<encoded URL>` | any | the network gate ([below](#__ovnet)) |
+| `/__ov/net?url=<encoded URL>` | any | the policy-checked outbound proxy ([below](#__ovnet)) |
 | `/__ov/ping` | any | `pong` (`text/plain`) |
 | `/__ov/k/<kid>/<file>` (not an endpoint) | `GET`, `HEAD` | `<file>` of the runtime directory, as a new response with the requested URL and the isolation headers (so `kernel.js`, `process.js`, chunks and `compat/` work under the prefix) |
 | anything else | `GET` | fetched from the server, with the isolation headers added if missing |

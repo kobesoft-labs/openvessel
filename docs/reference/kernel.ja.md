@@ -58,21 +58,22 @@ URL（末尾の `/` なし）です。ランタイムの Service Worker は、�
 
 | ランタイム | スクリプト | ソース | 使われるとき |
 |---|---|---|---|
-| 旧ランタイム | `dist/runtime/process.js` | `src/node/`（手書きの Node 互換の層） | 既定 |
-| 移植ランタイム | `dist/runtime/node-process.js` | `src/nodejs/`（Node 自身の `lib/` と、TypeScript で書いた `internalBinding()`） | VFS のファイル `/etc/openvessel/node` の中身が `port` のとき |
+| 移植版ランタイム | `dist/runtime/node-process.js` | `src/nodejs/`（Node 自身の `lib/` と、TypeScript で書いた `internalBinding()`） | 既定 |
+| 旧ランタイム | `dist/runtime/process.js` | `src/node/`（手書きの Node 互換の層） | VFS のファイル `/etc/openvessel/node` の中身が `legacy` のとき |
 
 カーネルは node のプログラムが起動するたびに（新しいプロセスと `execve`）`/etc/openvessel/node` を読み、前後の空白を
 除いて比べ、選んだランタイムをプロセスに記録します。プロセスのワーカースレッドは、実行中にファイルが変わっても、
-いつもメインスレッドと同じランタイムになります。ほかの中身のときや、ファイルが無いときは旧ランタイムです。公開している互換性の数字
-（[互換性](../compatibility.ja.md)）は、移植ランタイムのものです。
+いつもメインスレッドと同じランタイムになります。ほかの中身のとき（移植版ランタイムが既定になる前にそれを選ぶために使っていた
+`port` も含む）や、ファイルが無いときは移植版ランタイムです。公開している互換性の数字（[互換性](../compatibility.ja.md)）は、
+移植版ランタイムのものです。
 
 ```ts
-// これから起動する node のプロセスをすべて移植ランタイムにする
-await vessel.mount({ node: 'port' }, { path: '/etc/openvessel' });
+// これから起動する node のプロセスをすべて旧ランタイムにする
+await vessel.mount({ node: 'legacy' }, { path: '/etc/openvessel' });
 ```
 
 ```sh
-mkdir -p /etc/openvessel && echo port > /etc/openvessel/node
+mkdir -p /etc/openvessel && echo legacy > /etc/openvessel/node
 ```
 
 ### 同期のシステムコール
@@ -235,7 +236,7 @@ node のスレッドは、`SharedArrayBuffer` の通信路を通して、カー�
 
 ## エラーと errno の値
 
-エラーは、コードの文字列とメッセージで通信路を通ります。移植ランタイムはこれを libuv のエラー（`UVException`、負の
+エラーは、コードの文字列とメッセージで通信路を通ります。移植版ランタイムはこれを libuv のエラー（`UVException`、負の
 `UV_*` の番号）に、旧ランタイムは `errno` = Linux の番号の負の値の Node 風のエラーにします。`E` で始まらないコード
 （`ERR_FS_EISDIR`）は、その `code` を持つふつうの `Error` のままです。カーネルの中でそれ以外の例外が起きたときは、
 その例外の `code`、無ければ `EIO` を返します。
@@ -309,7 +310,7 @@ node のスレッドは、`SharedArrayBuffer` の通信路を通して、カー�
 
 | 種類 | 使う側 | 接続 | ホストに知らせるか |
 |---|---|---|---|
-| `raw` | 移植ランタイム（`net`・`http` など） | socketpair の上のバイト列 | 知らせる（`server-ready`・`ports()`） |
+| `raw` | 移植版ランタイム（`net`・`http` など） | socketpair の上のバイト列 | 知らせる（`server-ready`・`ports()`） |
 | `http` | 旧ランタイムの `http.Server` | HTTP のメッセージ（`http-req` など） | 知らせる |
 | TCP だけ | 旧ランタイムの `net.Server` | —（プレビューからは `ECONNREFUSED`） | 知らせない |
 
@@ -380,7 +381,7 @@ node のスレッドは、`SharedArrayBuffer` の通信路を通して、カー�
 
 ### ループバックと代わりのアドレス
 
-何がローカルかは、移植ランタイムが決めます（`src/nodejs/bindings/net.ts`）。
+何がローカルかは、移植版ランタイムが決めます（`src/nodejs/bindings/net.ts`）。
 
 - `connect` でループバックとみなすもの: `localhost`・`127.*`・`::1`・`0.0.0.0`・`::`・空・`::ffff:127.0.0.1`。
   これらは仮想ポートへ行き（`tcpConnect`）、それ以外のアドレスは外へ行きます（`tcpConnectOut`）。
@@ -454,7 +455,7 @@ TLS を始めるときに `tcpSetTls` を呼びます。カーネルはその接
 | `/__ov/esm/<絶対パス>[?query]` | そのファイルを ES モジュールにしたもの |
 | `/__ov/builtin/<name>` | 組み込みのモジュール（`node:fs` など）を `globalThis.__ov.builtin(name)` から export し直すモジュール |
 | `/__ov/esm-error?code=…&msg=…&names=…` | 解決できない import の代わり。`names` の名前（`default` も）を 1 回ずつ宣言し、評価されると `code` と `msg` の `Error` を投げる。import する側のモジュールはリンクできる |
-| `/__ov/mw/<pid>/<id>.mjs` | `esmRegister` で登録したソース（移植ランタイムの `ModuleWrap`）。知らないキーには `ERR_INTERNAL_ASSERTION` を投げるモジュール |
+| `/__ov/mw/<pid>/<id>.mjs` | `esmRegister` で登録したソース（移植版ランタイムの `ModuleWrap`）。知らないキーには `ERR_INTERNAL_ASSERTION` を投げるモジュール |
 
 生成するモジュールに書き込む URL は `RUNTIME_BASE` から始まる絶対 URL なので、ランタイムをサブパスで配信しても
 動きます。
@@ -474,7 +475,7 @@ TLS を始めるときに `tcpSetTls` を呼びます。カーネルはその接
 モジュールを作れないときは、そのコードの `Error` を投げるモジュールで答えるので、エラーは import したところで
 表に出ます。作ったモジュールはパスごとに、inode の番号・mtime・大きさをキーにして覚えておきます。4000 個を超えたら
 すべて捨てます。`esmRegister` で登録したソースは、そのプロセスが終わると捨てます。旧ランタイムは ES モジュールを
-`/__ov/esm/` から読み、移植ランタイムは自分でコンパイルするソースを登録して `/__ov/mw/` から読みます。
+`/__ov/esm/` から読み、移植版ランタイムは自分でコンパイルするソースを登録して `/__ov/mw/` から読みます。
 
 ## 組み込みのプログラム
 
@@ -532,14 +533,14 @@ TLS を始めるときに `tcpSetTls` を呼びます。カーネルはその接
 | `/dev/null`・`/dev/zero`・`/dev/random`・`/dev/urandom` | キャラクタデバイス | 0666 |
 | `/dev/fd` | ディレクトリ | 空。`/dev/fd/N` はプロセスごとに答える |
 | `/dev/stdin`・`/dev/stdout`・`/dev/stderr` | シンボリックリンク | `/proc/self/fd/0`・`/1`・`/2` へ |
-| `/proc/cpuinfo` | ファイル | `navigator.hardwareConcurrency`（不明なら 4）の数だけの項目（`processor`、`model name : OpenVessel Virtual CPU`、`cpu MHz : 2400.000`、`cpu cores`）。移植ランタイムの `os.cpus()` と同じ数 |
-| `/proc/meminfo` | ファイル | `MemTotal: 8388608 kB`、`MemFree: 4194304 kB`、`MemAvailable: 4194304 kB`（移植ランタイムの `os.totalmem()` と `os.freemem()`） |
-| `/proc/version` | ファイル | `Linux version 6.8.0-openvessel (user@openvessel) #1 SMP OpenVessel`（移植ランタイムの `os.release()` と `os.version()`） |
+| `/proc/cpuinfo` | ファイル | `navigator.hardwareConcurrency`（不明なら 4）の数だけの項目（`processor`、`model name : OpenVessel Virtual CPU`、`cpu MHz : 2400.000`、`cpu cores`）。移植版ランタイムの `os.cpus()` と同じ数 |
+| `/proc/meminfo` | ファイル | `MemTotal: 8388608 kB`、`MemFree: 4194304 kB`、`MemAvailable: 4194304 kB`（移植版ランタイムの `os.totalmem()` と `os.freemem()`） |
+| `/proc/version` | ファイル | `Linux version 6.8.0-openvessel (user@openvessel) #1 SMP OpenVessel`（移植版ランタイムの `os.release()` と `os.version()`） |
 | `/bin/*`・`/usr/bin/*` | 実行できる小さなファイル | [登録されているプログラム](#登録されているプログラム) を参照 |
 | `/usr/bin/nodejs` | シンボリックリンク | `/usr/bin/node` へ |
 | `/home/user/.shrc` | ファイル | `alias ll='ls -l'`、`alias la='ls -la'` |
 
-通常のファイルは mode 0644 で作ります。`/etc/openvessel/node` は起動時にはありません（旧ランタイムを使います）。
+通常のファイルは mode 0644 で作ります。`/etc/openvessel/node` は起動時にはありません（移植版ランタイムを使います）。
 ホストが置くファイルは、既定で `/home/user/app` に入ります（[ホスト API](host-api.ja.md)）。ホスト名は `openvessel` です。
 
 ## 既定の環境変数

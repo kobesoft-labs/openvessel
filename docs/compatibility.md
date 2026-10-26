@@ -70,7 +70,7 @@ To measure again: `node test/node-compat/run.mjs --port && node test/node-compat
 
 ## Firefox
 
-The ported runtime (`port` in `/etc/openvessel/node`) works in the current Firefox release: booting,
+The ported runtime (the default) works in the current Firefox release: booting,
 the shell, `node` (CommonJS, ES modules, TypeScript, `worker_threads`, `child_process`, zlib, crypto),
 `npm install`, `npx`, an HTTP server in the preview, and Astro builds and `astro dev` with hot reload
 over WebSocket. Node's own tests: 1200 of the 1237 that pass in Chrome (2026-10-26, Playwright's
@@ -89,7 +89,7 @@ Firefox 157). The rest fail for these reasons:
 - A few crypto tests (Diffie-Hellman key generation, many cipher rounds) run past the 30-second
   limit, and some `vm` tests expect V8's exact behaviour for proxies and non-configurable properties.
 
-The legacy runtime boots and runs simple programs, but its stack traces stay in Firefox's format.
+The legacy runtime (`legacy` in `/etc/openvessel/node`) boots and runs simple programs, but its stack traces stay in Firefox's format.
 The end-to-end scripts run in Firefox with `OV_BROWSER=firefox` (see the README).
 
 ## What can't work in a browser, and why
@@ -103,10 +103,10 @@ These are limits of the platform, not missing work. Each has a reason a browser 
 | Raw TCP to the internet for protocols other than HTTP (databases, SMTP, SSH, Redis, …) | A web page can't open sockets. | `net.connect` to an outside host is handled by the kernel, which speaks HTTP/1.1 over `fetch`; anything that isn't HTTP is reset. |
 | Servers that don't allow cross-origin requests | Outbound requests are made with the browser's `fetch`, which enforces CORS. | The request fails with `fetch failed` (`ECONNREFUSED`) and a message that names CORS. Google Fonts metadata and many RSS feeds are in this group. |
 | UDP (`dgram`), raw DNS queries | No UDP in browsers. | Host names resolve to stand-in addresses the HTTP bridge maps back to the name. |
-| WebSocket client connections to outside hosts over `net`/`tls` | The HTTP bridge handles request/response only. | Answered with `501 Not Implemented`. (The browser's `WebSocket` global is available.) |
+| WebSocket client connections to outside hosts over `net`/`tls` | The HTTP bridge handles request/response only. | Answered with `501 Not Implemented`. The `WebSocket` global is the browser's, but the runtime's Content-Security-Policy (`connect-src 'self' data: blob:`) only lets it connect to the runtime origin itself, so it can't reach outside hosts either ([details](reference/network-policy.md#websockets)). |
 | Custom CAs, client certificates, TLS details | TLS is done — and verified — by the browser's `fetch`; the process sees plaintext. | `tls.connect` succeeds with `authorized: true` when the browser accepted the certificate. `getPeerCertificate()` returns a summary, not the real certificate. |
 | Listening on a real port | Nothing outside the tab can connect to it. | Servers listen on virtual ports; the preview iframe reaches them through a service worker. |
-| HTTP/2 (`node:http2`) | Not a browser limit: the binding (`node_http2.cc` over nghttp2) is not implemented yet; it is a large port of its own. | `require('node:http2')` loads. On the ported runtime `http2.createServer()` returns a server, and creating a session (an incoming connection, `http2.connect()`) throws `ERR_NOT_IMPLEMENTED`; on the legacy runtime `createServer`, `createSecureServer` and `connect` throw "HTTP/2 is not supported in OpenVessel" (`ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`). HTTP/1.1 servers and clients work. |
+| HTTP/2 (`node:http2`) | Not a browser limit: the binding (`node_http2.cc` over nghttp2) is not implemented yet; it is a large port of its own. | On the ported runtime `node:http2` loads and servers listen, but every session (an incoming connection, `http2.connect()`) fails with `ERR_NOT_IMPLEMENTED` (`Http2Session`, [details](reference/nodejs-runtime.md#not-implemented)). On the legacy runtime `createServer()`, `createSecureServer()` and `connect()` throw `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` (`HTTP/2 is not supported in OpenVessel`). HTTP/1.1 servers and clients work. |
 
 ### Native code
 
@@ -149,7 +149,7 @@ compiles to WebAssembly, but the Node binding has no WASI build yet).
 ## Astro site corpus
 
 `corpus/` holds 147 real Astro sites (official examples and popular community themes for Astro 5,
-6 and 7). `node corpus/run.mjs --port` runs `install` and `build` for each.
+6 and 7). `node corpus/run.mjs` runs `install` and `build` for each.
 
 Sites that don't build, by reason:
 

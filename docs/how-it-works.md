@@ -4,8 +4,8 @@
 
 OpenVessel is easiest to think of as **a small virtual machine for Node.js that lives inside a browser
 tab**. Like a VM, it has its own operating system (a kernel with a file system, processes and a shell),
-its own programs (Node.js, npm, Astro), and controlled ways in and out (a network gate, and virtual
-ports for the preview). Unlike a VM, it doesn't emulate a CPU: JavaScript and WebAssembly run directly
+its own programs (Node.js, npm, Astro), and controlled ways in and out (a network policy for outgoing traffic, and
+virtual ports for the preview). Unlike a VM, it doesn't emulate a CPU: JavaScript and WebAssembly run directly
 on the browser's engine.
 
 ![OpenVessel: a Node.js virtual machine inside a browser tab](images/overview.svg)
@@ -24,7 +24,7 @@ One Web Worker plays the role of the operating system. It owns:
   `pnpm`, `yarn`, `bun` — the same client handles all four lockfile formats),
 - **virtual ports**: when a process listens on port 4321, nothing is opened on your machine; the kernel
   records the listener and connects the preview to it,
-- **the network gate**: the only way to reach the internet. The embedding page decides what is allowed
+- **the network policy**: every request to the internet is checked against it. The embedding page decides what is allowed
   (presets such as the npm registry, prompts per host, or everything).
 
 ### Processes — Node.js itself
@@ -53,6 +53,10 @@ and codes, argument validation, stack traces with `node:fs:441:20`, stream back-
 events. Each binding is tested against the same call on real Node, and Node's own test suite is run in
 OpenVessel ([compatibility](compatibility.md)).
 
+This is the ported runtime (`src/nodejs/`), which every `node` process uses by default. The build still
+contains the older hand-written runtime (`src/node/`); writing `legacy` to `/etc/openvessel/node` selects it
+for the processes started after that ([Node.js runtime](reference/nodejs-runtime.md#two-runtimes)).
+
 ### The preview
 
 A dev server inside OpenVessel listens on a virtual port. To show it, OpenVessel opens an iframe on a
@@ -77,7 +81,7 @@ verifies the certificate.
 | Origin | Holds | Why separate |
 |---|---|---|
 | Host page | your UI and the OpenVessel API | code in the VM can't touch your page |
-| Runtime | the kernel, the processes, the network gate | it is the only one that can reach out, and only through the gate |
+| Runtime | the kernel, the processes, the network policy | it is the only one that can reach out, and only as the policy allows |
 | Preview | the site being developed | the site's own JavaScript can't reach the runtime or your page |
 
 The three talk over `postMessage` channels. The runtime and the preview need cross-origin isolation
@@ -88,7 +92,7 @@ can't set headers (GitHub Pages), the service workers add them. See [SECURITY.md
 
 1. The host page calls `vessel.exec(...)`. The kernel starts `sh`, which parses the command line.
 2. `npm install` runs in the kernel. It resolves the dependency tree like npm (hoisting, peer
-   dependencies, lockfiles), fetches tarballs through the network gate, verifies integrity, and
+   dependencies, lockfiles), fetches tarballs as the network policy allows, verifies integrity, and
    unpacks them into the in-memory file system. Native packages are swapped for WebAssembly builds or
    compat packages.
 3. `npm run dev` starts `node node_modules/.bin/astro dev`: a new Web Worker boots Node.js (bootstrap

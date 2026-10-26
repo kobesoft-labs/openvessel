@@ -12,7 +12,7 @@ arguments, environment variables, timeouts and result files, and how to add test
 | Unit | `scripts/test.mjs` | Node.js | `npm test` |
 | End to end | `test/e2e/*.mjs` | a build (`dist/`), Google Chrome | `node test/e2e/harness.mjs 'node -v'` |
 | Node's test suite | `test/node-compat/run.mjs` | a build, Chrome, `test/node-compat/.node/` | `node test/node-compat/run.mjs --port fs` |
-| Astro corpus | `corpus/run.mjs` | a build, Chrome, `corpus/sites/`, network | `node corpus/run.mjs --port basics` |
+| Astro corpus | `corpus/run.mjs` | a build, Chrome, `corpus/sites/`, network | `node corpus/run.mjs basics` |
 
 Don't rebuild `dist/` while a browser suite is running: the running tests would load a mix of old and new
 files.
@@ -71,8 +71,8 @@ All scripts in `test/e2e/` use `harness.mjs`. They start `scripts/serve.mjs` (us
 the system Chrome through `playwright-core` (`channel: 'chrome'`, persistent profile, `--js-flags=--stack-size=4000`),
 open the playground at `http://localhost:<base>/`, wait for `window.ovReady`, and use the playground's
 `window.ov` (an `OpenVessel` instance). The playground mounts a sample Astro 5 project at
-`/home/user/app`. Runs use the legacy runtime unless the command writes `/etc/openvessel/node` (see
-[Node.js runtime](nodejs-runtime.md#selecting-the-runtime)).
+`/home/user/app`. Runs use the ported runtime unless the command writes `legacy` to `/etc/openvessel/node`
+(see [Node.js runtime](nodejs-runtime.md#selecting-the-runtime)).
 
 `harness.mjs` exports:
 
@@ -81,6 +81,8 @@ open the playground at `http://localhost:<base>/`, wait for `window.ovReady`, an
 | `startServer()` | spawns `scripts/serve.mjs` and resolves once it prints |
 | `openBrowser({ headless = true, profile })` | launches Chrome, opens the playground, waits for `ovReady`; `OV_CONSOLE`, `OV_TRACE` apply |
 | `exec(page, cmd, { cwd = '/home/user/app', timeout = 600000, allowAll = true })` | sets the network policy to `allow-all` (unless `allowAll: false`), runs `ov.exec(cmd, { cwd })`, returns `{ code, output, ms }` |
+| `useLegacyRuntime(page)` | writes `legacy` to `/etc/openvessel/node`, so node processes started after it run on the legacy runtime |
+| `usePortedRuntime(page)` | writes `port` to `/etc/openvessel/node`; the ported runtime is the default, so this only makes the choice explicit |
 
 | Script | Arguments | What it does |
 |---|---|---|
@@ -88,20 +90,20 @@ open the playground at `http://localhost:<base>/`, wait for `window.ovReady`, an
 | `run-file.mjs` | `<local file> <vfs path> '<command>'` | runs `SETUP` if set, writes the local file into the VFS, runs the command |
 | `watch.mjs` | `[--mount <dir>] '<command>' [seconds=20]` | spawns `/bin/sh -c <command>` (cwd `/home/user`, or `/home/user/app` with `--mount`, which copies a local project there first), streams the output every 200 ms, prints `[exit <code>]`, or `[still running after <n>s] ps:` and the process list when time runs out |
 | `project.mjs` | `<dir> ['<command>']` (default `npm install && npm run build`) | replaces `/home/user/app` with a local project and runs the command (15-minute timeout). Skips `node_modules`, `.git`, `dist`, `.astro`, `.vercel`, `.netlify`, `.cache`, `.turbo`, `.output` and files over 64 MiB; keeps symlinks. Exports `collectFiles()` and `mountProject()` |
-| `dev.mjs` | `[--port]` | `npm install` in `/home/user/app`, spawns `npm run dev`, waits for `server-ready`, checks the preview's `<h1>`, edits `src/pages/index.astro` and waits up to 30 s for the HMR update |
+| `dev.mjs` | `[--legacy]` | `npm install` in `/home/user/app`, spawns `npm run dev`, waits for `server-ready`, checks the preview's `<h1>`, edits `src/pages/index.astro` and waits up to 30 s for the HMR update |
 | `preview-port.mjs` | — | on the ported runtime: starts an `http` server on port 4000, loads it in the preview iframe (a 70000-byte chunked body) and POSTs to it from the iframe; prints `OK` or `FAIL` and exits 0/1 |
 | `port-fs.mjs` | `[scenario…]` | on the ported runtime: runs the fs scenarios `dir`, `watch`, `watch2`, `cp`, `cp2`, `misc`, `misc2` (opendir/Dir, `fs.watch`, `fs.watchFile`, `fs.cp`/`cpSync`, readv/writev, FileHandle) and compares each output with the expected output recorded from Node v22.23.4 on Linux (`node:22.23.4-bookworm-slim` in Docker); prints `ok`/`FAIL` with a line diff, `all passed` or `<n> failed`, exits 0/1 |
 | `esm-graph.mjs` | `[--port] <project dir> <entry path in VFS> [install command='npm install']` | mounts a project, installs, then walks the ES module graph the kernel serves under `/__ov/esm` (the legacy runtime's ESM service) and reports modules that don't load |
 | `debug-esm.mjs` | `[--port] <vfs path…>` | runs `npm install`, then prints the first 3000 characters of `/__ov/esm<path>` for each path |
 
-`--port` (in `dev.mjs`, `esm-graph.mjs`, `debug-esm.mjs`) selects the ported runtime before anything runs,
-with `usePortedRuntime(page)` from `harness.mjs` (it writes `port` to `/etc/openvessel/node`). The ESM
-service that `esm-graph.mjs` and `debug-esm.mjs` read is only used by the legacy runtime; with `--port`
-the install runs on the ported runtime.
+`dev.mjs` runs on the ported runtime; `--legacy` switches to the legacy runtime before anything runs, with
+`useLegacyRuntime(page)` from `harness.mjs`. `esm-graph.mjs` and `debug-esm.mjs` work the other way round:
+the ESM service they read is only used by the legacy runtime, so they select it with `useLegacyRuntime(page)`
+unless `--port` is given, in which case the install runs on the ported runtime.
 
 ```bash
 OV_PORT_BASE=5270 node test/e2e/harness.mjs \
-  'mkdir -p /etc/openvessel && echo port > /etc/openvessel/node; node -p process.versions.node'
+  'mkdir -p /etc/openvessel && echo legacy > /etc/openvessel/node; node -p process.versions.node'
 HEADED=1 node test/e2e/project.mjs ~/sites/blog 'npm install && npm run build'
 node test/e2e/watch.mjs --mount ~/sites/blog 'npm run dev' 60
 ```
@@ -143,7 +145,7 @@ A selected test is skipped when its source matches any of: `expose-internals`/`e
 | `node test/node-compat/run.mjs --baseline [prefix…]` | runs the selected tests on real Node (`npx -y node@<NODE_VERSION>`, eight at a time, cwd `.node/`, `NODE_TEST_DIR` unset, 30 s each, then `SIGKILL`) and writes `results/baseline.json` |
 | `node test/node-compat/run.mjs [--port] [prefix…]` | runs them in OpenVessel and writes the results, then prints the report |
 | `node test/node-compat/run.mjs [--port] --report` | only rebuilds the report from the stored results |
-| `--port` | use the ported runtime (`/etc/openvessel/node` = `port`) and store results under `results/port/` instead of `results/` |
+| `--port` | run on the ported runtime and store results under `results/port/` instead of `results/` (the published numbers come from `results/port/`). Without it the harness writes `legacy` to `/etc/openvessel/node` and the tests run on the legacy runtime |
 | `prefix…` | any other argument: keep only tests whose file name starts with `test-<prefix>` |
 
 ### How a run works
@@ -251,16 +253,19 @@ any failed. Directories in `corpus/sites/` that `sites.json` doesn't list are le
 
 ### corpus/run.mjs
 
-`node corpus/run.mjs [--port] [filter…]` runs, for each site whose id contains one of the filters (all
+`node corpus/run.mjs [--legacy] [filter…]` runs, for each site whose id contains one of the filters (all
 sites without filters):
 
 1. reload the playground (a fresh kernel), mount `corpus/sites/<id>` at `/home/user/app`;
 2. pick the package manager: the `packageManager` field of `package.json` (`npm`, `pnpm`, `yarn`, `bun`),
    else `pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `bun.lock`/`bun.lockb` → bun, else npm;
 3. `<pm> install`, then, if it succeeded, `<pm> run build` — each with `export CI=1 ASTRO_TELEMETRY_DISABLED=1`
-   (and, with `--port`, the line that selects the ported runtime) and a 15-minute timeout.
+   (and, with `--legacy`, the line that selects the legacy runtime) and a 15-minute timeout.
 
 If the harness itself fails, the browser is relaunched and the run continues with the next site.
+
+Results go to `corpus/results/port/` (the ported runtime, the default) or, with `--legacy`, to
+`corpus/results/`; `[/port]` in the table below stands for that choice.
 
 | Output | Contents |
 |---|---|
@@ -283,8 +288,8 @@ and the run ends with `build ok: <x>/<total>, install ok: <y>`. `corpus/results/
   `compareFixtures(run(createX()), fixture.results, known)`. List accepted differences in `known`, with
   the reason as the key.
 - **An end-to-end check**: write a script in `test/e2e/` using `startServer`, `openBrowser` and `exec` from
-  `harness.mjs`; select the ported runtime with `usePortedRuntime(page)` (or
-  `mkdir -p /etc/openvessel && echo port > /etc/openvessel/node`); print a clear result and exit non-zero
+  `harness.mjs`; it runs on the ported runtime by default (use `useLegacyRuntime(page)` for the legacy
+  one); print a clear result and exit non-zero
   on failure, as `port-fs.mjs` and `preview-port.mjs` do.
 - **A Node test that can't pass in a browser**: add it to `test/node-compat/limits/<module>.json` with the
   reason; it then no longer counts toward the target. Remove it when the report lists it as passing.

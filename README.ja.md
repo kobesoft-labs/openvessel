@@ -108,7 +108,7 @@ await vessel.spawn('npm', ['run', 'dev'], { cwd: '/home/user/app' });
 | ホストの API | `src/host/` |
 | ネイティブだけのパッケージの互換パッケージ | `compat/`・`scripts/build-compat.mjs` |
 
-もっと詳しく: [しくみ](docs/how-it-works.ja.md)・[互換性](docs/compatibility.ja.md)・[リファレンス](docs/reference/README.ja.md)（ホスト API・配信・カーネル・シェル・npm・Node.js の層など）・設計のメモ [docs/DESIGN.md](docs/DESIGN.md)・[docs/NODE-PORT.md](docs/NODE-PORT.md)。
+もっと詳しく: [しくみ](docs/how-it-works.ja.md)・[互換性](docs/compatibility.ja.md)・[リファレンス](docs/reference/README.ja.md)（ホスト API・配信・カーネル・シェル・npm・Node.js ランタイムなど）・設計のメモ [docs/DESIGN.md](docs/DESIGN.md)・[docs/NODE-PORT.md](docs/NODE-PORT.md)。
 
 ## 開発
 
@@ -118,7 +118,7 @@ node test/e2e/harness.mjs 'echo hi; node -v'               # ヘッドレスの 
 node test/e2e/project.mjs <dir> 'npm install && npm run build'
 node test/node-compat/run.mjs --port [モジュール…]           # Node 自身の試験を OpenVessel で
 node test/node-compat/run.mjs --port --report              # モジュールごとの 通過 / 目標
-node corpus/run.mjs --port [絞り込み]                       # Astro のサイト集をビルド
+node corpus/run.mjs [絞り込み]                              # Astro のサイト集をビルド
 ```
 
 ## ライセンス

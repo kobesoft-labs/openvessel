@@ -3,7 +3,7 @@
 [English](getting-started.md)
 
 空の Web ページから、OpenVessel の中でプロジェクトを動かすところまでを順に説明します。パッケージを入れ、3 つの
-オリジンにファイルを置き、起動し、Node.js の層を選び、プロジェクトを書き込み、`npm install`・ビルド・開発サーバーと
+オリジンにファイルを置き、起動し、Node.js ランタイムを選び、プロジェクトを書き込み、`npm install`・ビルド・開発サーバーと
 プレビュー・対話のターミナル・後片付けまでです。ここで使う呼び出しの細かい仕様は [ホスト API](host-api.ja.md) に、
 本番での配信は [配信](deployment.ja.md) にあります。
 
@@ -13,7 +13,7 @@
 |---|---|
 | Chromium 系のブラウザか Firefox | OpenVessel をテストしているブラウザです（[README](../../README.ja.md)）。Firefox では移植版ランタイムを使ってください。いくつか違いがあります（[互換性](../compatibility.ja.md#firefox)）。 |
 | ホストのページの cross-origin isolation（`Cross-Origin-Opener-Policy: same-origin` と、`Cross-Origin-Embedder-Policy: require-corp` か `credentialless`） | カーネルとプロセスは `SharedArrayBuffer` と `Atomics.wait` でやり取りします。ブラウザはこれを cross-origin isolated なページでしか使わせません。`OpenVessel.boot()` は最初に `crossOriginIsolated` を確かめ、偽なら失敗します。 |
-| 3 つのオリジン: 自分のページ・ランタイム・プレビュー | ランタイム（カーネル・プロセス・通信の関所）とプレビュー（作っているサイト）は、自分のページとも、お互いとも、オリジンを分けます（[しくみ](../how-it-works.ja.md#3-つのオリジン)）。 |
+| 3 つのオリジン: 自分のページ・ランタイム・プレビュー | ランタイム（カーネル・プロセス・外部通信の制御）とプレビュー（作っているサイト）は、自分のページとも、お互いとも、オリジンを分けます（[しくみ](../how-it-works.ja.md#3-つのオリジン)）。 |
 
 手元で試すときは、`localhost` の 3 つのポートを 3 つのオリジンにできます。OpenVessel のリポジトリの
 `npm run serve` がそうしています。
@@ -33,7 +33,7 @@ npm install https://github.com/kobesoft-labs/openvessel/releases/download/v1.1.1
 |---|---|---|
 | `exports["."].default`・`main` | `./dist/host/index.js` | ホスト API。1 つにまとめてあり、実行時の依存はありません。 |
 | `exports["."].types`・`types` | `./dist/types/host/index.d.ts` | TypeScript の型の宣言（`dist/types/shared/policy.d.ts` を読みます）。 |
-| `openvessel.node` | `22.23.4` | 移植した Node.js の層が追っている Node.js の版。 |
+| `openvessel.node` | `22.23.4` | 移植版の Node.js ランタイムが追っている Node.js の版。 |
 
 ```ts
 import { OpenVessel, PRESETS, type BootOptions, type Process } from 'openvessel';
@@ -47,7 +47,7 @@ import { OpenVessel, PRESETS, type BootOptions, type Process } from 'openvessel'
 |---|---|---|
 | `dist/host/` | `index.js`（ホスト API） | 自分のページのバンドルの中（`import 'openvessel'` で）。 |
 | `dist/types/` | `.d.ts` | TypeScript だけが使います。 |
-| `dist/runtime/` | `runtime.html`・`runtime.js`・`sw.js`・`kernel.js`・`process.js`（旧来の層）・`node-process.js` と `nodelib.js`（移植した層）・`ts-strip.js`・`amaro.js`・`chunks/`・`compat/`（互換パッケージの tarball と `index.json`）・ライセンスのファイル | **ランタイムのオリジン**に、1 つのディレクトリのまま。パスの下に置いてもかまいません（例: `https://example.com/ov/runtime/`）。 |
+| `dist/runtime/` | `runtime.html`・`runtime.js`・`sw.js`・`kernel.js`・`process.js`（旧ランタイム）・`node-process.js` と `nodelib.js`（移植版ランタイム）・`ts-strip.js`・`amaro.js`・`chunks/`・`compat/`（互換パッケージの tarball と `index.json`）・ライセンスのファイル | **ランタイムのオリジン**に、1 つのディレクトリのまま。パスの下に置いてもかまいません（例: `https://example.com/ov/runtime/`）。 |
 | `dist/preview/` | `__ov-sw.js`・`__ov/relay.html`・`__ov/relay.js`・`__ov/inject.js` | **プレビューのオリジン**に、1 つのディレクトリのまま。こちらもパスの下に置けます。 |
 | `dist/playground/` | リポジトリの試し書きのページ | 埋め込みには要りません。 |
 
@@ -63,10 +63,10 @@ import { OpenVessel, PRESETS, type BootOptions, type Process } from 'openvessel'
 |---|---|
 | ホストのページ | `Cross-Origin-Opener-Policy: same-origin`・`Cross-Origin-Embedder-Policy: require-corp`・`Cross-Origin-Resource-Policy: same-origin` |
 | ランタイム | `Cross-Origin-Opener-Policy: same-origin`・`Cross-Origin-Embedder-Policy: require-corp`・`Cross-Origin-Resource-Policy: cross-origin`。さらに `sw.js` 以外のすべてのファイルに `Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob: data:; connect-src 'self' data: blob:; worker-src 'self' blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors <ホストのオリジン>` |
-| プレビュー | `Cross-Origin-Opener-Policy: same-origin`・`Cross-Origin-Embedder-Policy: require-corp`・`Cross-Origin-Resource-Policy: cross-origin`・`Service-Worker-Allowed: /` |
+| プレビュー | `Cross-Origin-Opener-Policy: same-origin`・`Cross-Origin-Embedder-Policy: require-corp`（Service Worker の `__ov-sw.js` だけ `credentialless`）・`Cross-Origin-Resource-Policy: cross-origin` |
 
-ランタイムの `connect-src 'self'` が、プロセスの中のコードを関所の外から通信させないための仕掛けです。`sw.js` には
-付けません。Service Worker 自身が関所だからです。ヘッダーを付けられない静的な配信先、埋め込めるオリジンの絞り方など、
+ランタイムの `connect-src 'self'` は、プロセスの中のコードがネットワークポリシーの確認を通らずに通信するのを防ぐためのものです。
+`sw.js` には付けません。その確認をしているのが Service Worker 自身だからです。ヘッダーを付けられない静的な配信先、埋め込めるオリジンの絞り方など、
 配信のことは [配信](deployment.ja.md) にまとめてあります。
 
 `dist/runtime/runtime.html` には `<meta name="openvessel-allowed-hosts" content="*">` があります。`*` を、ランタイムを
@@ -122,24 +122,25 @@ vessel.on('error', ({ message, fatal }) => console.error(message, fatal ? '(stop
 いちばん新しいカーネルへの接続しか持たないので、同じランタイムのオリジンで 2 つ目のタブや 2 回目の `boot()` を
 始めると、モジュールの読み込みと通信の判定を、そちらが引き取ってしまいます。
 
-## Node.js の層を選ぶ
+## Node.js ランタイムを選ぶ
 
-ビルドには Node.js の層が 2 つ入っています。カーネルは `node` のプロセスを起動するたびに、どちらかを選びます。
+ビルドには Node.js ランタイムが 2 つ入っています。カーネルは `node` のプロセスを起動するたびに、どちらかを選びます。
 
-| 層 | スクリプト | 使われるとき |
+| ランタイム | スクリプト | 使われるとき |
 |---|---|---|
-| 移植した層 | `dist/runtime/node-process.js`（`src/nodejs/`）。Node.js v22.23.4 自身の `lib/` を、TypeScript で書いた `internalBinding()` の上で動かす | VFS のファイル `/etc/openvessel/node` の中身が `port` のとき（前後の空白は無視） |
-| 旧来の層 | `dist/runtime/process.js`（`src/node/worker.ts`）。以前の、手で書いた Node 互換の層 | それ以外（既定） |
+| 移植版ランタイム | `dist/runtime/node-process.js`（`src/nodejs/`）。Node.js v22.23.4 自身の `lib/` を、TypeScript で書いた `internalBinding()` の上で動かす | 既定 |
+| 旧ランタイム | `dist/runtime/process.js`（`src/node/worker.ts`）。以前の、手で書いた Node 互換の層 | VFS のファイル `/etc/openvessel/node` の中身が `legacy` のとき（前後の空白は無視） |
 
-[互換性](../compatibility.ja.md) の数字は、すべて移植した層で計ったものです。起動の直後に選んでください。
+[互換性](../compatibility.ja.md) の数字はすべて移植版ランタイムで計ったものなので、特に設定は要りません。
+旧ランタイムで動かしたいときは、起動の後にこのファイルを書き込みます。
 
 ```ts
-await vessel.mount({ node: 'port' }, { path: '/etc/openvessel' });
-// これと同じ: await vessel.fs.writeFile('/etc/openvessel/node', 'port');
+await vessel.mount({ node: 'legacy' }, { path: '/etc/openvessel' });
+// これと同じ: await vessel.fs.writeFile('/etc/openvessel/node', 'legacy');
 ```
 
-このファイルはプロセスを起動するたびに読まれます。もう動いているプロセスは、起動したときの層のままです。
-詳しくは [Node.js の層](nodejs-runtime.ja.md) を見てください。
+このファイルはプロセスを起動するたびに読まれます。もう動いているプロセスは、起動したときのランタイムのままです。
+詳しくは [Node.js ランタイム](nodejs-runtime.ja.md) を見てください。
 
 ## プロジェクトをファイルシステムに入れる
 
@@ -177,7 +178,7 @@ if ((await install.exit) !== 0) throw new Error('npm install failed');
 ```
 
 `npm`・`pnpm`・`yarn`・`bun` はカーネルに入っています（[パッケージマネージャ](package-managers.ja.md)）。レジストリへの
-問い合わせと tarball は通信の関所を通るので、方針でレジストリを許す必要があります。用意したセットの `npm` が
+問い合わせと tarball の取得はネットワークポリシーの確認を通るので、ポリシーでレジストリを許可する必要があります。用意したセットの `npm` が
 `registry.npmjs.org` とよく使われるミラーを含んでいます。ネイティブのバイナリを持つパッケージは、WebAssembly 版が
 入ります（[ネイティブのモジュール](native-modules.ja.md)）。
 

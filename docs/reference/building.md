@@ -64,7 +64,7 @@ bundles use no aliases.
 | `node-process` | `src/nodejs/boot.ts` | `dist/runtime/node-process.js` (ported runtime); `./nodelib.js` stays an external import | ESM |
 | `ts-strip` | `src/nodejs/ts-strip.ts` | `dist/runtime/ts-strip.js` (sucrase, for `require(esm)`) | IIFE |
 | `relay`, `inject` | `src/preview/relay.ts`, `src/preview/inject.ts` | `dist/preview/__ov/relay.js`, `dist/preview/__ov/inject.js` | IIFE |
-| `__ov-sw` | `src/preview/sw.ts` | `dist/preview/__ov-sw.js` (at the preview's root, so it controls the whole origin without a `Service-Worker-Allowed` header) | IIFE |
+| `__ov-sw` | `src/preview/sw.ts` | `dist/preview/__ov-sw.js` (at the top of the preview directory, so its scope covers the directory without a `Service-Worker-Allowed` header) | IIFE |
 | `index` | `src/host/index.ts` | `dist/host/index.js` (the package's `main`) | ESM |
 | `app` | `playground/app.ts` | `dist/playground/app.js` (CSS through the `css` loader) | ESM |
 
@@ -182,8 +182,8 @@ the emitted `.d.ts` files to `.js`. Run it **after** `npm run build`, because a 
 | Site | Port | Directory | Headers |
 |---|---|---|---|
 | host | `OV_HOST_PORT`, else `OV_PORT_BASE` (default 5170) | `dist/playground` | COOP `same-origin`, COEP `require-corp`, CORP `same-origin` |
-| runtime | `OV_RUNTIME_PORT`, else base + 1 | `dist/runtime` | COOP, COEP, CORP `cross-origin`, and a CSP: `default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob: data:; connect-src 'self' data: blob:; worker-src 'self' blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors http://localhost:<host port>` — except on `/sw.js`, the network gate, which must not inherit `connect-src 'self'` |
-| preview | `OV_PREVIEW_PORT`, else base + 2 | `dist/preview` | COOP, COEP, CORP `cross-origin`, `Service-Worker-Allowed: /` |
+| runtime | `OV_RUNTIME_PORT`, else base + 1 | `dist/runtime` | COOP, COEP, CORP `cross-origin`, and a CSP: `default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob: data:; connect-src 'self' data: blob:; worker-src 'self' blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors http://localhost:<host port>` — except on `/sw.js`, which makes the network policy checks and must not inherit `connect-src 'self'` |
+| preview | `OV_PREVIEW_PORT`, else base + 2 | `dist/preview` | COOP, COEP, CORP `cross-origin`; `/__ov-sw.js` gets COEP `credentialless` instead of `require-corp` |
 
 Every response has `cache-control: no-cache`; a path ending in `/` serves `index.html`; content types
 cover `.html`, `.js`, `.mjs`, `.css`, `.map`, `.json`, `.wasm`, `.svg`, `.png` (else

@@ -60,22 +60,23 @@ The build contains two Node.js runtimes:
 
 | Runtime | Script | Source | Used when |
 |---|---|---|---|
-| The legacy runtime | `dist/runtime/process.js` | `src/node/` (a hand-written Node-compatible layer) | by default |
-| The ported runtime | `dist/runtime/node-process.js` | `src/nodejs/` (Node's own `lib/` with `internalBinding()` in TypeScript) | the VFS file `/etc/openvessel/node` contains `port` |
+| The ported runtime | `dist/runtime/node-process.js` | `src/nodejs/` (Node's own `lib/` with `internalBinding()` in TypeScript) | by default |
+| The legacy runtime | `dist/runtime/process.js` | `src/node/` (a hand-written Node-compatible layer) | the VFS file `/etc/openvessel/node` contains `legacy` |
 
 The kernel reads `/etc/openvessel/node` (trimmed) every time a node program starts — a new process
 or an `execve` — and records the choice in the process; the process's worker threads always get the
-same runtime as its main thread, even when the file changes while it runs. Any other content, or a
-missing file, selects the legacy runtime. The published compatibility numbers
-([compatibility](../compatibility.md)) refer to the ported runtime.
+same runtime as its main thread, even when the file changes while it runs. Any other content
+(including `port`, which selected the ported runtime before it became the default), or a missing file,
+selects the ported runtime. The published compatibility numbers ([compatibility](../compatibility.md))
+refer to the ported runtime.
 
 ```ts
-// select the ported runtime for every node process started from now on
-await vessel.mount({ node: 'port' }, { path: '/etc/openvessel' });
+// select the legacy runtime for every node process started from now on
+await vessel.mount({ node: 'legacy' }, { path: '/etc/openvessel' });
 ```
 
 ```sh
-mkdir -p /etc/openvessel && echo port > /etc/openvessel/node
+mkdir -p /etc/openvessel && echo legacy > /etc/openvessel/node
 ```
 
 ### Synchronous system calls
@@ -559,7 +560,7 @@ What the kernel creates when it starts (`src/kernel/kernel.ts`, `src/kernel/inde
 | `/usr/bin/nodejs` | symlink | to `/usr/bin/node` |
 | `/home/user/.shrc` | file | `alias ll='ls -l'`, `alias la='ls -la'` |
 
-Regular files are created with mode 0644. `/etc/openvessel/node` does not exist at start (the legacy
+Regular files are created with mode 0644. `/etc/openvessel/node` does not exist at start (the ported
 runtime is used). Files the host mounts go to `/home/user/app` by default (see [Host API](host-api.md)).
 The host name is `openvessel`.
 

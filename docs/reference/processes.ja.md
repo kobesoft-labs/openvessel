@@ -57,7 +57,7 @@
 
 - 直接起動した node のプログラム（`node app.js`、または中身が `#!/ov/builtin node` のファイルのパス）は、呼び出し側の
   `argv[0]`（`process.argv0`。たとえば `node`）を保ちます。`execve`/`spawn` は別のもの（`argv0`）を渡せます。
-  スクリプトの `#!` の行を通して起動したときは、`argv[0]` は `node` です。移植ランタイムは `process.execPath` と
+  スクリプトの `#!` の行を通して起動したときは、`argv[0]` は `node` です。移植版ランタイムは `process.execPath` と
   `process.argv[0]` を `/usr/bin/node` とします。
 - 環境変数はまるごと渡します。子は、親の環境変数と渡されたものを混ぜません。
 - `chdir` はシンボリックリンクを解決します。新しい `cwd` は実際のパスです。失敗すると `ENOENT` か `ENOTDIR` です。
@@ -74,7 +74,7 @@
 | 組み込みのプログラムが、誰も読まないパイプに書く（`EPIPE`） | 141 |
 | シグナルで終わる | `{ code: null, signal }` |
 | node のプロセスのメインの Worker が失敗する（`onerror`） | 1 |
-| `process.abort()`（移植ランタイム） | 134 |
+| `process.abort()`（移植版ランタイム） | 134 |
 
 node のプロセスが `exit` を呼ぶと、カーネルは片付ける前に、読む側が追いつくのを待ちます。そのプロセスが書いた
 パイプをほかのプロセスがまだ読んでいるなら、空になるまで（最大 250 ミリ秒）待ちます。そのプロセスが書くソケットを
@@ -95,7 +95,7 @@ node のプロセスが `exit` を呼ぶと、カーネルは片付ける前に�
 
 ### execve
 
-`execve(argv, env, argv0)`（Node の `process.execve`。移植ランタイム）は、プロセスのプログラムを入れ替えます。
+`execve(argv, env, argv0)`（Node の `process.execve`。移植版ランタイム）は、プロセスのプログラムを入れ替えます。
 
 - まず新しいプログラムを探します。`ENOENT`・`EACCES`・`ELOOP` のときは、プロセスに何もしません。
 - 2 より大きい fd をすべて閉じ、監視を外し、古いプログラムのスレッドを止め、受け手を登録したシグナルの記録を消し、
@@ -159,8 +159,8 @@ chmod +x hello
 
 ## node のプロセスの起動
 
-1. カーネルは、`/etc/openvessel/node` で選んだランタイムの Worker を取ります（`port` → 移植ランタイムの
-   `node-process.js`、それ以外か無いとき → 旧ランタイムの `process.js`。プログラムの起動のときに読んでプロセスに記録し、
+1. カーネルは、`/etc/openvessel/node` で選んだランタイムの Worker を取ります（`legacy` → 旧ランタイムの
+   `process.js`、それ以外か無いとき → 既定の移植版ランタイムの `node-process.js`。プログラムの起動のときに読んでプロセスに記録し、
    そのプロセスのワーカースレッドも同じランタイムを使います）。ランタイムごとに、
    何もしていない Worker を 2 つ読み込んでおきます（[温めた Worker の待機列](kernel.ja.md#温めた-worker-の待機列)）。
 2. そのスレッドのシステムコールのために、4 MiB の `SharedArrayBuffer` の通信路を作ります。
@@ -201,7 +201,7 @@ chmod +x hello
   取ります。その番号は `nofile`（`RLIMIT_NOFILE`、`ulimit -n`）より小さい必要があり、届くときは `EMFILE` で失敗して
   何も作りません。既定の 1024 なら、0〜2 のほかに 1021 個の記述子を開けます。
 - 子が受け継ぐのは、標準入出力として渡したものだけです。close-on-exec のフラグはありません。
-- 移植ランタイムの標準出力・標準エラー（fd 0〜2）への書き込みは、Linux の Node がパイプとファイルにするのと同じく、
+- 移植版ランタイムの標準出力・標準エラー（fd 0〜2）への書き込みは、Linux の Node がパイプとファイルにするのと同じく、
   バッファ全体を同期で書きます。
 
 ### spawn のシステムコールの stdio
@@ -219,9 +219,9 @@ chmod +x hello
 | `'ignore'`・`null`・`undefined` | `/dev/null`（位置 0 は読み取り専用、ほかは書き込み専用） | — |
 | それ以外 | fd 無し | — |
 
-プログラムを起動できなかったときは、子の側の端を閉じます。`keepStdioOnError`（移植ランタイムが使う）があれば、
+プログラムを起動できなかったときは、子の側の端を閉じます。`keepStdioOnError`（移植版ランタイムが使う）があれば、
 `ENOENT`/`EACCES` を `{ pid: 0, fds, error }` として返し、親の側の端は開いたままにするので、libuv と同じく親の
-ストリームは EOF を読みます。移植ランタイムは Node のオプションを次のように変えます: `pipe` と `overlapped` →
+ストリームは EOF を読みます。移植版ランタイムは Node のオプションを次のように変えます: `pipe` と `overlapped` →
 `pipe`（または `ipc`）、`inherit` → `inherit`、`{ fd }` → その数、ハンドルを持つストリーム → その fd、それ以外 →
 `ignore`。
 
@@ -243,7 +243,7 @@ chmod +x hello
 |---|---|
 | バッファ | 大きさに上限の無いかたまりの列。ブロックする書き込みは、いつも全部のバイトを一度に受け取り、待たない |
 | 容量 | 65536 バイト。ブロックしない書き手（`nonblock` 付きの `write`）にだけ効く。入る分だけ書き、いっぱいなら 0 |
-| 背圧 | 移植ランタイムは、標準入出力以外のパイプとソケットにブロックせずに書き、残りを列に入れて `fd-writable` を頼む。`fd-writable` はバッファがまた空になったとき（または読む人がいなくなったとき）に来る |
+| 背圧 | 移植版ランタイムは、標準入出力以外のパイプとソケットにブロックせずに書き、残りを列に入れて `fd-writable` を頼む。`fd-writable` はバッファがまた空になったとき（または読む人がいなくなったとき）に来る |
 | 読み取り | たまっている分を、求めた大きさまで返す。何も無ければ待つ |
 | EOF | 書く端がすべて閉じ、バッファが空のとき |
 | 読み手がいない | 書き込みは `EPIPE` で失敗する。`SIGPIPE` は出さない。node のプロセスは `EPIPE` のエラーを受け取り（Node はもともと `SIGPIPE` を無視する）、組み込みのプログラムは 141 で終わる |
@@ -313,7 +313,7 @@ FIFO は [ファイルシステム](filesystem.ja.md#fifo) で説明していま
 | `SIGRTMIN`・`SIGRTMIN+1` … `SIGRTMIN+15`・`SIGRTMAX-14` … `SIGRTMAX-1`・`SIGRTMAX` | 34〜64 | 終わる |
 
 名前は `kill -l` が出すものです。`SIG` の無い名前、括弧の中の別名、範囲内のどの書き方の `SIGRTMIN+n`/`SIGRTMAX-n`、
-`SIG<番号>` も受け付けます。シグナルは、移植ランタイムからは番号で、旧ランタイムからは名前で届きます。どちらでも
+`SIG<番号>` も受け付けます。シグナルは、移植版ランタイムからは番号で、旧ランタイムからは名前で届きます。どちらでも
 `process.kill(pid, 'SIGPWR')` は `SIGPWR` として届きます。
 
 「終わる（core）」も「終わる」と同じように終わります（core ファイルは作りません）。止まった状態は無いので、停止の
@@ -324,7 +324,7 @@ FIFO は [ファイルシステム](filesystem.ja.md#fifo) で説明していま
 - シグナルの受け手を持つ node のプロセス（`sigaction` を呼んだもの。`process.on('SIGINT', …)`）は、
   `{ t: 'signal', sig }` を受け取り、動き続けます。`SIGKILL` と `SIGSTOP` は受け手に届きません。
 - 旧ランタイムが受け手を登録するのは `SIGINT`・`SIGTERM`・`SIGHUP`・`SIGQUIT`・`SIGUSR1`・`SIGUSR2`・`SIGWINCH`・
-  `SIGBREAK`・`SIGPIPE`・`SIGCONT`・`SIGTSTP` です。移植ランタイムは、Node の `process.on` が受け付けるすべての
+  `SIGBREAK`・`SIGPIPE`・`SIGCONT`・`SIGTSTP` です。移植版ランタイムは、Node の `process.on` が受け付けるすべての
   シグナルです。
 - node のプロセスを終わらせると、その Worker をすぐに止めます。JavaScript はそれ以上動きません（`exit` のイベントも
   ありません）。

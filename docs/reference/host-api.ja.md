@@ -326,7 +326,7 @@ ps(): Promise<{ pid: number; ppid: number; argv: string[]; cwd: string }[]>
 ports(): Promise<{ port: number; pid: number }[]>
 ```
 
-待ち受け中の仮想ポートと、待ち受けているプロセスです。移植した層ではすべての TCP の待ち受けが入ります。旧来の層では
+待ち受け中の仮想ポートと、待ち受けているプロセスです。移植版ランタイムではすべての TCP の待ち受けが入ります。旧ランタイムでは
 HTTP のサーバーだけです（ただの `net` のサーバーは中で使うだけで、出てきません）。
 
 ## 通信の方針 — `vessel.network`
@@ -353,11 +353,11 @@ on(event: 'server-ready' | 'port-closed' | 'permission-request' | 'permission-se
 
 | イベント | 中身 | いつ |
 |---|---|---|
-| `server-ready` | `{ port: number, pid: number, url: string \| null }` | プロセスが仮想ポートで待ち受けを始めたとき。移植した層ではすべての TCP の待ち受け、旧来の層では HTTP のサーバーだけです。`url` は `/` を出すプレビューの URL（`previewUrl` があるとき）で、無ければ `null`。`previewUrl` があると、プレビューの中継が動いていなければ起動し、中継が動いてからイベントを出すので、`url` はすぐに読み込めます。中継の起動に失敗したとき（最長 20 秒）もイベントは出し、失敗は致命的でない `error` で知らせ、次の `previewUrl()`・`createPreview()` が起動をやり直します。`server-ready` と `port-closed` の順番は保たれます。ポート `0` は、カーネルが選んだポート（49152〜65151）で届きます。 |
+| `server-ready` | `{ port: number, pid: number, url: string \| null }` | プロセスが仮想ポートで待ち受けを始めたとき。移植版ランタイムではすべての TCP の待ち受け、旧ランタイムでは HTTP のサーバーだけです。`url` は `/` を出すプレビューの URL（`previewUrl` があるとき）で、無ければ `null`。`previewUrl` があると、プレビューの中継が動いていなければ起動し、中継が動いてからイベントを出すので、`url` はすぐに読み込めます。中継の起動に失敗したとき（最長 20 秒）もイベントは出し、失敗は致命的でない `error` で知らせ、次の `previewUrl()`・`createPreview()` が起動をやり直します。`server-ready` と `port-closed` の順番は保たれます。ポート `0` は、カーネルが選んだポート（49152〜65151）で届きます。 |
 | `port-closed` | `{ port: number }` | 待ち受けが無くなったとき（サーバーが閉じた、またはそのプロセスが終わった）。 |
 | `process-exit` | `{ pid: number, code: number, signal: string \| null }` | `spawn()`・`exec()` で起動したプロセスが終わったとき。それらがさらに起動したプロセスでは届きません。 |
 | `permission-request` | `{ ev: 'permission-request', id: number, url: string, host: string, initiator: string, source: 'runtime' \| 'preview' }` | カーネルがホストについて尋ねたとき。リスナーは知らせを受けるだけで、答えるのは `onPermissionRequest` かダイアログです。 |
-| `permission-settled` | `{ ev: 'permission-settled', id: number, host: string, allowed: boolean }` | 問い合わせが決まったとき（答えたとき、または 5 分たって打ち切られたとき）。 |
+| `permission-settled` | `{ ev: 'permission-settled', id: number, host: string, allowed: boolean, decision: 'once' \| 'session' \| 'deny' \| 'deny-session' \| 'timeout' }` | 許可リクエストが決まったとき。`decision` は答えで、5 分以内に誰も答えなかったときは `'timeout'`（`allowed` は `false`）になります。4 つの答えのどれでもない値は `'deny'` として届きます。`decision` は **1.2.0 で追加**。 |
 | `error` | `RuntimeErrorEvent`: `{ error: Error, message: string, fatal: boolean }` | **1.2.0 で追加。** 呼び出しの外で何かが失敗したとき（[下](#error-イベント)）。`error` のリスナーが 1 つも無ければ `console.error` に出します。 |
 
 ### `error` イベント

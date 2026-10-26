@@ -2,15 +2,15 @@
 
 [日本語](network-policy.ja.md)
 
-Everything inside OpenVessel that reaches a host outside the tab goes through one gate, and the
-embedding page decides what that gate lets through. This page specifies the policy model
+Everything inside OpenVessel that reaches a host outside the tab is checked against one network policy,
+and the embedding page decides what that policy lets through. This page specifies the policy model
 (`src/shared/policy.ts`), the order in which a request is decided, how the user is asked
 (`src/kernel/index.ts`), where the policy is enforced (`src/runtime/sw.ts`, `src/preview/sw.ts`) and
 what each kind of client sees when a request is refused.
 
-## What goes through the gate
+## What the policy covers
 
-| Traffic | Path to the gate | `source` / `initiator` |
+| Traffic | Path to the policy check | `source` / `initiator` |
 |---|---|---|
 | `fetch()` in a `node` process (both runtimes) | The process calls the runtime service worker's `/__ov/net` | `runtime` / pid and command line, e.g. `7 node server.js` |
 | `http`/`https` clients, `net.connect`/`tls.connect` to a non-local address (ported runtime) | The kernel reads HTTP/1.1 from the socket (`src/kernel/outbound.ts`) and calls `/__ov/net` per request | `runtime` / pid and command line |
@@ -122,7 +122,7 @@ Rules (`matches()` in `src/shared/policy.ts`):
 2. The scheme is not `http:` or `https:` → **deny**.
 3. The host is a loopback name (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`, `0.0.0.0`, `::`,
    IPv4-mapped loopback) → **deny**, in every mode. Clients route loopback to virtual ports before they
-   get here; the gate never sends such a request to the user's machine.
+   get here; the policy check never sends such a request to the user's machine.
 4. A `deny` pattern matches → **deny**.
 5. The host is in the session deny set → **deny**.
 6. `mode` is `allow-all` → **allow**.
@@ -235,7 +235,7 @@ The message format is in [Protocol](protocol.md).
 | `fetch()` in a process (both runtimes) | `TypeError: fetch failed` with `cause.code === 'EACCES'` and `cause.message` the denial message (`ETIMEDOUT` when the prompt was not answered) | `TypeError: fetch failed` with `cause.code === 'ECONNREFUSED'` and the CORS hint |
 | `http`/`https`/`net`/`tls` client (ported runtime) | An HTTP response `403 Forbidden` with `X-OpenVessel-Error: 1`, `Connection: close` and the message as the body; then the connection closes | `502 Bad Gateway`, same form |
 | `http`/`https` client (legacy runtime) | `'error'` event: `Error` with the message and `code: 'EACCES'` | `'error'` event with `code: 'ECONNREFUSED'` |
-| `net.connect` to an outside host (legacy runtime) | Not routed to the gate: always `ECONNREFUSED` | — |
+| `net.connect` to an outside host (legacy runtime) | Not routed to the policy check: always `ECONNREFUSED` | — |
 | `npm` and the other package managers | Error with `code: 'EACCES'` (`ETIMEDOUT` when the prompt was not answered); a tarball download is not retried | Error with `code: 'ECONNREFUSED'`; a tarball download is tried 3 times |
 | `curl`, `wget` | `curl: (7) <message>`, exit status 7 | `curl: (7) <message>`, exit status 7 |
 | The preview page | `403` with an empty body and status text `Blocked by OpenVessel network policy` (`… (not answered in time)` after a timeout) | The browser's own network error |
@@ -277,7 +277,7 @@ service workers therefore check where a redirected response ended: the final URL
 policy like the first one, and if it is refused the response is dropped and the request is answered as
 denied. The hosts in between have been contacted by then, but nothing they sent reaches the process or
 the page. `curl`, `wget` and the package managers that hit a loopback URL follow its redirects
-themselves: a hop to a loopback URL stays on the virtual ports, any other goes through the gate.
+themselves: a hop to a loopback URL stays on the virtual ports, any other goes through the policy check.
 
 ### WebSockets
 
@@ -296,7 +296,7 @@ Service workers don't see WebSocket connections:
 
 ### Content Security Policy
 
-The gate only works if nothing else can leave the runtime. `scripts/serve.mjs` serves every runtime
+The policy only works if nothing else can leave the runtime. `scripts/serve.mjs` serves every runtime
 file except `sw.js` with a CSP whose `connect-src` is `'self' data: blob:`, so a process's direct
 `fetch`, `XMLHttpRequest`, `WebSocket` or `EventSource` to another origin is refused by the browser and
 only `/__ov/net` (same origin) is reachable. `sw.js` must be served without that CSP. Deployments need
@@ -311,15 +311,15 @@ Servers inside OpenVessel listen on virtual ports; nothing listens on the real m
 |---|---|
 | `fetch()` in a process | Sent to the virtual port through Node's `http` module (ported) or directly (legacy). Not checked by the policy. `ECONNREFUSED` if nothing listens. The legacy runtime also treats an empty host name as loopback. |
 | `http`/`net` clients in a process | Connected to the virtual port. Not checked. `ECONNREFUSED` if nothing listens. |
-| `curl`, `wget`, package managers (kernel) | Sent to the virtual port by the kernel (`curl http://localhost:4321/` reaches a dev server inside OpenVessel). Not checked. `ECONNREFUSED` if nothing listens. Redirects are followed: to the virtual ports for loopback, through the gate otherwise. |
+| `curl`, `wget`, package managers (kernel) | Sent to the virtual port by the kernel (`curl http://localhost:4321/` reaches a dev server inside OpenVessel). Not checked. `ECONNREFUSED` if nothing listens. Redirects are followed: to the virtual ports for loopback, through the policy check otherwise. |
 | Preview page | Its own origin, and `http://localhost:<port>/` (any loopback name), reach the virtual server; a loopback URL without a port uses the page's port. Not checked. WebSockets to loopback names are tunnelled to the port in the URL, else the page's port (see above). |
-| Anything that reaches the gate anyway | Denied by the policy in every mode ([The decision order](#the-decision-order)). |
+| Anything that reaches the policy check anyway | Denied by the policy in every mode ([The decision order](#the-decision-order)). |
 
 ## Other schemes
 
 - The policy denies every URL whose scheme isn't `http:` or `https:` (`ws:`, `wss:`, `ftp:`, `file:`, …).
 - `fetch()` in the ported runtime reads `data:` and `blob:` URLs with the browser's `fetch`, without the
-  gate, and rejects other non-HTTP schemes with `TypeError: fetch failed`
+  policy check, and rejects other non-HTTP schemes with `TypeError: fetch failed`
   (`cause.code === 'ERR_INVALID_URL'`, `unsupported URL scheme <scheme>`).
 - The preview service worker only checks `http:` and `https:` requests to other origins.
 

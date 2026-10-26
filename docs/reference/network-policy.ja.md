@@ -12,8 +12,8 @@ OpenVessel の中からタブの外のホストへ届くものは、すべて 1 
 | 通信 | 出口までの道 | `source` / `initiator` |
 |---|---|---|
 | `node` のプロセスの `fetch()`（両方の層） | プロセスがランタイムの Service Worker の `/__ov/net` を呼ぶ | `runtime` / pid とコマンド行（例: `7 node server.js`） |
-| ローカルでないアドレスへの `http`・`https` のクライアント、`net.connect`・`tls.connect`（移植した層） | カーネルがソケットから HTTP/1.1 を読み（`src/kernel/outbound.ts`）、要求ごとに `/__ov/net` を呼ぶ | `runtime` / pid とコマンド行 |
-| `http`・`https` のクライアント（旧来の層） | プロセスが `/__ov/net` を呼ぶ | `runtime` / pid とコマンド行 |
+| ローカルでないアドレスへの `http`・`https` のクライアント、`net.connect`・`tls.connect`（移植版ランタイム） | カーネルがソケットから HTTP/1.1 を読み（`src/kernel/outbound.ts`）、要求ごとに `/__ov/net` を呼ぶ | `runtime` / pid とコマンド行 |
+| `http`・`https` のクライアント（旧ランタイム） | プロセスが `/__ov/net` を呼ぶ | `runtime` / pid とコマンド行 |
 | `npm`・`pnpm`・`yarn`・`bun` のレジストリの情報と tarball | カーネルが `/__ov/net` を呼ぶ | `runtime` / `npm` |
 | `curl`・`wget` | カーネルが `/__ov/net` を呼ぶ | `runtime` / pid とコマンド行（例: `12 curl -s https://example.com/`） |
 | プレビューのページから別のオリジンへの要求（スクリプト・スタイル・画像・フォント・`fetch`・XHR・`EventSource`） | プレビューの Service Worker がカーネルに尋ねる | `preview` / `preview` |
@@ -223,14 +223,14 @@ await vessel.network.clearSession();
 | クライアント | 方針が断った | 許されたが fetch が失敗した |
 |---|---|---|
 | プロセスの `fetch()`（両方の層） | `TypeError: fetch failed`。`cause.code === 'EACCES'`（問い合わせが時間切れなら `ETIMEDOUT`）、`cause.message` は拒否のメッセージ | `TypeError: fetch failed`。`cause.code === 'ECONNREFUSED'` と CORS の説明 |
-| `http`・`https`・`net`・`tls` のクライアント（移植した層） | `X-OpenVessel-Error: 1`・`Connection: close` 付きの HTTP の応答 `403 Forbidden`。本体はメッセージ。そのあと接続は閉じる | `502 Bad Gateway`。形は同じ |
-| `http`・`https` のクライアント（旧来の層） | `'error'` イベント。メッセージと `code: 'EACCES'` の `Error` | `'error'` イベント。`code: 'ECONNREFUSED'` |
-| 外のホストへの `net.connect`（旧来の層） | 出口へ行かず、いつも `ECONNREFUSED` | — |
+| `http`・`https`・`net`・`tls` のクライアント（移植版ランタイム） | `X-OpenVessel-Error: 1`・`Connection: close` 付きの HTTP の応答 `403 Forbidden`。本体はメッセージ。そのあと接続は閉じる | `502 Bad Gateway`。形は同じ |
+| `http`・`https` のクライアント（旧ランタイム） | `'error'` イベント。メッセージと `code: 'EACCES'` の `Error` | `'error'` イベント。`code: 'ECONNREFUSED'` |
+| 外のホストへの `net.connect`（旧ランタイム） | 出口へ行かず、いつも `ECONNREFUSED` | — |
 | `npm` とほかのパッケージマネージャ | `code: 'EACCES'` のエラー（問い合わせが時間切れなら `ETIMEDOUT`）。tarball の取得はやり直さない | `code: 'ECONNREFUSED'` のエラー。tarball の取得は 3 回まで試す |
 | `curl`・`wget` | `curl: (7) <メッセージ>`、終了ステータス 7 | `curl: (7) <メッセージ>`、終了ステータス 7 |
 | プレビューのページ | 本体が空で、状態の文が `Blocked by OpenVessel network policy` の `403`（時間切れなら `… (not answered in time)`） | ブラウザ自身の通信のエラー |
 
-移植した層のソケットのクライアントで外へ出せるのは HTTP/1.1 だけです。最初のバイト列が要求の行でない接続は閉じ、
+移植版ランタイムのソケットのクライアントで外へ出せるのは HTTP/1.1 だけです。最初のバイト列が要求の行でない接続は閉じ、
 WebSocket への upgrade には `501 Not Implemented` を返します（[カーネル](kernel.ja.md)）。
 
 ### プレビュー
@@ -274,7 +274,7 @@ Service Worker からは WebSocket の接続が見えません。
   （`ws-check`。同じホストへの `http:`・`https:` の要求と同じく判定します）、許されたときだけブラウザの WebSocket を
   開きます。断られると `error` のあと、`1006`・理由 `blocked by OpenVessel network policy` で `close` します。ページが
   この差し替えを避けることはできます（たとえばページが自分で起こした Worker の `WebSocket` はブラウザのものです）。
-- プロセスでは、移植した層の `WebSocket` のグローバルはブラウザのものです。ランタイムのオリジンでは、下の
+- プロセスでは、移植版ランタイムの `WebSocket` のグローバルはブラウザのものです。ランタイムのオリジンでは、下の
   Content-Security-Policy の `connect-src` に縛られるので、つなげるのはランタイムのオリジン自身だけです（外のホストにも
   仮想ポートにもつなげません）。`net`・`tls` のソケットでは、外のホストへの upgrade に `501` を返します。
 
@@ -292,7 +292,7 @@ OpenVessel の中のサーバーは仮想ポートで待ち受けます。手元
 
 | クライアント | `localhost`・`127.0.0.1`・`::1`/`[::1]`・`0.0.0.0`・`*.localhost` |
 |---|---|
-| プロセスの `fetch()` | 仮想ポートへ送ります（移植した層は Node の `http` モジュールで、旧来の層は直接）。方針では判定しません。待ち受けが無ければ `ECONNREFUSED`。旧来の層は、空のホスト名もループバックとして扱います。 |
+| プロセスの `fetch()` | 仮想ポートへ送ります（移植版ランタイムは Node の `http` モジュールで、旧ランタイムは直接）。方針では判定しません。待ち受けが無ければ `ECONNREFUSED`。旧ランタイムは、空のホスト名もループバックとして扱います。 |
 | プロセスの `http`・`net` のクライアント | 仮想ポートにつなぎます。判定はしません。待ち受けが無ければ `ECONNREFUSED`。 |
 | `curl`・`wget`・パッケージマネージャ（カーネル） | カーネルが仮想ポートへ送ります（`curl http://localhost:4321/` は OpenVessel の中の開発サーバーに届きます）。判定はしません。待ち受けが無ければ `ECONNREFUSED`。リダイレクトはたどります。ループバックへは仮想ポートへ、ほかは出口を通ります。 |
 | プレビューのページ | 自分のオリジンと `http://localhost:<port>/`（どのループバックの名前でも）が仮想サーバーに届きます。ポートの無いループバックの URL はページのポートです。判定はしません。ループバックへの WebSocket は、URL のポート、無ければページのポートへ通します（上を参照）。 |
@@ -301,7 +301,7 @@ OpenVessel の中のサーバーは仮想ポートで待ち受けます。手元
 ## ほかのスキーム
 
 - 方針は、スキームが `http:` でも `https:` でもない URL（`ws:`・`wss:`・`ftp:`・`file:` など）をすべて断ります。
-- 移植した層の `fetch()` は、`data:` と `blob:` の URL をブラウザの `fetch` で出口を通さずに読み、ほかの HTTP でない
+- 移植版ランタイムの `fetch()` は、`data:` と `blob:` の URL をブラウザの `fetch` で出口を通さずに読み、ほかの HTTP でない
   スキームは `TypeError: fetch failed`（`cause.code === 'ERR_INVALID_URL'`、`unsupported URL scheme <scheme>`）で
   失敗させます。
 - プレビューの Service Worker が判定するのは、別のオリジンへの `http:` と `https:` の要求だけです。

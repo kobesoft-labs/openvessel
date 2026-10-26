@@ -370,7 +370,7 @@ added; an exception in one is logged with `console.error` and doesn't stop the o
 | `port-closed` | `{ port: number }` | The listener is gone (server closed, or its process exited). |
 | `process-exit` | `{ pid: number, code: number, signal: string \| null }` | A process started by `spawn()`/`exec()` ended. Not emitted for processes those start themselves. |
 | `permission-request` | `{ ev: 'permission-request', id: number, url: string, host: string, initiator: string, source: 'runtime' \| 'preview' }` | The kernel asks about a host. Listeners are informational; the answer comes from `onPermissionRequest` or the dialog. |
-| `permission-settled` | `{ ev: 'permission-settled', id: number, host: string, allowed: boolean }` | A request was decided (answered, or timed out after 5 minutes). |
+| `permission-settled` | `{ ev: 'permission-settled', id: number, host: string, allowed: boolean, decision: 'once' \| 'session' \| 'deny' \| 'deny-session' \| 'timeout' }` | A request was decided. `decision` is the answer, or `'timeout'` when nobody answered within 5 minutes (then `allowed` is `false`). An answer that isn't one of the four decisions arrives as `'deny'`. `decision` is **new in 1.2.0**. |
 | `error` | `RuntimeErrorEvent`: `{ error: Error, message: string, fatal: boolean }` | **New in 1.2.0.** Something failed outside a call ([below](#the-error-event)). Without any `error` listener, the error is logged with `console.error`. |
 
 ### The `error` event

@@ -268,7 +268,7 @@ WebSocket を打ち切ります。
 |---|---|---|
 | `/__ov/esm/<VFS の絶対パス>[?query]` | どれでも | カーネルが VFS のファイルから作る ES モジュール（[下](#モジュールの窓口)）。旧ランタイムが使う |
 | `/__ov/builtin/<name>[.mjs]` | どれでも | 組み込みモジュール（`node:fs` など）をかぶせた ES モジュール。旧ランタイムが使う |
-| `/__ov/mw/<pid>/<id>.mjs` | どれでも | 移植ランタイムが `esmRegister` のシステムコールで登録したモジュールのソース |
+| `/__ov/mw/<pid>/<id>.mjs` | どれでも | 移植版ランタイムが `esmRegister` のシステムコールで登録したモジュールのソース |
 | `/__ov/esm-error?…` | どれでも | カーネルが解決できなかった import のエラーを投げるモジュール（カーネルが答える） |
 | `/__ov/net?url=<エンコードした URL>` | どれでも | 通信の出口（[下](#__ovnet)） |
 | `/__ov/ping` | どれでも | `pong`（`text/plain`） |
@@ -299,7 +299,7 @@ WebSocket を打ち切ります。
 
 ### `/__ov/net`
 
-ランタイムからネットワークへの唯一の道です。使うのは、移植ランタイムの `fetch` と旧ランタイムの通信の層（プロセスの
+ランタイムからネットワークへの唯一の道です。使うのは、移植版ランタイムの `fetch` と旧ランタイムの通信の層（プロセスの
 Worker から）、カーネルの npm のクライアントと `curl`・`wget`、そしてカーネルの外向きの TCP の橋渡し（ソケットに
 書かれた HTTP/1.1 をこの要求に変える。`src/kernel/outbound.ts`）です。カーネル自身のクライアントは、ループバックの URL を
 ここへは送らず仮想ポートへ送ります（[通信の方針](network-policy.ja.md#localhost-と仮想ポート)）。
@@ -343,7 +343,7 @@ Service Worker はカーネルに尋ね（`{ k: 'net', url, initiator, token }`�
 | `502` | `network` | `request to <host> failed: <message>. The server may not allow cross-origin requests (CORS) from the browser.` |
 | `502` | `network` | カーネルへの通り道を得られなかった（`OpenVessel kernel is not connected`） |
 
-移植ランタイムの `fetch` はこれらを `TypeError('fetch failed')` にし、その `cause` の `code` を `EACCES`（`denied`）・
+移植版ランタイムの `fetch` はこれらを `TypeError('fetch failed')` にし、その `cause` の `code` を `EACCES`（`denied`）・
 `ETIMEDOUT`（`timeout`）・`ECONNREFUSED`（ほか）にします。旧ランタイムとカーネルの npm のクライアントも同じです。外向きの TCP の橋渡しは、HTTP の `403` か `502` をソケットに書き戻します。
 
 ### Service Worker ↔ ランタイムのフレームとカーネル
@@ -408,8 +408,8 @@ Service Worker は通り道を最大 15 秒待ちます。カーネルの答え�
 | `watch` | `id`・`type`・`path` | `watch` のシステムコールへのファイルシステムの変更 |
 | `thread-exit` | `tid`・`code`・`initFailed?`・`terminated?` | スレッドが終わった |
 | `thread-gone` | `tid` | 見張っていたスレッドがいなくなった |
-| `tcp-accept` | `port`・`fd`・`remoteAddress`・`remotePort` | 移植ランタイム: 待ち受けのポートへの新しい接続 |
-| `pipe-accept` | `port`・`fd`・`remoteAddress`・`remotePort` | 移植ランタイム: Unix ソケットへの新しい接続 |
+| `tcp-accept` | `port`・`fd`・`remoteAddress`・`remotePort` | 移植版ランタイム: 待ち受けのポートへの新しい接続 |
+| `pipe-accept` | `port`・`fd`・`remoteAddress`・`remotePort` | 移植版ランタイム: Unix ソケットへの新しい接続 |
 | `tls-peer` | `fd`・`certs` | 相手の証明書（2 つのプロセスのあいだの TLS） |
 | `udp-msg` | `port`・`data`・`from: { address, port }` | データグラム |
 | `http-req` | `rid`・`port`・`method`・`url`・`headers`・`hasBody`・`upgrade?` | 旧ランタイム: サーバーへの HTTP の要求 |

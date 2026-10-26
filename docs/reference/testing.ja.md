@@ -9,7 +9,7 @@ OpenVessel の試験には 4 つの層があります。Node.js で動かす単�
 | 単体 | `scripts/test.mjs` | Node.js | `npm test` |
 | 端から端まで | `test/e2e/*.mjs` | ビルド（`dist/`）・Google Chrome | `node test/e2e/harness.mjs 'node -v'` |
 | Node の試験 | `test/node-compat/run.mjs` | ビルド・Chrome・`test/node-compat/.node/` | `node test/node-compat/run.mjs --port fs` |
-| Astro のコーパス | `corpus/run.mjs` | ビルド・Chrome・`corpus/sites/`・通信 | `node corpus/run.mjs --port basics` |
+| Astro のコーパス | `corpus/run.mjs` | ビルド・Chrome・`corpus/sites/`・通信 | `node corpus/run.mjs basics` |
 
 ブラウザを使う試験を流している間は、`dist/` をビルドし直さないでください。走っている試験が、古いファイルと新しいファイルの混ざったものを読み込みます。
 
@@ -24,7 +24,7 @@ OpenVessel の試験には 4 つの層があります。Node.js で動かす単�
 | `OV_TRACE` | `harness.mjs` | 空でなければカーネルのトレース（`debug.trace`）を入れる。起動・パイプを閉じる・読みの EOF・fd 0 の同期の読みのたびに `[trace]` の行を console に出す。`OV_CONSOLE=1` で見える |
 | `SETUP` | `run-file.mjs` | ファイルを書く前に流すコマンドライン |
 | `PRINT` | `port-fs.mjs` | 空でなければ、どの場面も実際の出力を出す |
-| `OV_TIMING` | 移植版ランタイム | ホストではなく OpenVessel の中で使う。起動の時間を出す（[Node.js の層](nodejs-runtime.ja.md#ov_timing)） |
+| `OV_TIMING` | 移植版ランタイム | ホストではなく OpenVessel の中で使う。起動の時間を出す（[Node.js ランタイム](nodejs-runtime.ja.md#ov_timing)） |
 
 ## 単体の試験
 
@@ -52,7 +52,7 @@ OpenVessel の試験には 4 つの層があります。Node.js で動かす単�
 
 ## 端から端までの試験
 
-`test/e2e/` のスクリプトは、どれも `harness.mjs` を使います。`scripts/serve.mjs` を起こし（`OV_PORT_BASE` に従う）、手元の Chrome を `playwright-core` で起動し（`channel: 'chrome'`・残るプロファイル・`--js-flags=--stack-size=4000`）、`http://localhost:<基準>/` のプレイグラウンドを開き、`window.ovReady` を待って、プレイグラウンドの `window.ov`（`OpenVessel` のインスタンス）を使います。プレイグラウンドは `/home/user/app` に Astro 5 の見本のプロジェクトを置きます。コマンドが `/etc/openvessel/node` を書かない限り、旧ランタイムで動きます（[Node.js の層](nodejs-runtime.ja.md#ランタイムの選び方) を参照）。
+`test/e2e/` のスクリプトは、どれも `harness.mjs` を使います。`scripts/serve.mjs` を起こし（`OV_PORT_BASE` に従う）、手元の Chrome を `playwright-core` で起動し（`channel: 'chrome'`・残るプロファイル・`--js-flags=--stack-size=4000`）、`http://localhost:<基準>/` のプレイグラウンドを開き、`window.ovReady` を待って、プレイグラウンドの `window.ov`（`OpenVessel` のインスタンス）を使います。プレイグラウンドは `/home/user/app` に Astro 5 の見本のプロジェクトを置きます。コマンドが `/etc/openvessel/node` に `legacy` を書き込まない限り、移植版ランタイムで動きます（[Node.js ランタイム](nodejs-runtime.ja.md#ランタイムの選び方) を参照）。
 
 `harness.mjs` が出す関数:
 
@@ -61,6 +61,8 @@ OpenVessel の試験には 4 つの層があります。Node.js で動かす単�
 | `startServer()` | `scripts/serve.mjs` を起こし、何か出力したら解決する |
 | `openBrowser({ headless = true, profile })` | Chrome を起動し、プレイグラウンドを開き、`ovReady` を待つ。`OV_CONSOLE`・`OV_TRACE` が効く |
 | `exec(page, cmd, { cwd = '/home/user/app', timeout = 600000, allowAll = true })` | 通信の方針を `allow-all` にし（`allowAll: false` でなければ）、`ov.exec(cmd, { cwd })` を実行し、`{ code, output, ms }` を返す |
+| `useLegacyRuntime(page)` | `/etc/openvessel/node` に `legacy` を書き込み、そのあとに起動する node のプロセスを旧ランタイムで動かす |
+| `usePortedRuntime(page)` | `/etc/openvessel/node` に `port` を書き込む。移植版ランタイムは既定なので、選択を明示するだけ |
 
 | スクリプト | 引数 | すること |
 |---|---|---|
@@ -68,17 +70,17 @@ OpenVessel の試験には 4 つの層があります。Node.js で動かす単�
 | `run-file.mjs` | `<手元のファイル> <VFS のパス> '<コマンド>'` | `SETUP` があれば流し、手元のファイルを VFS に書いて、コマンドを実行する |
 | `watch.mjs` | `[--mount <dir>] '<コマンド>' [秒=20]` | `/bin/sh -c <コマンド>` を起こし（cwd は `/home/user`。`--mount` では先に手元のプロジェクトを写した `/home/user/app`）、200 ms ごとに出力を流す。終われば `[exit <code>]`、時間切れなら `[still running after <n>s] ps:` とプロセスの一覧を出す |
 | `project.mjs` | `<dir> ['<コマンド>']`（既定は `npm install && npm run build`） | `/home/user/app` を手元のプロジェクトで置き換え、コマンドを実行する（上限 15 分）。`node_modules`・`.git`・`dist`・`.astro`・`.vercel`・`.netlify`・`.cache`・`.turbo`・`.output` と 64 MiB を超えるファイルは飛ばし、シンボリックリンクは残す。`collectFiles()` と `mountProject()` を出す |
-| `dev.mjs` | `[--port]` | `/home/user/app` で `npm install`、`npm run dev` を起こし、`server-ready` を待ち、プレビューの `<h1>` を確かめ、`src/pages/index.astro` を書き換えて、HMR での更新を 30 秒まで待つ |
+| `dev.mjs` | `[--legacy]` | `/home/user/app` で `npm install`、`npm run dev` を起こし、`server-ready` を待ち、プレビューの `<h1>` を確かめ、`src/pages/index.astro` を書き換えて、HMR での更新を 30 秒まで待つ |
 | `preview-port.mjs` | — | 移植版ランタイムで、ポート 4000 に `http` のサーバーを立て、プレビューの iframe に読み込み（70000 バイトの分割された本文）、iframe から POST する。`OK` か `FAIL` を出し、0／1 で終わる |
 | `port-fs.mjs` | `[場面…]` | 移植版ランタイムで、fs の場面 `dir`・`watch`・`watch2`・`cp`・`cp2`・`misc`・`misc2`（opendir と Dir・`fs.watch`・`fs.watchFile`・`fs.cp`／`cpSync`・readv／writev・FileHandle）を流し、それぞれの出力を Linux の Node v22.23.4（Docker の `node:22.23.4-bookworm-slim`）で記録した期待の出力と比べる。`ok`／`FAIL` と行の差分、`all passed` か `<n> failed` を出し、0／1 で終わる |
 | `esm-graph.mjs` | `[--port] <プロジェクトのディレクトリ> <VFS の入口のパス> [インストールのコマンド='npm install']` | プロジェクトを置いてインストールし、カーネルが `/__ov/esm` で配る ES モジュールのグラフ（旧ランタイムの ESM の配信）をたどって、読み込めないモジュールを報告する |
 | `debug-esm.mjs` | `[--port] <VFS のパス…>` | `npm install` のあと、それぞれのパスについて `/__ov/esm<パス>` の最初の 3000 文字を出す |
 
-`--port`（`dev.mjs`・`esm-graph.mjs`・`debug-esm.mjs`）は、何かを動かす前に `harness.mjs` の `usePortedRuntime(page)` で移植版ランタイムを選びます（`/etc/openvessel/node` に `port` を書く）。`esm-graph.mjs` と `debug-esm.mjs` が読む ESM の配信を使うのは旧ランタイムだけなので、`--port` で変わるのはインストールを動かすランタイムです。
+`dev.mjs` は移植版ランタイムで動きます。`--legacy` を付けると、何かを動かす前に `harness.mjs` の `useLegacyRuntime(page)` で旧ランタイムに切り替えます。`esm-graph.mjs` と `debug-esm.mjs` は逆で、読み出す ESM の配信を使うのが旧ランタイムだけなので、`--port` を付けない限り `useLegacyRuntime(page)` で旧ランタイムを選びます。`--port` を付けると、インストールは移植版ランタイムで動きます。
 
 ```bash
 OV_PORT_BASE=5270 node test/e2e/harness.mjs \
-  'mkdir -p /etc/openvessel && echo port > /etc/openvessel/node; node -p process.versions.node'
+  'mkdir -p /etc/openvessel && echo legacy > /etc/openvessel/node; node -p process.versions.node'
 HEADED=1 node test/e2e/project.mjs ~/sites/blog 'npm install && npm run build'
 node test/e2e/watch.mjs --mount ~/sites/blog 'npm run dev' 60
 ```
@@ -104,7 +106,7 @@ node test/e2e/watch.mjs --mount ~/sites/blog 'npm run dev' 60
 | `node test/node-compat/run.mjs --baseline [prefix…]` | 選んだ試験を本物の Node で動かし（`npx -y node@<NODE_VERSION>`、8 本ずつ、cwd は `.node/`、`NODE_TEST_DIR` は外す、1 本 30 秒で `SIGKILL`）、`results/baseline.json` に書く |
 | `node test/node-compat/run.mjs [--port] [prefix…]` | OpenVessel の中で動かして結果を書き、報告を出す |
 | `node test/node-compat/run.mjs [--port] --report` | 取ってある結果から報告だけを作り直す |
-| `--port` | 移植版ランタイムを使い（`/etc/openvessel/node` を `port` に）、結果を `results/` ではなく `results/port/` に置く |
+| `--port` | 移植版ランタイムで動かし、結果を `results/` ではなく `results/port/` に置く（公開している数字は `results/port/` のもの）。付けないときは `/etc/openvessel/node` に `legacy` を書き込み、旧ランタイムで動かす |
 | `prefix…` | ほかの引数: ファイル名が `test-<prefix>` で始まる試験だけにする |
 
 ### 流れ
@@ -182,13 +184,16 @@ node test/e2e/watch.mjs --mount ~/sites/blog 'npm run dev' 60
 
 ### corpus/run.mjs
 
-`node corpus/run.mjs [--port] [filter…]` は、ID がどれかの filter を含むサイト（filter が無ければ全部）について、次を行います。
+`node corpus/run.mjs [--legacy] [filter…]` は、ID がどれかの filter を含むサイト（filter が無ければ全部）について、次を行います。
 
 1. プレイグラウンドを読み直し（新しいカーネル）、`corpus/sites/<id>` を `/home/user/app` に置く
 2. パッケージマネージャを選ぶ: `package.json` の `packageManager`（`npm`・`pnpm`・`yarn`・`bun`）、無ければ `pnpm-lock.yaml` → pnpm、`yarn.lock` → yarn、`bun.lock`／`bun.lockb` → bun、それ以外は npm
-3. `<pm> install`、通れば `<pm> run build`。どちらも `export CI=1 ASTRO_TELEMETRY_DISABLED=1`（`--port` では移植版ランタイムを選ぶ行も）を付け、上限は 15 分
+3. `<pm> install`、通れば `<pm> run build`。どちらも `export CI=1 ASTRO_TELEMETRY_DISABLED=1`（`--legacy` では旧ランタイムを選ぶ行も）を付け、上限は 15 分
 
 道具そのものが失敗したときは、ブラウザを起動し直して次のサイトへ進みます。
+
+結果は `corpus/results/port/`（既定の移植版ランタイム）に、`--legacy` のときは `corpus/results/` に書き込みます。
+下の表の `[/port]` は、この違いを表しています。
 
 | 出力 | 中身 |
 |---|---|
@@ -201,7 +206,7 @@ node test/e2e/watch.mjs --mount ~/sites/blog 'npm run dev' 60
 
 - **単体の試験**: `node:test` と `node:assert/strict` を使って `test/unit/<name>.test.ts` を足します。名前の末尾で拾われます。ソースは直接（`../../src/…`）import します。npm のパッケージは外のままです。
 - **バインディングの差分の試験**: `{ 区分: [{ args, r }] }` を返す `run(binding)` を出す `test/fixtures-gen/<name>.cases.mjs` と、`generate('<バインディングの名前>', run)` を呼ぶ `test/fixtures-gen/<name>.mjs` を書き、`scripts/regen-fixtures.mjs` にジョブを足して流し、`compareFixtures(run(createX()), fixture.results, known)` を呼ぶ `test/unit/bindings-<name>.test.ts` を書きます。認める違いは、理由を名前にして `known` に並べます。
-- **端から端までの確かめ**: `harness.mjs` の `startServer`・`openBrowser`・`exec` を使うスクリプトを `test/e2e/` に書きます。移植版ランタイムは `usePortedRuntime(page)`（または `mkdir -p /etc/openvessel && echo port > /etc/openvessel/node`）で選びます。`port-fs.mjs` や `preview-port.mjs` のように、結果をはっきり出し、失敗したら 0 以外で終わるようにします。
+- **端から端までの確かめ**: `harness.mjs` の `startServer`・`openBrowser`・`exec` を使うスクリプトを `test/e2e/` に書きます。スクリプトは既定で移植版ランタイムで動きます（旧ランタイムで動かすときは `useLegacyRuntime(page)`）。`port-fs.mjs` や `preview-port.mjs` のように、結果をはっきり出し、失敗したら 0 以外で終わるようにします。
 - **ブラウザでは通らない Node の試験**: 理由とともに `test/node-compat/limits/<module>.json` に足します。それ以後は target に数えません。報告が通ったと言えば外します。
 - **コーパスのサイト**: `corpus/collect.mjs` を流すか、`corpus/sites.json` に項目を足し、ファイルを `corpus/sites/<id>/` に置きます。
 

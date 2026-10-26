@@ -517,8 +517,8 @@ How the kernel runs a program file (`planExec` in `src/kernel/kernel.ts`):
 | no `#!`, name ends in `.js`, `.cjs` or `.mjs` | Node.js with the file |
 | no `#!`, anything else | `sh file` (like POSIX `ENOEXEC` handling) |
 
-Which Node.js runtime is started (the ported or the legacy one) is decided per process start by
-`/etc/openvessel/node`; see [Node.js runtime](nodejs-runtime.md).
+Node.js runs on the ported runtime unless `/etc/openvessel/node` contains `legacy` when the process
+starts; see [Node.js runtime](nodejs-runtime.md).
 
 ### Exit status
 
@@ -1339,7 +1339,7 @@ found / run.
 
 ### curl and wget
 
-`curl` and `wget` are in `/usr/bin`. Requests go through the kernel's network gate and the runtime's
+`curl` and `wget` are in `/usr/bin`. Requests go through the kernel's network policy check and the runtime's
 fetch proxy, so the [network policy](network-policy.md) applies and the target server must allow
 cross-origin requests from the browser; a request the browser cannot make fails with status 7.
 

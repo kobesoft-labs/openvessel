@@ -15,7 +15,7 @@ OpenVessel は、カーネル向けに書いた自前のパッケージマネー
 - lockfile は版の手がかりとしてだけ読みます。lockfile を書くのは `yarn` だけです（v1 の形の `yarn.lock`。
   [yarn.lock](#yarnlock)）。それ以外に `node_modules` のほかで書くのは `node_modules/.package-lock.json` だけです
   （[隠れ lockfile](#隠れ-lockfile)）。
-- レジストリへの通信は、ほかの外向きの要求と同じくランタイムの関所を通ります（[通信の方針](network-policy.ja.md)）。
+- レジストリへの通信は、ほかの外向きの要求と同じく、ランタイムでネットワークポリシーの確認を受けます（[ネットワークポリシー](network-policy.ja.md)）。
 - ライフサイクルスクリプトはプロジェクト自身のものだけを動かし、依存のものは動かしません。
 - ネイティブのパッケージは、入れるときに WebAssembly 版か互換パッケージに置き換えます
   （[ネイティブのモジュール](native-modules.ja.md)）。
@@ -666,7 +666,7 @@ is-number@^6.0.0:
 |---|---|
 | パッケージの情報 | `GET <registry><name>`。スコープ付きの名前の `/` は `%2f` にする。ヘッダー `accept: application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*`（省略版の情報） |
 | tarball | `dist.tarball` の URL への `GET`。gzip は先頭のバイトで見分け、`DecompressionStream` で戻す |
-| 互換パッケージの tarball | `<ランタイムの基点>/compat/` から直接取る。関所は通らない（[ネイティブのモジュール](native-modules.ja.md)） |
+| 互換パッケージの tarball | `<ランタイムの基点>/compat/` から直接取る。ネットワークポリシーの確認は通らない（[ネイティブのモジュール](native-modules.ja.md)） |
 
 上限とやり直し:
 
@@ -679,8 +679,8 @@ is-number@^6.0.0:
 |---|---|---|
 | 404 | `E404` | `404 Not Found - GET <url> - '<name>' is not in this registry.`（情報）または `404 Not Found - GET <url>` |
 | ほかの HTTP の状態 | `E<status>` | `<status> <statusText> - GET <url>` |
-| 通信の方針で断られた | `EACCES` | 関所のメッセージ。続けて `npm error network access was denied by the OpenVessel network policy` |
-| 通信の失敗・CORS | `ECONNREFUSED` | 関所のメッセージ |
+| 通信の方針で断られた | `EACCES` | 外部通信の制御が出すメッセージ。続けて `npm error network access was denied by the OpenVessel network policy` |
+| 通信の失敗・CORS | `ECONNREFUSED` | 外部通信の制御が出すメッセージ |
 | integrity が合わない | `EINTEGRITY` | `integrity checksum failed for <url>` |
 
 失敗した install は（どの入口でも）`npm error code <code>` と `npm error <message>` を出し、終了コード 1 です。

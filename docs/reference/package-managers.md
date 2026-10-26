@@ -16,7 +16,7 @@ resolves and lays out `node_modules`, which lockfiles are read, and how the regi
 - Lockfiles are read as version hints only. Only `yarn` writes one (`yarn.lock` in the v1 format, see
   [yarn.lock](#yarnlock)); otherwise the only file written besides `node_modules` is
   `node_modules/.package-lock.json` (see [Hidden lockfile](#hidden-lockfile)).
-- Registry traffic goes through the runtime's network gate like every other outgoing request
+- Registry traffic is checked against the network policy in the runtime like every other outgoing request
   ([Network policy](network-policy.md)).
 - Lifecycle scripts run only for the project itself, never for dependencies.
 - Native packages are replaced by WebAssembly builds or compat packages while installing
@@ -701,7 +701,7 @@ of the network policy allows `registry.npmjs.org`, `registry.npmjs.com`, `regist
 |---|---|
 | Package metadata | `GET <registry><name>` with `/` in scoped names encoded as `%2f`, header `accept: application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*` (abbreviated metadata) |
 | Tarball | `GET` of the `dist.tarball` URL; gzip is detected by its magic bytes and decompressed with `DecompressionStream` |
-| Compat tarball | fetched directly from `<runtime base>/compat/`, not through the network gate ([Native modules](native-modules.md)) |
+| Compat tarball | fetched directly from `<runtime base>/compat/`, without the network policy check ([Native modules](native-modules.md)) |
 
 Limits and retries:
 
@@ -714,8 +714,8 @@ Limits and retries:
 |---|---|---|
 | 404 | `E404` | `404 Not Found - GET <url> - '<name>' is not in this registry.` (metadata) or `404 Not Found - GET <url>` |
 | other HTTP status | `E<status>` | `<status> <statusText> - GET <url>` |
-| refused by the network policy | `EACCES` | the gate's message, then `npm error network access was denied by the OpenVessel network policy` |
-| network failure, CORS | `ECONNREFUSED` | the gate's message |
+| refused by the network policy | `EACCES` | the outbound proxy's message, then `npm error network access was denied by the OpenVessel network policy` |
+| network failure, CORS | `ECONNREFUSED` | the outbound proxy's message |
 | integrity mismatch | `EINTEGRITY` | `integrity checksum failed for <url>` |
 
 An install that fails prints `npm error code <code>` and `npm error <message>` (with every front end) and

@@ -85,7 +85,7 @@ uid/gid 1000、大きさ 0、時刻はすべて「いま」で、mode は `S_IFI
 ### ユーザー
 
 すべての inode は uid 1000、gid 1000（`user`）のもので、プロセスもそのユーザーとして動きます（`process.getuid()` は
-1000）。`chown` は何も変えません。移植ランタイムの `fs.chown`・`fs.fchown`・`fs.lchown` はパスや fd があるかを
+1000）。`chown` は何も変えません。移植版ランタイムの `fs.chown`・`fs.fchown`・`fs.lchown` はパスや fd があるかを
 調べるだけ、旧ランタイムでは何もせず、`chown` のプログラムも何もしません。
 
 ### 調べること
@@ -161,7 +161,7 @@ umask はプロセスごとです。ホストが起動したプロセスは 0o02
 - `lstat().size` はリンク先の UTF-8 の長さです。
 - 行き先の無いシンボリックリンクを通してファイルを作ると（`open(O_CREAT)`・`writeFile`）、リンク先ができます。
   `O_EXCL` 付きなら `EEXIST` です。
-- `utimes` はリンクをたどります。移植ランタイムの `fs.lutimes()` は、リンクそのものの時刻を変えます。
+- `utimes` はリンクをたどります。移植版ランタイムの `fs.lutimes()` は、リンクそのものの時刻を変えます。
 - `chmod` はリンクをたどります（`lchmod` はありません）。
 
 ### ハードリンク
@@ -211,7 +211,7 @@ umask はプロセスごとです。ホストが起動したプロセスは 0o02
 - 項目は入れた順、つまり名前を作った順に返ります。`rename` で入ってきた名前は末尾に付きます。すでにある名前の上に
   `rename` したときは、その名前の位置のままです。`.` と `..` は出ません。
 - 種類付き（`withFileTypes`）の種類は、その項目自身のものです（シンボリックリンクはシンボリックリンクのまま）。
-- 移植ランタイムの `fs.opendir` は、開いたときの一覧の写しを取り、`bufferSize` ずつ渡します。
+- 移植版ランタイムの `fs.opendir` は、開いたときの一覧の写しを取り、`bufferSize` ずつ渡します。
 - `/proc` に出るのは `cpuinfo`・`meminfo`・`version` だけです。`/dev/fd` は空で、`readdir('/proc/self/fd')` は
   `ENOENT` です。
 
@@ -236,7 +236,7 @@ umask はプロセスごとです。ホストが起動したプロセスは 0o02
 | `truncate`・`ftruncate` | `EISDIR`。inode の無い記述子や、書き込み用に開いていない記述子の `ftruncate` は `EINVAL` | ほかの、通常のファイルでないものはそのまま |
 | `copyFile` | `EISDIR`（元がディレクトリ）・`EEXIST`（`COPYFILE_EXCL`）・`ENOENT`（コピー先のディレクトリが無い） | 両側でシンボリックリンクをたどる。`COPYFILE_FICLONE*` のフラグは無視 |
 | `lseek` | `ESPIPE`（通常のファイルでない）・`EINVAL`（結果が負） | |
-| `fs.rm`（旧） | `force` でなければ `ENOENT`、`ERR_FS_EISDIR`（`recursive` 無しのディレクトリ） | 移植ランタイムは、上の呼び出しの上で Node 自身の `rm`（rimraf）を動かす |
+| `fs.rm`（旧） | `force` でなければ `ENOENT`、`ERR_FS_EISDIR`（`recursive` 無しのディレクトリ） | 移植版ランタイムは、上の呼び出しの上で Node 自身の `rm`（rimraf）を動かす |
 | `fs.cp` | Node の `ERR_FS_CP_*` のエラー | 移植: Node の `cpSync` の確認を、ネイティブの半分を作り直して行う。旧: カーネルの `cp` |
 
 ## 特別なファイル
@@ -252,7 +252,7 @@ umask はプロセスごとです。ホストが起動したプロセスは 0o02
 | `/proc/self` | `lstat` ではシンボリックリンク（大きさ = pid の桁数）、`readlink` は pid を返す、`stat` ではディレクトリ（mode 0o555） |
 | `/proc/<自分の pid>`・`/proc/<自分の pid>/fd` | `stat` ではディレクトリ（0o555 と 0o500） |
 | `readlink('/proc/self/fd/N')` | ファイルのパス・`/dev/tty`・`pipe:[id]`・`socket:[id]` |
-| `/proc/cpuinfo`・`/proc/meminfo`・`/proc/version` | 起動時に書いた固定のファイル。CPU・メモリ・カーネルのバージョンは移植ランタイムの `os` モジュールが返すものと同じ（[起動時のファイルシステム](kernel.ja.md#起動時のファイルシステム)） |
+| `/proc/cpuinfo`・`/proc/meminfo`・`/proc/version` | 起動時に書いた固定のファイル。CPU・メモリ・カーネルのバージョンは移植版ランタイムの `os` モジュールが返すものと同じ（[起動時のファイルシステム](kernel.ja.md#起動時のファイルシステム)） |
 | FIFO（`mkfifo`） | 下を参照 |
 | Unix ドメインソケット | `listen(path)` で作る。`open` ではつながらない（`net.connect(path)` を使う） |
 
@@ -299,7 +299,7 @@ VFS を変える操作はすべて、`{ type, path }` の通知をその場で�
 
 ### `fs.watch`
 
-| | 移植ランタイム（`src/nodejs/bindings/fs_event_wrap.ts`） | 旧ランタイム（`src/node/fs.ts`） |
+| | 移植版ランタイム（`src/nodejs/bindings/fs_event_wrap.ts`） | 旧ランタイム（`src/node/fs.ts`） |
 |---|---|---|
 | パスが無い | `ENOENT`（先に stat する） | `ENOENT`（先に stat する） |
 | 監視しているパスそのものの `filename` | その最後の名前 | その最後の名前 |
@@ -310,7 +310,7 @@ VFS を変える操作はすべて、`{ type, path }` の通知をその場で�
 
 ### `fs.watchFile`
 
-| | 移植ランタイム | 旧ランタイム |
+| | 移植版ランタイム | 旧ランタイム |
 |---|---|---|
 | 見に行く間隔 | `interval` ミリ秒ごとに `stat`（Node の既定は 5007） | `min(interval, 1000)` ミリ秒ごと |
 | 変わったとみなすとき | ctime・mtime・birthtime・size・mode・uid・gid・ino・dev のどれかが違う（libuv の決まり） | mtime・size・ino のどれかが違う |
@@ -334,7 +334,7 @@ VFS を変える操作はすべて、`{ type, path }` の通知をその場で�
 
 ## Node の `fs` とカーネルの対応
 
-移植ランタイムは `internalBinding('fs')` を作り直しています（`src/nodejs/bindings/fs.ts`・`fs_dir.ts`・
+移植版ランタイムは `internalBinding('fs')` を作り直しています（`src/nodejs/bindings/fs.ts`・`fs_dir.ts`・
 `fs_event_wrap.ts`）。その上には Node 自身の `lib/fs.js` が、そのまま乗っています。バインディングの関数はどれも、
 Node の 3 つの形で動きます: 同期（例外を投げる）、コールバック（`FSReqCallback`。後のターンで完了）、Promise
 （`kUsePromises`）。エラーは Node の `UVException`（`ENOENT: no such file or directory, open '/x'`）になります。

@@ -48,11 +48,11 @@ const vessel = await OpenVessel.boot({
 | `runtime.js` | `runtime.html` のふつうのスクリプト（IIFE）。オリジンの確認、Service Worker の登録、カーネルの起動、ホストへの通り道の受け渡し（`src/runtime/runtime.ts`） | `runtime.html` と一緒に |
 | `sw.js` | ランタイムの Service Worker（`src/runtime/sw.ts`）。`/__ov/esm/`・`/__ov/builtin/`・`/__ov/mw/`・`/__ov/esm-error` の ES モジュールの配信、通信の出口 `/__ov/net`、`/__ov/ping`、カーネルごとの `/__ov/k/<id>/` の下のランタイム自身のファイル、ランタイム自身のファイルへの分離のヘッダー | `runtime.js` がスコープ `./` で登録 |
 | `kernel.js` | カーネル。ES モジュールの Worker（`src/kernel/index.ts`） | 起動ごとに 1 回、`new Worker('__ov/k/<id>/kernel.js', { type: 'module' })`。`<id>` はランタイムのフレームごとのでたらめなカーネルの id で、Service Worker が `kernel.js` を返す |
-| `process.js` | **旧ランタイム**: 以前からの手書きの Node 互換の層（`src/node/worker.ts`）。プロセスごとに 1 つのモジュール Worker | 既定で、すべての `node` プロセス |
-| `node-process.js` | **移植ランタイム**: Node.js 自身の `lib/` を、作り直した `internalBinding()` の上で動かす（`src/nodejs/boot.ts`）。プロセスごとに 1 つのモジュール Worker | VFS のファイル `/etc/openvessel/node` が `port` のとき、すべての `node` プロセス |
+| `process.js` | **旧ランタイム**: 以前からの手書きの Node 互換の層（`src/node/worker.ts`）。プロセスごとに 1 つのモジュール Worker | VFS のファイル `/etc/openvessel/node` が `legacy` のとき、すべての `node` プロセス |
+| `node-process.js` | **移植版ランタイム**: Node.js 自身の `lib/` を、作り直した `internalBinding()` の上で動かす（`src/nodejs/boot.ts`）。プロセスごとに 1 つのモジュール Worker | 既定で、すべての `node` プロセス |
 | `nodelib.js` | Node.js v22.23.4 の `lib/`（と `deps/`）のソースを文字列で持つもの。`scripts/gen-nodelib.mjs` が作る（約 4.5 MB）。ビルドのときに `vendor/node/` があった場合だけ書き出される | `node-process.js` が静的に import |
-| `ts-strip.js` | sucrase（ふつうのスクリプト）。移植ランタイムが `require(esm)` の ESM → CommonJS の書き換えに使う | 移植ランタイムで初めて使うとき。同期の `XMLHttpRequest` で取って評価 |
-| `amaro.js` | Node 自身の `amaro`（swc を WebAssembly にしたもの。JavaScript に埋め込み、約 3.4 MB）。Node が同梱するのと同じ版 | 移植ランタイムで初めて TypeScript の型を取り除くとき。同期の `XMLHttpRequest` |
+| `ts-strip.js` | sucrase（ふつうのスクリプト）。移植版ランタイムが `require(esm)` の ESM → CommonJS の書き換えに使う | 移植版ランタイムで初めて使うとき。同期の `XMLHttpRequest` で取って評価 |
+| `amaro.js` | Node 自身の `amaro`（swc を WebAssembly にしたもの。JavaScript に埋め込み、約 3.4 MB）。Node が同梱するのと同じ版 | 移植版ランタイムで初めて TypeScript の型を取り除くとき。同期の `XMLHttpRequest` |
 | `chunks/chunk-<hash>.js` | `kernel.js` と `process.js` が共有するコード（esbuild の分割） | その 2 つが静的に import |
 | `chunks/esm-<hash>.js` | 分割した sucrase | カーネルか旧ランタイムが初めて TypeScript を取り除く、または ESM を書き換えるときに動的 `import()` |
 | `chunks/legacy-<hash>.js` | `@noble/hashes` の古いハッシュ | 組み込みの `md5sum` が動的 `import()` |
@@ -65,12 +65,12 @@ const vessel = await OpenVessel.boot({
 チャンクのハッシュはビルドごとに変わります。名前の一覧ではなく、ディレクトリをまるごと配置してください。
 
 `node` のプロセスにどちらのスクリプトを使うかは、プロセスを起動するたびに決まります。カーネルは
-`/etc/openvessel/node` を読み、前後の空白を除いた中身が `port` なら `node-process.js`、そうでなければ `process.js`
-を起動します（`src/kernel/index.ts` の `processScript()`）。公開している互換性の数字は移植ランタイムのものです。
-移植ランタイムを使うには、プロセスを起動する前にこのファイルを書きます。
+`/etc/openvessel/node` を読み、前後の空白を除いた中身が `legacy` なら `process.js`、そうでなければ `node-process.js`
+を起動します（`src/kernel/index.ts` の `processScript()`）。公開している互換性の数字は移植版ランタイムのもので、
+こちらは設定なしで使われます。旧ランタイムで動かしたいときは、プロセスを起動する前にこのファイルを書き込みます。
 
 ```ts
-await vessel.mount({ node: 'port' }, { path: '/etc/openvessel' });
+await vessel.mount({ node: 'legacy' }, { path: '/etc/openvessel' });
 ```
 
 カーネルは、最後に起動したスクリプトの Worker を 2 つ待機させておきます（`WARM = 2`）。最初の `node` のあとは、
@@ -154,7 +154,7 @@ frame-ancestors <ホストのオリジン>
 |---|---|
 | `script-src 'unsafe-eval'` | Node の組み込みモジュールは、`nodelib.js` から間接 `eval` でコンパイルする（`src/nodejs/boot.ts` の `compileBuiltin()`）。`vm`・CommonJS の包み・`amaro.js`・`ts-strip.js` も同じように評価する |
 | `script-src 'wasm-unsafe-eval'` | esbuild・rollup・rolldown・lightningcss・amaro（swc）・互換パッケージは WebAssembly で動く |
-| `script-src data:` | 移植ランタイムのモジュールローダーは `data:text/javascript,…` のモジュールを import する（`src/nodejs/bindings/module_wrap.ts`）。旧ランタイムも `eval` で ES モジュールを動かす `worker_threads` で使う |
+| `script-src data:` | 移植版ランタイムのモジュールローダーは `data:text/javascript,…` のモジュールを import する（`src/nodejs/bindings/module_wrap.ts`）。旧ランタイムも `eval` で ES モジュールを動かす `worker_threads` で使う |
 | `connect-src 'self'` | この CSP の目的。プロセスは `fetch` や `WebSocket` でランタイムのオリジンの外へ出られないので、出口は `/__ov/net` だけになる。そこで Service Worker が通信の方針を確かめる |
 | `frame-ancestors` | `runtime.html` を埋め込めるのをホストのページだけにする |
 
@@ -278,7 +278,7 @@ self.addEventListener('fetch', (e) => {
 });
 ```
 
-デモはページからの相対 URL で起動し、プロセスを移植ランタイムに切り替えます。
+デモはページからの相対 URL で起動します。
 
 ```ts
 const here = new URL('./', location.href);
@@ -287,7 +287,6 @@ const vessel = await OpenVessel.boot({
   previewUrl: new URL('preview/', here).href,
   network: { mode: 'allowlist', presets: ['npm', 'fonts', 'cdn'] },
 });
-await vessel.mount({ node: 'port' }, { path: '/etc/openvessel' });
 ```
 
 デモの `build.mjs` は `dist/runtime` を `site/runtime` に、`dist/preview` を `site/preview` にコピーし、空の `.nojekyll`
@@ -304,7 +303,7 @@ force-push します。ヘッダーが無いので、ランタイムの CSP も 
 **ランタイム。** カーネルは自分の基準の URL を `kernel.js` のディレクトリから（`src/kernel/base.ts` の `RUNTIME_BASE`）、
 それぞれのランタイムは自分の Worker のスクリプト（`node-process.js`・`process.js`）のディレクトリから取ります。
 Service Worker は要求のパスからスコープ（とカーネルの `/__ov/k/<id>/` の前置き）を取り除いてから `/__ov/…` と照らし合わせます。
-npm のクライアントの `/__ov/net` と `compat/` の取得、移植ランタイムの `/__ov/net` と `/__ov/mw/` の URL、旧ランタイムの
+npm のクライアントの `/__ov/net` と `compat/` の取得、移植版ランタイムの `/__ov/net` と `/__ov/mw/` の URL、旧ランタイムの
 `/__ov/esm/`・`/__ov/builtin/`・`/__ov/net` の URL（カーネルが配るモジュールに書き込むものも）は、どれもこの基準からの相対です。
 `kernel.js` は `__ov/k/<id>/kernel.js` として起動し、プロセスの Worker を自分と同じ場所から起動するので、基準は
 `<ランタイムのディレクトリ>/__ov/k/<id>` です。Service Worker はその下の `/__ov/…` をカーネル `<id>` への要求として
@@ -371,7 +370,7 @@ OpenVessel は Chromium 系のブラウザで開発・テストしています�
 - モジュール Worker（`new Worker(url, { type: 'module' })`）と、カーネルの Worker から作る入れ子の Worker
 - ランタイムとプレビューのオリジンの、別オリジンの iframe の中の Service Worker
 - iframe の `allow="cross-origin-isolated"`
-- Worker の中の同期の `XMLHttpRequest`（移植ランタイム: `amaro.js`・`ts-strip.js`）
+- Worker の中の同期の `XMLHttpRequest`（移植版ランタイム: `amaro.js`・`ts-strip.js`）
 - 組み込みの許可のダイアログのための `<dialog>`（`onPermissionRequest` を渡さないときだけ）
 
 `location.ancestorOrigins` はあれば使います。
@@ -408,7 +407,7 @@ server {
         add_header Cache-Control "no-cache" always;
     }
     location = /sw.js {
-        # the network gate: no CSP here
+        # the network policy checks happen here: no CSP
         include snippets/openvessel-isolation.conf;
         add_header Cache-Control "no-cache" always;
     }
@@ -507,4 +506,4 @@ app.example.com {
       ファイルを含む）
 - [ ] `runtimeUrl` と `previewUrl` が `/` で終わっている（か、`runtimeUrl` が `runtime.html` の URL）
 - [ ] ハッシュ付きのチャンクは長くキャッシュしてよい。ほか、特に Service Worker は確かめ直す
-- [ ] プロセスを移植ランタイムで動かすなら、`/etc/openvessel/node` が `port` になっている
+- [ ] 旧ランタイムで動かすつもりがないなら、`/etc/openvessel/node` が `legacy` になっていない

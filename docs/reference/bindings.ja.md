@@ -2,7 +2,7 @@
 
 [English](bindings.md)
 
-Node の `lib/` は `internalBinding(name)` を通して C++ の半分とやり取りします。このページは、移植版ランタイムが知っているバインディングの名前を全部挙げ、それぞれをどのファイルが実装しているか、どこまでできているか、どうまねているかを示します。あわせて、バインディングを本物の Node とどう突き合わせて試験しているかを説明します。ランタイム全体の振る舞いは [Node.js の層](nodejs-runtime.ja.md) にあります。
+Node の `lib/` は `internalBinding(name)` を通して C++ の半分とやり取りします。このページは、移植版ランタイムが知っているバインディングの名前を全部挙げ、それぞれをどのファイルが実装しているか、どこまでできているか、どうまねているかを示します。あわせて、バインディングを本物の Node とどう突き合わせて試験しているかを説明します。ランタイム全体の振る舞いは [Node.js ランタイム](nodejs-runtime.ja.md) にあります。
 
 ## バインディングの引き方
 
@@ -42,7 +42,7 @@ Node の `lib/` は `internalBinding(name)` を通して C++ の半分とやり�
 
 | バインディング | 実装 | 状況 | メモ |
 |---|---|---|---|
-| `async_wrap` | `process.ts` | 一部 | `async_hook_fields`・`async_id_fields`・`async_ids_stack` は `AsyncHooks` の初めの状態から始める（吸い出しがコールバックの中で取られたため）。`pushAsyncContext`／`popAsyncContext`／`executionAsyncResource`／`clearAsyncIdStack` は C++ と同じ。destroy の ID はあとのタスクでまとめて流す。スタックの ID は、`grow_async_ids_stack` と同じに大きくなる（バインディングの上で差し替える）`Float64Array` に持つ。ネイティブのリソースは `AsyncWrap`（`process.ts` の `emitAsyncInit`）: 作られたときに `kAsyncIdCounter` から ID をもらって `init` のフックを呼び、`loop.scope()` がそのコールバックの前後で非同期の文脈を出し入れして `before`／`after` を呼び（`InternalCallbackScope`）、ハンドルが閉じたとき・リクエストが終わったときに `destroy` を積む。`getProviderType()` は `Providers` の数を返す（[Node.js の層](nodejs-runtime.ja.md#asynclocalstorage) を参照）。`setPromiseHooks`・`getPromiseHooks`・`registerDestroyHook`・`setCallbackTrampoline` は何もしない（V8 の Promise のフックが無い） |
+| `async_wrap` | `process.ts` | 一部 | `async_hook_fields`・`async_id_fields`・`async_ids_stack` は `AsyncHooks` の初めの状態から始める（吸い出しがコールバックの中で取られたため）。`pushAsyncContext`／`popAsyncContext`／`executionAsyncResource`／`clearAsyncIdStack` は C++ と同じ。destroy の ID はあとのタスクでまとめて流す。スタックの ID は、`grow_async_ids_stack` と同じに大きくなる（バインディングの上で差し替える）`Float64Array` に持つ。ネイティブのリソースは `AsyncWrap`（`process.ts` の `emitAsyncInit`）: 作られたときに `kAsyncIdCounter` から ID をもらって `init` のフックを呼び、`loop.scope()` がそのコールバックの前後で非同期の文脈を出し入れして `before`／`after` を呼び（`InternalCallbackScope`）、ハンドルが閉じたとき・リクエストが終わったときに `destroy` を積む。`getProviderType()` は `Providers` の数を返す（[Node.js ランタイム](nodejs-runtime.ja.md#asynclocalstorage) を参照）。`setPromiseHooks`・`getPromiseHooks`・`registerDestroyHook`・`setCallbackTrampoline` は何もしない（V8 の Promise のフックが無い） |
 | `builtins` | `src/nodejs/boot.ts` | 実装済み | `nodelib.js` から作る: `builtinIds`・`compileFunction`・`natives`・`setInternalLoaders`・`hasCachedBuiltins`・`getCacheUsage` |
 | `config` | `process.ts` | 実装済み | 記録した値。ただし `hasInspector: true`・`isDebugBuild: false`・`noBrowserGlobals: false`・`getDefaultLocale()` は `en-US` |
 | `constants` | `index.ts` | 実装済み | 記録した `os`・`fs`・`crypto`・`zlib`・`trace`・`internal` の組。`NODE_DEFINE_CONSTANT` と同じく、どの組もプロトタイプが null で、どの定数も書き換え・削除できない |
@@ -50,7 +50,7 @@ Node の `lib/` は `internalBinding(name)` を通して C++ の半分とやり�
 | `errors` | `process.ts` | 実装済み | `setPrepareStackTraceCallback` と `setEnhanceStackForFatalException` はスタックトレースのフックへ。`triggerUncaughtException` はループへ。`getErrorSourcePositions` はスタックの最初のフレームから読む。ソースマップの設定は何もしない |
 | `mksnapshot` | `process.ts` | 一部 | 設定の関数は何もしない。`compileSerializeMain` は空（スナップショットは作れない） |
 | `options` | `index.ts` | 実装済み | `getCLIOptionsValues()` は解析したコマンドラインを返す。オプションの情報・別名・埋め込み側のオプション・`envSettings`・`types` は吸い出したもの。`noGlobalSearchPaths: false`・`shouldNotRegisterESMLoader: false` |
-| `os` | `process.ts` | 実装済み | 値は [Node.js の層](nodejs-runtime.ja.md#process-と-os-の値) を参照。`getOSInformation()` は `node_os.cc` が uname を返すのと同じ `[sysname, version, release, machine]` |
+| `os` | `process.ts` | 実装済み | 値は [Node.js ランタイム](nodejs-runtime.ja.md#process-と-os-の値) を参照。`getOSInformation()` は `node_os.cc` が uname を返すのと同じ `[sysname, version, release, machine]` |
 | `process_methods` | `process.ts` | 実装済み | `hrtime`、`cwd`／`chdir`／`umask`（カーネル）、`memoryUsage`／`rss`／`cpuUsage`／`resourceUsage`（近い値）、`_kill`、`reallyExit`（`--trace-exit`）、`dlopen`（いつも失敗）、`execve`、`patchProcessObject`、`loadEnvFile`、ループから取る動いているハンドル・リクエスト。`_debugProcess`・`_debugEnd`・`resetStdioForTesting` は何もしない |
 | `report` | `report.ts` | 実装済み | Node のレポートの形で、頭の部分は glibc の Linux のもの（`glibcVersionRuntime` 2.36・`glibcVersionCompiler` 2.28。`cpus` と `networkInterfaces` は `os` のバインディングから）。`writeReport` はカーネルを通して書く。設定は覚える |
 | `symbols` | `process.ts` | 実装済み | 記録した説明を持つ新しい Symbol |
@@ -96,7 +96,7 @@ Node の `lib/` は `internalBinding(name)` を通して C++ の半分とやり�
 | `js_udp_wrap` | — | 形だけ | |
 | `tls_wrap` | `tls_wrap.ts` | 一部 | 通信路の上の TLS は無い。外への接続では、ブラウザの `fetch` が TLS をして証明書を確かめるので、`TLSWrap` は平文をそのまま通し、ハンドシェイクは済んだと報告する（`verifyError()` は `null`）。`getPeerCertificate()` は代わりの物（subject は `CN=<servername>`、issuer は `O=OpenVessel, CN=verified by the browser`、1 日前から 90 日有効）を、`getPeerX509Certificate()` は `undefined` を返す。ランタイムの中の 2 つの端の間では、両方とも素通しで、「ハンドシェイク」はカーネルを通した証明書の受け渡し（`tlsHello`）なので、`getPeerCertificate()`／`getPeerX509Certificate()` には相手の証明書が見える。サーバーの `TLSWrap` は、包んだソケットの読みを引き継ぐ（lib が包むとき、ソケットはもう読んでいる）。`SecureContext` は設定を覚える。`loadPKCS12` は中身を読んで MAC を確かめる。`addCRL` は形式を確かめる。StreamBase のメンバーのいくつか（`bytesRead`・`onread` など）は記録した空のまま |
 | `http_parser` | `http_parser.ts`・`http/llhttp.ts` | 実装済み | `HTTPParser` は llhttp 9.4.3（Node 22.23.4 が同梱する版。`process.versions.llhttp`）を節ごとに移したものの上で動くので、コールバック・エラーのコード・理由・エラーの位置が C のパーサーと同じ。サーバーのタイムアウトのための `ConnectionsList`。ヘッダーの大きさの上限の既定値は `--max-http-header-size`（16384）。`getProviderType()` は `initialize()` のあと 17／18（`HTTPINCOMINGMESSAGE`／`HTTPCLIENTREQUEST`）。ほかのオブジェクトの上で呼んだメソッドは `TypeError: Illegal invocation` を投げる |
-| `http2` | `index.ts` | 一部 | 記録した形に、何もしない `setCallbackFunctions` と `refreshDefaultSettings` を足したもの。そのため `node:http2` は読み込める。`Http2Session`・`Http2Stream`・`packSettings`・`nghttp2ErrorString` は `ERR_NOT_IMPLEMENTED` を投げる空のものなので、HTTP/2 のセッションはどれも失敗する（[Node.js の層](nodejs-runtime.ja.md#実装していないもの) を参照） |
+| `http2` | `index.ts` | 一部 | 記録した形に、何もしない `setCallbackFunctions` と `refreshDefaultSettings` を足したもの。そのため `node:http2` は読み込める。`Http2Session`・`Http2Stream`・`packSettings`・`nghttp2ErrorString` は `ERR_NOT_IMPLEMENTED` を投げる空のものなので、HTTP/2 のセッションはどれも失敗する（[Node.js ランタイム](nodejs-runtime.ja.md#実装していないもの) を参照） |
 | `block_list` | — | 形だけ | `net.BlockList`・`net.SocketAddress` |
 
 ## 子プロセスとシグナル
@@ -219,7 +219,7 @@ Node の新しい版に移ったら、`node scripts/regen-fixtures.mjs [name…]
 
 ## 関連するページ
 
-- [Node.js の層](nodejs-runtime.ja.md)
+- [Node.js ランタイム](nodejs-runtime.ja.md)
 - [ビルド](building.ja.md) — 形を作る `gen-node-data.mjs` と、Node の版の間のバインディングの変化を報告する `node-upgrade-check.mjs`
 - [試験](testing.ja.md)
 - [互換性](../compatibility.ja.md)

@@ -4,7 +4,7 @@
 
 OpenVessel の細かい技術文書です。ホスト API のすべてのオプション、埋め込みと配信の条件、部品どうしの通信の形式、
 そしてタブの中のしくみ（カーネル・ファイルシステム・プロセス・シェル・パッケージマネージャ・ネイティブのモジュール・
-Node.js の層）を、ひとつずつ説明します。書いてあるのは、このリポジトリの OpenVessel です
+Node.js ランタイム）を、ひとつずつ説明します。書いてあるのは、このリポジトリの OpenVessel です
 （版は `package.json`、移植している Node.js の版は `openvessel.node` を見てください）。
 
 全体の考え方は [OpenVessel のしくみ](../how-it-works.ja.md) から、ブラウザで動くもの・動かないものは
@@ -36,7 +36,7 @@ Node.js の層）を、ひとつずつ説明します。書いてあるのは、
 | [シェルとコマンド](shell.ja.md) | `sh` の文法と組み込みコマンド、すべてのコマンドとそのオプション。 |
 | [パッケージマネージャ](package-managers.ja.md) | 組み込みの `npm`・`pnpm`・`yarn`・`bun`。コマンド、インストール、lockfile、スクリプト。 |
 | [ネイティブのモジュール](native-modules.ja.md) | WebAssembly 版、WASI、napi-rs と emnapi、互換パッケージ。 |
-| [Node.js の層](nodejs-runtime.ja.md) | Worker の中で Node.js が動くしくみ。起動、イベントループ、モジュール、TypeScript、fetch、worker。 |
+| [Node.js ランタイム](nodejs-runtime.ja.md) | Worker の中で Node.js が動くしくみ。起動、イベントループ、モジュール、TypeScript、fetch、worker。 |
 | [バインディング](bindings.ja.md) | すべての `internalBinding()` のモジュールと、その状態。 |
 
 ## 開発に加わる
