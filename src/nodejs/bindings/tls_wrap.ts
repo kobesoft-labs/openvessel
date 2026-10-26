@@ -176,6 +176,13 @@ class TLSWrap extends LibuvStreamWrap {
       if (waiting.get(this.fd) === this.#peerHello) waiting.delete(this.fd);
       return parentClose.call(parent, cb);
     };
+    // the wrapped stream's reads come here from now on (TLSWrap makes itself the stream's
+    // listener): a server's socket is already reading when lib wraps it, and lib then takes this
+    // wrap's `reading` from it
+    if (parent.reading) {
+      parent.readStop();
+      this.readStart();
+    }
     if (isServer) this.#hello();
   }
 
