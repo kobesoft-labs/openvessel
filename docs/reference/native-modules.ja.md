@@ -27,7 +27,7 @@
 | `process.platform`・`process.arch` | `linux`・`x64`（両方の層） | 読み込み役はこれで環境ごとのパッケージを選びます。互換パッケージは、読み込み役が期待する場所では `linux-x64` の名前で出しています |
 | `process.versions.napi` | `10` | |
 | `process.report.getReport().header.glibcVersionRuntime` | `2.36` | `detect-libc` がこれを読むので、musl でなく glibc の環境として数えられます |
-| `NAPI_RS_FORCE_WASI` | カーネルの既定の環境で `1`（`src/kernel/kernel.ts`） | napi-rs が生成する読み込み役が読みます。最近の読み込み役は `true` か `error` のときだけ WASI を強制し、ほかの値は「ネイティブを先に」と扱います。ネイティブ版は入っていない（[環境での絞り込み](#環境での絞り込み)）ので、どちらでも `wasm32-wasi` のパッケージに落ちます |
+| `NAPI_RS_FORCE_WASI` | カーネルの既定の環境で `true`（`src/kernel/kernel.ts`） | napi-rs が生成する読み込み役が読み、ネイティブ版を試さずに `wasm32-wasi` のパッケージを読みます。古い読み込み役は空でない値なら何でも、最近のものは `true` か `error` のときだけ WASI を強制します。`true` はどちらでも効きます |
 | インストーラーが使う環境 | `os: linux`・`cpu: wasm32` | `cpu` が `x64`・`arm64` などのパッケージは、入れるときに飛ばします |
 
 ## 入れるときの決まり
@@ -163,10 +163,10 @@ const png = await sharp({ create: { width: 2, height: 2, channels: 3, background
 | | 移植した層（`src/nodejs/bindings/process.ts`） | 旧来の層（`src/node/module.ts`・`src/node/process.ts`） |
 |---|---|---|
 | `require('x.node')` | Node 自身の読み込みが `process.dlopen` を呼び、`ERR_DLOPEN_FAILED` を投げる | `ERR_DLOPEN_FAILED` を投げる: `Native addons are not supported in OpenVessel (tried to load <file>). Use the WebAssembly build of this package.` |
-| `process.dlopen()` | glibc の `dlopen` に似たメッセージ（下）で `ERR_DLOPEN_FAILED` を投げる | コードのない `Error` を投げる: `process.dlopen is not supported in OpenVessel (native addons cannot run in the browser)` |
+| `process.dlopen()` | glibc の `dlopen` に似たメッセージ（下）で `ERR_DLOPEN_FAILED` を投げる | 同じ |
 | `import 'x.node'` | `ERR_UNKNOWN_FILE_EXTENSION`（`--experimental-addon-modules` なしの Node 22 と同じ） | 失敗する |
 
-移植した層の `dlopen` のメッセージ:
+`process.dlopen` のメッセージ（どちらの層も）:
 
 | ファイル | メッセージ |
 |---|---|
@@ -188,14 +188,14 @@ napi-rs の読み込み役はこれらのエラーを受け止めて次の候補
 | | 移植した層 | 旧来の層 |
 |---|---|---|
 | モジュール | `internalBinding('wasi')`（`src/nodejs/bindings/wasi.ts`）の上の、Node 自身の `lib/wasi.js` | `src/node/wasi.ts` の `WASI` クラスそのもの |
-| `version` | 必須。`'preview1'` か `'unstable'`。ない → `ERR_INVALID_ARG_TYPE`、ほかの値 → `ERR_INVALID_ARG_VALUE` | 無視する |
-| `getImportObject()` | `{ wasi_snapshot_preview1: … }`。`'unstable'` なら `{ wasi_unstable: … }` | いつも `{ wasi_snapshot_preview1: … }` |
-| 設定の検査（`args`・`env`・`preopens`・`stdin`・`stdout`・`stderr`・`returnOnExit`） | Node のもの | なし |
-| `env` の値が `undefined` の項目 | 捨てる | `KEY=undefined` として残す |
+| `version` | 必須。`'preview1'` か `'unstable'`。ない → `ERR_INVALID_ARG_TYPE`、ほかの値 → `ERR_INVALID_ARG_VALUE` | 同じ |
+| `getImportObject()` | `{ wasi_snapshot_preview1: … }`。`'unstable'` なら `{ wasi_unstable: … }` | 同じ |
+| 設定の検査（`args`・`env`・`preopens`・`stdin`・`stdout`・`stderr`・`returnOnExit`） | Node のもの | 同じ検査とメッセージを `src/node/wasi.ts` に書いたもの |
+| `env` の値が `undefined` の項目 | 除く（Node と同じ）。ほかの値は `KEY=<String(値)>` | 同じ |
 | `returnOnExit`（既定 `true`） | `start()` が終了コードを返す。`false` なら `proc_exit` でプロセスが終わる | 同じ |
-| `start(instance)` | `_start` が要り、`_initialize` は拒む（Node の検査）。2 度目は `ERR_WASI_ALREADY_STARTED` | `_start` が要る（`ERR_INVALID_ARG_TYPE`）。2 度目は `ERR_WASI_ALREADY_STARTED` |
-| `initialize(instance)` | `_start` は拒み、`_initialize` があれば呼ぶ | `_initialize` があれば呼ぶ |
-| メモリ | `instance.exports.memory` | `instance.exports.memory`。または `wasi.setMemory(memory)` で渡す |
+| `start(instance)` | `_start` が要り、`_initialize` は拒む（Node の検査）。2 度目は `ERR_WASI_ALREADY_STARTED` | 同じ |
+| `initialize(instance)` | `_start` は拒み、`_initialize` があれば呼ぶ | 同じ |
+| メモリ | `instance.exports.memory` | 同じ |
 | `ExperimentalWarning: WASI is an experimental feature…` | Node と同じく 1 回出る | 出ない |
 
 ```js
@@ -228,11 +228,11 @@ preview1 の 46 の関数がすべてあります。ファイルに触る関数�
 | `fd_fdstat_get` | ファイルの種類・`APPEND` の印・すべての権利 |
 | `fd_filestat_get`・`path_filestat_get` | カーネルの `fstat`・`stat`（`path_filestat_get` は `SYMLINK_FOLLOW` のときだけリンクをたどる） |
 | `fd_filestat_set_size` | カーネルの `ftruncate` |
-| `fd_filestat_set_times`・`path_filestat_set_times` | カーネルの `utimes` |
+| `fd_filestat_set_times`・`path_filestat_set_times` | カーネルの `utimes`。`fst_flags` で変える時刻と「いま」にするかを選ぶ（時刻と「いま」を両方指定すると `EINVAL`）。`path_filestat_set_times` は `SYMLINK_FOLLOW` がなければリンクそのものを変える |
 | `fd_readdir` | 先頭に `.` と `..`。`d_next` と `d_ino` は項目の番号＋1 |
 | `fd_renumber` | 項目を移し、移し先は閉じる |
 | `fd_prestat_get`・`fd_prestat_dir_name` | 前もって開いたディレクトリ。fd 3 から |
-| `path_open` | ディレクトリはディレクトリの取っ手になる。`CREAT`・`DIRECTORY`・`EXCL`・`TRUNC` と fd の `APPEND` の印は `open` の flags に対応する。読み書きのどちらかは求めた権利から決める |
+| `path_open` | ディレクトリはディレクトリの取っ手になる。`CREAT`・`DIRECTORY`・`EXCL`・`TRUNC` と fd の `APPEND` の印は `open` の flags に対応する。読み書きのどちらかは求めた権利から決める。`SYMLINK_FOLLOW` なしで開いた最後の部分がシンボリックリンクなら `ELOOP` |
 | `path_create_directory`・`path_remove_directory`・`path_unlink_file`・`path_rename`・`path_link`・`path_symlink`・`path_readlink` | 対応するカーネルの呼び出し |
 | `poll_oneoff` | 時計の購読は、いちばん短い待ち時間（相対でも絶対でも）だけスレッドを止める（`Atomics.wait`）。fd の購読はすぐに準備できたと返し、呼び出しを止めない |
 | `random_get` | `crypto.getRandomValues` を 64 KiB ずつ |
@@ -245,8 +245,17 @@ preview1 の 46 の関数がすべてあります。ファイルに触る関数�
 - fd 0・1・2 はプロセスの標準入力・標準出力・標準エラーです（`stdin`・`stdout`・`stderr` を渡せば、そのカーネルの fd）。
 - `preopens` の各項目 `{ ゲストのパス: ホストのパス }` は、fd 3 からのディレクトリの fd になります。ホストのパスは
   プロセスの作業ディレクトリから解決します。
-- ディレクトリの fd からの相対パスは `path.resolve(<ディレクトリ>, <パス>)` で解決します。パスは前もって開いた
-  ディレクトリの中に閉じ込められず、`..` で外へ出られます。
+- パスの引数は、それが相対となるディレクトリの fd の下で、1 段ずつたどって探します（`src/node/wasi-path.ts`）。
+  uvwasi がモジュールを preopens の中に閉じ込めるのと同じです。パスを取る呼び出しはすべてこうします
+  （`path_open`・`path_filestat_get`・`path_filestat_set_times`・`path_create_directory`・`path_remove_directory`・
+  `path_unlink_file`・`path_rename`・`path_link`・`path_symlink` の新しいパス・`path_readlink`）。
+  - 絶対パス、ディレクトリより上への `..`、行き先がディレクトリの外になるシンボリックリンクは `ENOTCAPABLE`（76）。
+    ただし uvwasi と同じく、モジュールから `/` に見えるディレクトリ（`/` という名前の preopen）より上への `..` は
+    そこにとどまる（そこでの `../x` は `x`）
+  - 途中のシンボリックリンクはディレクトリの中でたどる（絶対パスの行き先はモジュールから見たパスとして、preopen の
+    ゲストのパスからの位置で読む）。最後の部分は `SYMLINK_FOLLOW` のときだけたどる。32 個を超えると `ELOOP`
+  - 途中のディレクトリがなければ `ENOENT`。最後の部分がないときは呼び出しに任せる（作る呼び出しもある）
+- `path_symlink` が書き込むリンクの中身は検査しません。たどるときに閉じ込めます。
 - 権利は効かせません。どの fd もすべての権利を持つと答えます。
 
 ### エラー

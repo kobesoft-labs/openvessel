@@ -27,9 +27,9 @@ export function setConditions(c: string[]) {
   conditions = c;
 }
 
-let runtimeOrigin = '';
-export function setRuntimeOrigin(o: string) {
-  runtimeOrigin = o;
+let runtimeBase = '';
+export function setRuntimeBase(o: string) {
+  runtimeBase = o;
 }
 
 function moduleNotFound(request: string, parent: Module | null, cause?: SysError): Error {
@@ -461,11 +461,11 @@ M.findPackageJSON = function (spec: string, base?: string) {
 // ESM glue (globalThis.__ov)
 
 export function esmUrl(p: string, query = ''): string {
-  return runtimeOrigin + ESM_PREFIX + encodePathForUrl(p) + query;
+  return runtimeBase + ESM_PREFIX + encodePathForUrl(p) + query;
 }
 
 export function builtinUrl(name: string): string {
-  return runtimeOrigin + BUILTIN_PREFIX + encodeURIComponent(name);
+  return runtimeBase + BUILTIN_PREFIX + encodeURIComponent(name);
 }
 
 export function resolveEsmUrl(spec: string, parentUrl: string): string {
@@ -529,7 +529,7 @@ export function metaFor(fileUrl: string) {
 export function installStackMapping() {
   const E = Error as any;
   if (typeof E.captureStackTrace !== 'function') return;
-  const esmBase = runtimeOrigin + ESM_PREFIX;
+  const esmBase = runtimeBase + ESM_PREFIX;
   const mapName = (name: string | null | undefined) => {
     if (!name) return name;
     if (name.startsWith(esmBase)) {
@@ -537,7 +537,7 @@ export function installStackMapping() {
       const p = q === -1 ? name.slice(esmBase.length) : name.slice(esmBase.length, q);
       return 'file://' + p;
     }
-    if (name.startsWith(runtimeOrigin + '/')) return 'node:internal/' + name.slice(runtimeOrigin.length + 1).replace(/\?.*$/, '');
+    if (name.startsWith(runtimeBase + '/')) return 'node:internal/' + name.slice(runtimeBase.length + 1).replace(/\?.*$/, '');
     return name;
   };
   E.prepareStackTrace = (err: Error, frames: any[]) => {

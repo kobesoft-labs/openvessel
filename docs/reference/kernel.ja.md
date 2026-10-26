@@ -558,7 +558,7 @@ TLS を始めるときに `tcpSetTls` を呼びます。カーネルはその接
 | `LANG` | `en_US.UTF-8` |
 | `TMPDIR` | `/tmp` |
 | `HOSTNAME` | `openvessel` |
-| `NAPI_RS_FORCE_WASI` | `1`（napi-rs のパッケージが WebAssembly 版を読む） |
+| `NAPI_RS_FORCE_WASI` | `true`（napi-rs のパッケージが WebAssembly 版を読む） |
 
 子プロセスは、呼び出し側が渡さない限り、親の環境変数の写しを受け継ぎます。シェルは自分の変数を足します（`PWD` など。
 [シェル](shell.ja.md)）。

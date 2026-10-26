@@ -132,10 +132,9 @@ runtime's `rm` and `cp`, the sticky bit of `/tmp`, and the kernel's own `/proc` 
 
 The umask is per process: 0o022 for a process the host starts, otherwise a copy of its parent's (also
 across `execve`). It is applied when a file, directory or socket is created and nowhere else, so with
-`umask 0` a new directory gets 0o777. It is changed with `process.umask()` (ported runtime) or the
+`umask 0` a new directory gets 0o777. It is changed with `process.umask()` (both runtimes) or the
 shell's `umask` builtin, which affects the shell's own redirections and the programs it starts
-afterwards. The legacy runtime keeps `process.umask()` inside the process and never tells the kernel.
-The host API and the kernel's own files use 0o022.
+afterwards. The host API and the kernel's own files use 0o022.
 
 ## Timestamps
 

@@ -68,11 +68,13 @@ OpenVessel の試験には 4 つの層があります。Node.js で動かす単�
 | `run-file.mjs` | `<手元のファイル> <VFS のパス> '<コマンド>'` | `SETUP` があれば流し、手元のファイルを VFS に書いて、コマンドを実行する |
 | `watch.mjs` | `[--mount <dir>] '<コマンド>' [秒=20]` | `/bin/sh -c <コマンド>` を起こし（cwd は `/home/user`。`--mount` では先に手元のプロジェクトを写した `/home/user/app`）、200 ms ごとに出力を流す。終われば `[exit <code>]`、時間切れなら `[still running after <n>s] ps:` とプロセスの一覧を出す |
 | `project.mjs` | `<dir> ['<コマンド>']`（既定は `npm install && npm run build`） | `/home/user/app` を手元のプロジェクトで置き換え、コマンドを実行する（上限 15 分）。`node_modules`・`.git`・`dist`・`.astro`・`.vercel`・`.netlify`・`.cache`・`.turbo`・`.output` と 64 MiB を超えるファイルは飛ばし、シンボリックリンクは残す。`collectFiles()` と `mountProject()` を出す |
-| `dev.mjs` | — | `/home/user/app` で `npm install`、`npm run dev` を起こし、`server-ready` を待ち、プレビューの `<h1>` を確かめ、`src/pages/index.astro` を書き換えて、HMR での更新を 30 秒まで待つ |
+| `dev.mjs` | `[--port]` | `/home/user/app` で `npm install`、`npm run dev` を起こし、`server-ready` を待ち、プレビューの `<h1>` を確かめ、`src/pages/index.astro` を書き換えて、HMR での更新を 30 秒まで待つ |
 | `preview-port.mjs` | — | 移植版ランタイムで、ポート 4000 に `http` のサーバーを立て、プレビューの iframe に読み込み（70000 バイトの分割された本文）、iframe から POST する。`OK` か `FAIL` を出し、0／1 で終わる |
-| `port-fs.mjs` | `[場面…]` | 移植版ランタイムで、fs の場面 `dir`・`watch`・`watch2`・`cp`・`cp2`・`misc`・`misc2`（opendir と Dir・`fs.watch`・`fs.watchFile`・`fs.cp`／`cpSync`・readv／writev・FileHandle）を流し、それぞれの出力を Linux の Node v22.20.0 で記録した期待の出力と比べる。`ok`／`FAIL` と行の差分、`all passed` か `<n> failed` を出し、0／1 で終わる |
-| `esm-graph.mjs` | `<プロジェクトのディレクトリ> <VFS の入口のパス> [インストールのコマンド='npm install']` | プロジェクトを置いてインストールし、カーネルが `/__ov/esm` で配る ES モジュールのグラフ（旧ランタイムの ESM の配信）をたどって、読み込めないモジュールを報告する |
-| `debug-esm.mjs` | `<VFS のパス…>` | `npm install` のあと、それぞれのパスについて `/__ov/esm<パス>` の最初の 3000 文字を出す |
+| `port-fs.mjs` | `[場面…]` | 移植版ランタイムで、fs の場面 `dir`・`watch`・`watch2`・`cp`・`cp2`・`misc`・`misc2`（opendir と Dir・`fs.watch`・`fs.watchFile`・`fs.cp`／`cpSync`・readv／writev・FileHandle）を流し、それぞれの出力を Linux の Node v22.23.4（Docker の `node:22.23.4-bookworm-slim`）で記録した期待の出力と比べる。`ok`／`FAIL` と行の差分、`all passed` か `<n> failed` を出し、0／1 で終わる |
+| `esm-graph.mjs` | `[--port] <プロジェクトのディレクトリ> <VFS の入口のパス> [インストールのコマンド='npm install']` | プロジェクトを置いてインストールし、カーネルが `/__ov/esm` で配る ES モジュールのグラフ（旧ランタイムの ESM の配信）をたどって、読み込めないモジュールを報告する |
+| `debug-esm.mjs` | `[--port] <VFS のパス…>` | `npm install` のあと、それぞれのパスについて `/__ov/esm<パス>` の最初の 3000 文字を出す |
+
+`--port`（`dev.mjs`・`esm-graph.mjs`・`debug-esm.mjs`）は、何かを動かす前に `harness.mjs` の `usePortedRuntime(page)` で移植版ランタイムを選びます（`/etc/openvessel/node` に `port` を書く）。`esm-graph.mjs` と `debug-esm.mjs` が読む ESM の配信を使うのは旧ランタイムだけなので、`--port` で変わるのはインストールを動かすランタイムです。
 
 ```bash
 OV_PORT_BASE=5270 node test/e2e/harness.mjs \
@@ -107,7 +109,7 @@ node test/e2e/watch.mjs --mount ~/sites/blog 'npm run dev' 60
 
 ### 流れ
 
-- `results/baseline.json` があれば、そこで通った試験だけを動かします。基準に無い試験は、`--baseline` を流し直すまで動きません。
+- `results/baseline.json` があれば、そこで通った試験だけを動かします。選んだ試験のうち基準に無いものは、`--baseline` を流し直すまで動きません。そのときは最初に `warning: <n> selected tests are not in results/baseline.json and are skipped (run --baseline to add them): <ファイル>` と出します。
 - VFS の `/node` に、`package.json`、`test/common` と `test/fixtures` の 8 MiB までのファイル全部、選んだ試験を置きます。ページの評価 1 回あたり約 4 MB ずつ送ります。
 - 通信の方針を `allow-all` にし、`window.ovNoAutoPreview` を立てて、試験が listen するポートのプレビューをプレイグラウンドが開かないようにします。
 - 1 つのページで 4 本ずつ、それぞれ `node test/parallel/<file>` を cwd `/node`・`TEST_THREAD_ID=<0〜3>` で動かします（`test/common/tmpdir.js` が、Node の試験の道具と同じく、枠ごとに自分の `.tmp.<id>` を使うように）。1 本 30 秒で `SIGKILL` し、さらに 3 秒待ち、ページの評価にはさらに 15 秒の余裕を持たせます。
@@ -165,16 +167,18 @@ node test/e2e/watch.mjs --mount ~/sites/blog 'npm run dev' 60
 { "id": "astro-5-examples__blog", "repo": "withastro/astro", "ref": "astro@5.18.2", "path": "examples/blog", "astro": 5 }
 ```
 
-コミュニティのサイトは、`id`（`<owner>__<repo>`）・`repo`・`ref`（既定のブランチ）・`sha`（`null`）・`astro`（メジャーの版）・`stars` を持ちます。各サイトのファイルは `corpus/sites/<id>/` にあります（git の外）。
+コミュニティのサイトは、`id`（`<owner>__<repo>`）・`repo`・`ref`（既定のブランチ）・`sha`（取ってきたコミット。記録するようになる前に集めたサイトは `null`）・`astro`（メジャーの版）・`stars` を持ちます。各サイトのファイルは `corpus/sites/<id>/` にあります（git の外。下の `--restore` を参照）。
 
 ### corpus/collect.mjs
 
 `node corpus/collect.mjs [target=100] [majors=5,6,7]` は、ログイン済みの `gh` が要ります。一覧が `target` 件になるまでサイトを足します。
 
-1. Astro のリリースのタグ `astro@7.4.2`・`astro@6.4.8`・`astro@5.18.2` の `examples/*` のうち、`build` のスクリプトがあるもの（ID は `astro-<major>-examples__<name>`）
-2. GitHub の検索（`topic:astro-theme`・`topic:astro-template`・`topic:astro-blog`・`topic:astro language:Astro`・`astro theme in:name,description language:Astro`・`astro portfolio language:Astro`・`starlight docs language:MDX`。どれも `pushed:>2025-03-01` を付け、星の多い順に 50 件ずつ 5 ページまで）で見つけたリポジトリ。アーカイブ済み・fork・200 MB を超えるもの・`build` のスクリプトが無いもの・`astro` の依存のメジャーの版が `majors` に無いものは飛ばす
+1. Astro のリリースのタグ `astro@7.4.2`・`astro@6.4.8`・`astro@5.18.2` の `examples/*` のうち、`build` のスクリプトと `astro.config.*` があるもの（ID は `astro-<major>-examples__<name>`）
+2. GitHub の検索（`topic:astro-theme`・`topic:astro-template`・`topic:astro-blog`・`topic:astro language:Astro`・`astro theme in:name,description language:Astro`・`astro portfolio language:Astro`・`starlight docs language:MDX`。どれも `pushed:>2025-03-01` を付け、星の多い順に 50 件ずつ 5 ページまで）で見つけたリポジトリ。アーカイブ済み・fork・200 MB を超えるもの・`build` のスクリプトが無いもの・`astro` の依存のメジャーの版が `majors` に無いもの・いちばん上に `astro.config.*` が無いものは飛ばす。取るのは既定のブランチのいまのコミットで、それを `sha` に記録する
 
-`sites.json` は、1 件足すたびに書き直します。`sites.json` にすでにある ID は飛ばすので、このスクリプトはサイトを足すだけで、一覧にあるサイトのファイルを取り直すことはしません。
+`astro.config.*` の無いディレクトリはサイトではない（`examples/toolbar-app` はツールバーの拡張）ので、足しません。`sites.json` は、1 件足すたびに書き直します。`sites.json` にすでにある ID は飛ばすので、この呼び方はサイトを足すだけです。
+
+`node corpus/collect.mjs --restore` は、一覧にあって `corpus/sites/` に無いサイトをすべて取ってきます（取ってきたばかりのリポジトリなら全部）。公式の例はリリースのタグごとに 1 つの tarball から、コミュニティのサイトは `sha` のコミットから取ります（`sha` が `null` なら `ref` のいまの先頭なので、結果を計ったときのファイルと違うことがあります）。`<取れた数> of <無かった数> missing sites restored (<一覧の数> listed)` と出し、失敗があれば 1 で終わります。`corpus/sites/` にあって `sites.json` に無いディレクトリはそのまま残し、流しません。
 
 ### corpus/run.mjs
 
@@ -197,7 +201,7 @@ node test/e2e/watch.mjs --mount ~/sites/blog 'npm run dev' 60
 
 - **単体の試験**: `node:test` と `node:assert/strict` を使って `test/unit/<name>.test.ts` を足します。名前の末尾で拾われます。ソースは直接（`../../src/…`）import します。npm のパッケージは外のままです。
 - **バインディングの差分の試験**: `{ 区分: [{ args, r }] }` を返す `run(binding)` を出す `test/fixtures-gen/<name>.cases.mjs` と、`generate('<バインディングの名前>', run)` を呼ぶ `test/fixtures-gen/<name>.mjs` を書き、`scripts/regen-fixtures.mjs` にジョブを足して流し、`compareFixtures(run(createX()), fixture.results, known)` を呼ぶ `test/unit/bindings-<name>.test.ts` を書きます。認める違いは、理由を名前にして `known` に並べます。
-- **端から端までの確かめ**: `harness.mjs` の `startServer`・`openBrowser`・`exec` を使うスクリプトを `test/e2e/` に書きます。移植版ランタイムは `mkdir -p /etc/openvessel && echo port > /etc/openvessel/node` で選びます。`port-fs.mjs` や `preview-port.mjs` のように、結果をはっきり出し、失敗したら 0 以外で終わるようにします。
+- **端から端までの確かめ**: `harness.mjs` の `startServer`・`openBrowser`・`exec` を使うスクリプトを `test/e2e/` に書きます。移植版ランタイムは `usePortedRuntime(page)`（または `mkdir -p /etc/openvessel && echo port > /etc/openvessel/node`）で選びます。`port-fs.mjs` や `preview-port.mjs` のように、結果をはっきり出し、失敗したら 0 以外で終わるようにします。
 - **ブラウザでは通らない Node の試験**: 理由とともに `test/node-compat/limits/<module>.json` に足します。それ以後は target に数えません。報告が通ったと言えば外します。
 - **コーパスのサイト**: `corpus/collect.mjs` を流すか、`corpus/sites.json` に項目を足し、ファイルを `corpus/sites/<id>/` に置きます。
 

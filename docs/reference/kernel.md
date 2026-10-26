@@ -579,7 +579,7 @@ passes) and of processes started without a parent:
 | `LANG` | `en_US.UTF-8` |
 | `TMPDIR` | `/tmp` |
 | `HOSTNAME` | `openvessel` |
-| `NAPI_RS_FORCE_WASI` | `1` (napi-rs packages load their WebAssembly build) |
+| `NAPI_RS_FORCE_WASI` | `true` (napi-rs packages load their WebAssembly build) |
 
 A child process inherits a copy of its parent's environment unless the caller passes one. The shell
 adds variables of its own (`PWD` and others, see [Shell](shell.md)).

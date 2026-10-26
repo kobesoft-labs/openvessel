@@ -151,7 +151,7 @@ await call('ping'); // 'pong'
 
 The default environment is `PATH=/usr/local/bin:/usr/bin:/bin`, `HOME=/home/user`, `USER=user`,
 `LOGNAME=user`, `SHELL=/bin/sh`, `TERM=xterm-256color`, `LANG=en_US.UTF-8`, `TMPDIR=/tmp`,
-`HOSTNAME=<kernel host name>`, `NAPI_RS_FORCE_WASI=1`. See [Kernel](kernel.md) and [Host API](host-api.md).
+`HOSTNAME=<kernel host name>`, `NAPI_RS_FORCE_WASI=true`. See [Kernel](kernel.md) and [Host API](host-api.md).
 
 ### Events
 

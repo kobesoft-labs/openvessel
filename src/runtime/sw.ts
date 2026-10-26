@@ -144,7 +144,7 @@ sw.addEventListener('fetch', (ev) => {
   if (url.origin !== sw.location.origin || !url.pathname.startsWith(SCOPE)) return;
   // /__ov/… relative to where the runtime is served
   const path = '/' + url.pathname.slice(SCOPE.length);
-  if (path.startsWith('/__ov/esm/') || path.startsWith('/__ov/builtin/') || path.startsWith('/__ov/mw/')) {
+  if (path.startsWith('/__ov/esm/') || path === '/__ov/esm-error' || path.startsWith('/__ov/builtin/') || path.startsWith('/__ov/mw/')) {
     ev.respondWith(
       ask({ k: 'esm', pathname: path, search: url.search }).then(
         (r) => new Response(r.body, { status: r.status, headers: { 'content-type': `${r.type}; charset=utf-8`, 'cache-control': 'no-store', 'cross-origin-resource-policy': 'same-origin' } }),

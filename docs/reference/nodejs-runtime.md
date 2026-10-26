@@ -22,7 +22,7 @@ contains two different scripts for that Worker:
 | TypeScript | Node's own type stripping (amaro) | sucrase's `typescript` transform (enums etc. are accepted) |
 | ES modules | `module_wrap` binding, served at `/__ov/mw/<pid>/<id>.mjs` | the kernel's ESM service at `/__ov/esm/…` and `/__ov/builtin/…` |
 | `--loader` | Node's hooks machinery | ignored with a warning |
-| `node:http2` | loads; sessions throw `ERR_NOT_IMPLEMENTED` | throws `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` |
+| `node:http2` | loads; sessions throw `ERR_NOT_IMPLEMENTED` | loads; `createServer`, `createSecureServer` and `connect` throw `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` ("HTTP/2 is not supported in OpenVessel") |
 | Default | no | **yes** |
 
 All numbers on the [Compatibility](../compatibility.md) page (Node's test suite and the Astro corpus) were

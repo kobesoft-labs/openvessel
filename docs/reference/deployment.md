@@ -306,12 +306,11 @@ Both the runtime and the preview may be served from a subdirectory (for example
 `https://example.com/demo/runtime/` and `https://example.com/demo/preview/`).
 
 **Runtime.** The kernel takes its base URL from the directory of `kernel.js` (`RUNTIME_BASE` in
-`src/kernel/base.ts`) and the ported runtime from the directory of `node-process.js`; the service worker
-strips its scope from request paths before matching `/__ov/…`. The npm client's `/__ov/net` requests and
-`compat/` downloads, and the ported runtime's `/__ov/net` and `/__ov/mw/` URLs, are all relative to that
-base. The legacy runtime builds its `/__ov/esm/`, `/__ov/builtin/` and `/__ov/net` URLs from the origin
-(`self.location.origin` in `src/node/worker.ts`), so with the legacy runtime the runtime directory has to
-be the root of its origin.
+`src/kernel/base.ts`) and each runtime from the directory of its worker script (`node-process.js`,
+`process.js`); the service worker strips its scope from request paths before matching `/__ov/…`. The npm
+client's `/__ov/net` requests and `compat/` downloads, the ported runtime's `/__ov/net` and `/__ov/mw/`
+URLs, and the legacy runtime's `/__ov/esm/`, `/__ov/builtin/` and `/__ov/net` URLs (also those the
+kernel writes into the modules it serves) are all relative to that base.
 
 **Preview.** The service worker's scope is the preview directory. A dev server inside OpenVessel still
 serves its site at `/`, so the service worker maps between the two:
@@ -512,4 +511,3 @@ and sets `frame-ancestors` to `http://localhost:<host port>`.
 - [ ] `runtimeUrl` and `previewUrl` end in `/` (or `runtimeUrl` is the `runtime.html` URL).
 - [ ] Hashed chunks may be cached long; everything else, the service workers in particular, revalidates.
 - [ ] If processes should run on the ported runtime, `/etc/openvessel/node` contains `port`.
-- [ ] If the runtime is served under a path, processes use the ported runtime.

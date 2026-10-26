@@ -131,7 +131,14 @@ async function mount(page, files) {
 async function runOv(tests) {
   const { startServer, openBrowser } = await import('../e2e/harness.mjs');
   const base = loadJson(baselineFile, null);
-  if (base) tests = tests.filter((t) => base[t.file]?.pass);
+  if (base) {
+    // a test the baseline has never run (new in .node/, or a changed selection) is not run here either
+    const unknown = tests.filter((t) => !base[t.file]);
+    if (unknown.length) {
+      console.warn(`warning: ${unknown.length} selected tests are not in results/baseline.json and are skipped (run --baseline to add them): ${unknown.map((t) => t.file).join(', ')}`);
+    }
+    tests = tests.filter((t) => base[t.file]?.pass);
+  }
   console.log(`running ${tests.length} tests in OpenVessel`);
   const res = loadJson(join(resultsDir, 'ov.json'), {});
   const files = [['package.json', join(nodeRoot, 'package.json')], ...collect(join(nodeRoot, 'test/common'), nodeRoot, []), ...collect(join(nodeRoot, 'test/fixtures'), nodeRoot, []), ...tests.map((t) => [`test/parallel/${t.file}`, join(parallel, t.file)])];
