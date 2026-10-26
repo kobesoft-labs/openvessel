@@ -73,7 +73,8 @@ window.addEventListener('message', (ev) => {
   }
   // refuse being nested inside something other than the top-level host
   const ancestors = (location as any).ancestorOrigins as DOMStringList | undefined;
-  if (ancestors && ancestors.length > 1) {
+  // (Firefox has no ancestorOrigins: there the parent must be the top-level window)
+  if (ancestors ? ancestors.length > 1 : window.parent !== window.top) {
     fail('the runtime must be embedded directly by the host page');
     return;
   }
