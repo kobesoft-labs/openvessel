@@ -3,9 +3,11 @@ import { build } from 'esbuild';
 import { readdirSync, mkdirSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 
 const root = new URL('..', import.meta.url).pathname;
-const outdir = join(root, 'node_modules/.cache/ov-tests');
+// one directory per checkout: worktrees that share node_modules don't overwrite each other's bundles
+const outdir = join(root, 'node_modules/.cache', `ov-tests-${createHash('sha1').update(root).digest('hex').slice(0, 8)}`);
 rmSync(outdir, { recursive: true, force: true });
 mkdirSync(outdir, { recursive: true });
 const filter = process.argv[2];
