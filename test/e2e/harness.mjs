@@ -50,9 +50,14 @@ export async function exec(page, cmd, { cwd = '/home/user/app', timeout = 600000
   );
 }
 
-/** Selects the ported runtime (src/nodejs) for the node processes started after this, as /etc/openvessel/node = port does. */
+/** The ported runtime (src/nodejs) is the default; this only makes it explicit (/etc/openvessel/node = port). */
 export async function usePortedRuntime(page) {
   await exec(page, 'mkdir -p /etc/openvessel && echo port > /etc/openvessel/node', { cwd: '/' });
+}
+
+/** Selects the legacy runtime (src/node) for the node processes started after this (/etc/openvessel/node = legacy). */
+export async function useLegacyRuntime(page) {
+  await exec(page, 'mkdir -p /etc/openvessel && echo legacy > /etc/openvessel/node', { cwd: '/' });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

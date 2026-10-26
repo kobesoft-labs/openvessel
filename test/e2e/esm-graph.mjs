@@ -2,7 +2,7 @@
 //   node test/e2e/esm-graph.mjs [--port] <project dir> <entry path in VFS> [install command]
 // The graph is the kernel's ESM service, which only the legacy runtime loads modules from; --port runs
 // the install on the ported runtime.
-import { startServer, openBrowser, exec, usePortedRuntime } from './harness.mjs';
+import { startServer, openBrowser, exec, useLegacyRuntime } from './harness.mjs';
 import { mountProject } from './project.mjs';
 
 const [dir, entry, install = 'npm install'] = process.argv.slice(2).filter((a) => a !== '--port');
@@ -10,7 +10,7 @@ const srv = await startServer();
 const { browser, page } = await openBrowser();
 try {
   await page.evaluate(() => window.ovReady);
-  if (process.argv.includes('--port')) await usePortedRuntime(page);
+  if (!process.argv.includes('--port')) await useLegacyRuntime(page);
   await mountProject(page, dir);
   const inst = await exec(page, `${install} >/dev/null 2>&1; echo $?`);
   console.log('install exit', inst.output.trim());

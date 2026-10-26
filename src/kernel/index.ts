@@ -21,13 +21,14 @@ declare const self: DedicatedWorkerGlobalScope;
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 const processUrl = new URL('./process.js', import.meta.url).href;
-// the ported Node.js runtime (src/nodejs) is used when /etc/openvessel/node contains "port"
+// The ported Node.js runtime (src/nodejs) is the default; /etc/openvessel/node containing "legacy"
+// selects the older hand-written one (src/node). "port" is still accepted and means the default.
 const nodePortUrl = new URL('./node-process.js', import.meta.url).href;
 function processScript(): string {
   try {
-    return dec.decode(kernel.vfs.readFile('/etc/openvessel/node')).trim() === 'port' ? nodePortUrl : processUrl;
+    return dec.decode(kernel.vfs.readFile('/etc/openvessel/node')).trim() === 'legacy' ? processUrl : nodePortUrl;
   } catch {
-    return processUrl;
+    return nodePortUrl;
   }
 }
 

@@ -1,10 +1,10 @@
 // Starts `npm run dev`, opens the preview and checks HMR.
-//   node test/e2e/dev.mjs [--port]     (--port: on the ported runtime instead of the legacy one)
-import { startServer, openBrowser, exec, usePortedRuntime } from './harness.mjs';
+//   node test/e2e/dev.mjs [--legacy]     (--legacy: on the legacy runtime instead of the ported one)
+import { startServer, openBrowser, exec, useLegacyRuntime } from './harness.mjs';
 const srv = await startServer();
 const { browser, page } = await openBrowser({ headless: !process.env.HEADED });
 try {
-  if (process.argv.includes('--port')) await usePortedRuntime(page);
+  if (process.argv.includes('--legacy')) await useLegacyRuntime(page);
   await exec(page, 'npm install >/dev/null 2>&1');
   const port = await page.evaluate(async () => {
     const ov = window.ov;
