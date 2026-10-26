@@ -2,7 +2,7 @@
 
 import * as path from '../../shared/path.ts';
 import type { VFS } from '../vfs.ts';
-import { isDir } from '../vfs.ts';
+import { isDir, isLink } from '../vfs.ts';
 import { RUNTIME_BASE } from '../base.ts';
 import type { LockHints } from './lockfile.ts';
 import type { PackageVersion, Packument, Registry } from './registry.ts';
@@ -45,12 +45,16 @@ function compatOrigin(): string | null {
 }
 function loadCompat(): Promise<Record<string, CompatEntry>> {
   const origin = compatOrigin();
-  compatIndex ??= origin
-    ? fetch(`${origin}/compat/index.json`)
-        .then((r) => (r.ok ? r.json() : {}))
-        .catch(() => ({}))
-    : Promise.resolve({});
-  return compatIndex;
+  if (!origin) return Promise.resolve({});
+  // only a successful fetch is kept: after a failure the next install asks again
+  const p: Promise<Record<string, CompatEntry>> = (compatIndex ??= fetch(`${origin}/compat/index.json`).then((r) => {
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.json();
+  }));
+  return p.catch(() => {
+    if (compatIndex === p) compatIndex = null;
+    return {};
+  });
 }
 
 /**
@@ -89,6 +93,50 @@ function pnpmWorkspacePackages(yaml: string): string[] {
   return out.filter(Boolean);
 }
 
+/** Workspace packages of a project: `workspaces` in package.json and the `packages:` of pnpm-workspace.yaml. */
+export function listWorkspaces(vfs: VFS, root: string, pkg?: any): { name: string; dir: string; pkg: any }[] {
+  pkg ??= readJsonFile(vfs, path.join(root, 'package.json'));
+  const patterns: string[] = Array.isArray(pkg?.workspaces) ? pkg.workspaces : (pkg?.workspaces?.packages ?? []);
+  let pnpmWs: string[] = [];
+  try {
+    pnpmWs = pnpmWorkspacePackages(dec.decode(vfs.readFile(path.join(root, 'pnpm-workspace.yaml'))));
+  } catch {}
+  const out: { name: string; dir: string; pkg: any }[] = [];
+  const seen = new Set<string>();
+  for (const pat of [...patterns, ...pnpmWs]) {
+    if (pat.startsWith('!')) continue;
+    for (const dir of expandWorkspaceGlob(vfs, root, pat)) {
+      const wpkg = readJsonFile(vfs, path.join(dir, 'package.json'));
+      if (!wpkg?.name || dir === root || seen.has(dir)) continue;
+      seen.add(dir);
+      out.push({ name: wpkg.name, dir, pkg: wpkg });
+    }
+  }
+  return out;
+}
+
+function expandWorkspaceGlob(vfs: VFS, root: string, pat: string): string[] {
+  const parts = pat.replace(/^\.\//, '').replace(/\/$/, '').split('/');
+  let bases = [root];
+  for (const part of parts) {
+    const next: string[] = [];
+    for (const b of bases) {
+      if (part === '*' || part === '**') {
+        try {
+          for (const [name, t] of vfs.readdirTypes(b)) if (t === 0o040000 && name !== 'node_modules' && !name.startsWith('.')) next.push(path.join(b, name));
+        } catch {}
+      } else if (part.includes('*')) {
+        const re = new RegExp('^' + part.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
+        try {
+          for (const [name, t] of vfs.readdirTypes(b)) if (t === 0o040000 && re.test(name)) next.push(path.join(b, name));
+        } catch {}
+      } else next.push(path.join(b, part));
+    }
+    bases = next;
+  }
+  return bases.filter((d) => vfs.exists(path.join(d, 'package.json')));
+}
+
 /** Packages that are never installed (native-only and optional at runtime). */
 const SKIP = new Set(['fsevents', 'bufferutil', 'utf-8-validate', 'cpu-features', 'ssh2']);
 
@@ -100,6 +148,8 @@ interface Source {
   linkTarget?: string;
   /** Install this package's contents under the node's name (wasm substitution / alias). */
   realName?: string;
+  /** Version of `realName` that is unpacked (a substitute may have a different one). */
+  realVersion?: string;
 }
 
 export class Node {
@@ -116,6 +166,8 @@ export class Node {
   optional = false;
   isRoot = false;
   isWorkspace = false;
+  /** The registry manifest of name@version, before a compat package or substitute replaced it. */
+  origin?: PackageVersion;
   constructor(name: string, version: string, pkg: any, parent: Node | null, dir: string, source: Source) {
     this.name = name;
     this.version = version;
@@ -141,7 +193,10 @@ interface Edge {
   from: Node;
   name: string;
   spec: string;
+  /** The spec as the dependent wrote it (before overrides and pins). */
+  rawSpec: string;
   target: Node;
+  peer: boolean;
 }
 
 /**
@@ -216,6 +271,8 @@ export class Installer {
   private overrides: Record<string, string> = {};
   private warned = new Set<string>();
   private workspaces = new Map<string, Node>();
+  /** The compat index, asked once per install. */
+  private compat: Promise<Record<string, CompatEntry>> | null = null;
 
   constructor(private o: InstallOptions) {}
 
@@ -279,17 +336,17 @@ export class Installer {
       const spec = this.overrides[item.name] ?? pinnedSpec(item.from, item.name, itemSpec);
       const visible = this.findVisible(placeFrom, item.name);
       if (visible && (visible.isWorkspace || (this.satisfiesNode(visible, spec) && this.peerSetOk(visible, item.from)))) {
-        this.addEdge(item.from, item.name, spec, visible);
+        this.addEdge(item.from, item.name, spec, visible, item.spec, item.peer);
         if (!item.dev) this.clearDev(visible);
         if (!item.optional) this.clearOptional(visible);
         continue;
       }
       if (visible && item.peer) {
         this.warnOnce(`peer:${item.from.name}:${item.name}`, `npm warn ERESOLVE ${item.from.name}@${item.from.version} wants peer ${item.name}@"${spec}", found ${visible.version}`);
-        this.addEdge(item.from, item.name, spec, visible);
+        this.addEdge(item.from, item.name, spec, visible, item.spec, item.peer);
         continue;
       }
-      let resolved: { version: string; pkg: PackageVersion; source: Source } | null;
+      let resolved: Awaited<ReturnType<Installer['resolve']>>;
       try {
         resolved = await this.resolve(item.name, spec);
       } catch (e: any) {
@@ -311,9 +368,10 @@ export class Installer {
       const node = new Node(item.name, resolved.version, resolved.pkg, level, path.join(level.nodeModules, item.name), resolved.source);
       node.dev = item.dev;
       node.optional = item.optional;
+      node.origin = resolved.origin;
       level.children.set(item.name, node);
       this.nodes.push(node);
-      this.addEdge(item.from, item.name, spec, node);
+      this.addEdge(item.from, item.name, spec, node, item.spec, item.peer);
       enqueueDeps(node, false);
     }
 
@@ -346,52 +404,19 @@ export class Installer {
   }
 
   private setupWorkspaces(pkg: any) {
-    const patterns: string[] = Array.isArray(pkg.workspaces) ? pkg.workspaces : (pkg.workspaces?.packages ?? []);
-    let pnpmWs: string[] = [];
-    try {
-      const y = dec.decode(this.o.vfs.readFile(path.join(this.o.root, 'pnpm-workspace.yaml')));
-      pnpmWs = pnpmWorkspacePackages(y);
-    } catch {}
-    for (const pat of [...patterns, ...pnpmWs]) {
-      if (pat.startsWith('!')) continue;
-      for (const dir of this.expandWorkspaceGlob(pat)) {
-        const wpkg = this.readJson(path.join(dir, 'package.json'));
-        if (!wpkg?.name || dir === this.o.root) continue;
-        const n = new Node(wpkg.name, wpkg.version ?? '0.0.0', wpkg, this.root, dir, { kind: 'link', linkTarget: dir });
-        n.isWorkspace = true;
-        this.workspaces.set(wpkg.name, n);
-        this.root.children.set(wpkg.name, n);
-        this.nodes.push(n);
-      }
+    for (const ws of listWorkspaces(this.o.vfs, this.o.root, pkg)) {
+      const n = new Node(ws.name, ws.pkg.version ?? '0.0.0', ws.pkg, this.root, ws.dir, { kind: 'link', linkTarget: ws.dir });
+      n.isWorkspace = true;
+      this.workspaces.set(ws.name, n);
+      this.root.children.set(ws.name, n);
+      this.nodes.push(n);
     }
   }
 
-  private expandWorkspaceGlob(pat: string): string[] {
-    const parts = pat.replace(/\/$/, '').split('/');
-    let bases = [this.o.root];
-    for (const part of parts) {
-      const next: string[] = [];
-      for (const b of bases) {
-        if (part === '*' || part === '**') {
-          try {
-            for (const [name, t] of this.o.vfs.readdirTypes(b)) if (t === 0o040000 && name !== 'node_modules' && !name.startsWith('.')) next.push(path.join(b, name));
-          } catch {}
-        } else if (part.includes('*')) {
-          const re = new RegExp('^' + part.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
-          try {
-            for (const [name, t] of this.o.vfs.readdirTypes(b)) if (t === 0o040000 && re.test(name)) next.push(path.join(b, name));
-          } catch {}
-        } else next.push(path.join(b, part));
-      }
-      bases = next;
-    }
-    return bases.filter((d) => this.o.vfs.exists(path.join(d, 'package.json')));
-  }
-
-  private addEdge(from: Node, name: string, spec: string, target: Node) {
+  private addEdge(from: Node, name: string, spec: string, target: Node, rawSpec = spec, peer = false) {
     let l = this.edges.get(name);
     if (!l) this.edges.set(name, (l = []));
-    l.push({ from, name, spec, target });
+    l.push({ from, name, spec, rawSpec, target, peer });
   }
 
   private clearDev(n: Node) {
@@ -516,7 +541,7 @@ export class Installer {
     return semver.maxSatisfying(versions, range) ?? semver.maxSatisfying(versions, range, { includePrerelease: true });
   }
 
-  private async resolve(name: string, spec: string): Promise<{ version: string; pkg: PackageVersion; source: Source } | null> {
+  private async resolve(name: string, spec: string): Promise<{ version: string; pkg: PackageVersion; source: Source; origin?: PackageVersion } | null> {
     if (spec.startsWith('workspace:') || this.workspaces.has(name)) {
       const ws = this.workspaces.get(name);
       if (ws) return null;
@@ -564,14 +589,15 @@ export class Installer {
     const up = version && UPGRADES.find((u) => u.name === realName && semver.satisfies(version!, u.range));
     if (up) version = this.pickVersion(p, realName, up.to);
     if (!version) throw Object.assign(new Error(`No matching version found for ${realName}@${range}.`), { code: 'ETARGET' });
-    let pkg = p.versions[version];
-    let source: Source = { kind: 'registry', tarball: pkg.dist.tarball, integrity: pkg.dist.integrity, shasum: pkg.dist.shasum, realName: realName !== name ? realName : undefined };
+    const origin = p.versions[version];
+    let pkg = origin;
+    let source: Source = { kind: 'registry', tarball: pkg.dist.tarball, integrity: pkg.dist.integrity, shasum: pkg.dist.shasum, realName: realName !== name ? realName : undefined, realVersion: version };
     // compat packages built by OpenVessel (a wasm build or a JS shim), under the requested name and version
-    const compat = (await loadCompat())[realName];
+    const compat = (await (this.compat ??= loadCompat()))[realName];
     if (compat && semver.satisfies(version, compat.range, { includePrerelease: true })) {
       pkg = { ...compat.pkg, name: realName, version, dist: { tarball: `${compatOrigin()}/compat/${compat.file}`, integrity: compat.integrity } } as any;
-      source = { kind: 'registry', tarball: `${compatOrigin()}/compat/${compat.file}`, integrity: compat.integrity, realName: compat.pkg.name };
-      return { version, pkg, source };
+      source = { kind: 'registry', tarball: `${compatOrigin()}/compat/${compat.file}`, integrity: compat.integrity, realName: compat.pkg.name, realVersion: compat.pkg.version ?? version };
+      return { version, pkg, source, origin };
     }
     // WebAssembly substitutes for native packages
     const sub = SUBSTITUTES.find((s) => s.name === realName && (!s.when || s.when(version)));
@@ -582,17 +608,17 @@ export class Installer {
         if (sv) {
           const spkg = sp.versions[sv];
           pkg = { ...spkg, name: realName, version, bin: spkg.bin ?? pkg.bin };
-          source = { kind: 'registry', tarball: spkg.dist.tarball, integrity: spkg.dist.integrity, shasum: spkg.dist.shasum, realName: sub.to };
+          source = { kind: 'registry', tarball: spkg.dist.tarball, integrity: spkg.dist.integrity, shasum: spkg.dist.shasum, realName: sub.to, realVersion: sv };
         }
       } catch {}
     }
-    return { version, pkg, source };
+    return { version, pkg, source, origin };
   }
 
   // ---------------------------------------------------------------------------
   // writing files
 
-  private readHiddenLock(): Record<string, { version: string; resolved?: string }> {
+  private readHiddenLock(): Record<string, { version: string; resolved?: string; link?: boolean }> {
     const j = this.readJson(path.join(this.o.root, 'node_modules/.package-lock.json'));
     return j?.packages ?? {};
   }
@@ -628,13 +654,16 @@ export class Installer {
     const jobs: Promise<void>[] = [];
     for (const [loc, n] of want) {
       const old = prev[loc];
-      const pj = this.readJson(path.join(n.dir, 'package.json'));
-      if (old && old.version === n.version && pj && pj.version === n.version && (old.resolved ?? '') === (n.source.tarball ?? n.source.linkTarget ?? '')) {
+      const at = path.join(this.o.root, loc);
+      const pj = this.readJson(path.join(at, 'package.json'));
+      const link = n.source.kind === 'link';
+      const ino = vfs.tryLookup(at, false);
+      const shapeOk = !!ino && (link ? isLink(ino) : isDir(ino));
+      if (old && old.version === n.version && pj && pj.version === n.version && (old.resolved ?? '') === this.resolvedOf(n) && !!old.link === link && shapeOk) {
         done++;
         continue;
       }
-      if (n.source.kind === 'link') {
-        const at = n.isWorkspace ? path.join(this.o.root, loc) : n.dir;
+      if (link) {
         mkdirp(path.dirname(at));
         if (vfs.tryLookup(at, false)) vfs.rmrf(at);
         vfs.symlink(path.relative(path.dirname(at), n.source.linkTarget!), at);
@@ -672,7 +701,7 @@ export class Installer {
                 const j = JSON.parse(dec.decode(data));
                 j.name = n.name;
                 j.version = n.version;
-                j._openvesselSource = `${n.source.realName}@${(n.pkg as any).version}`;
+                j._openvesselSource = `${n.source.realName}@${n.source.realVersion ?? n.version}`;
                 data = enc.encode(JSON.stringify(j, null, 2));
               } catch {}
             }
@@ -742,20 +771,70 @@ export class Installer {
     }
   }
 
+  /** `resolved` in the hidden lockfile: the tarball URL, or a link's target relative to the project. */
+  private resolvedOf(n: Node): string {
+    return n.source.tarball ?? (n.source.linkTarget ? this.rel(n.source.linkTarget) : '');
+  }
+
   private writeHiddenLock() {
     const packages: Record<string, any> = {};
     for (const n of this.nodes) {
-      packages[this.rel(n.dir)] = { version: n.version, resolved: n.source.tarball ?? n.source.linkTarget, integrity: n.source.integrity, dev: n.dev || undefined, optional: n.optional || undefined, link: n.source.kind === 'link' || undefined };
+      const entry = { version: n.version, resolved: this.resolvedOf(n), integrity: n.source.integrity, dev: n.dev || undefined, optional: n.optional || undefined, link: n.source.kind === 'link' || undefined };
+      if (n.isWorkspace) {
+        // like npm: the link in node_modules, and the workspace's own directory
+        packages[this.rel(path.join(this.root.nodeModules, n.name))] = entry;
+        packages[this.rel(n.dir)] = { name: n.name, version: n.version };
+      } else packages[this.rel(n.dir)] = entry;
     }
     const nm = path.join(this.o.root, 'node_modules');
     if (!this.o.vfs.exists(nm)) this.o.vfs.mkdir(nm, 0o755, true);
     this.o.vfs.writeFile(path.join(nm, '.package-lock.json'), JSON.stringify({ name: this.root.name, lockfileVersion: 3, requires: true, packages }, null, 2));
   }
 
+  /**
+   * The tree as a Yarn v1 lockfile: one entry per package, keyed by every `name@spec` that resolved to
+   * it, with the registry's own manifest (not a compat package's or substitute's).
+   */
+  yarnLockfile(): string {
+    const byNode = new Map<Node, Set<string>>();
+    for (const list of this.edges.values()) {
+      for (const e of list) {
+        if (e.peer || e.target.isWorkspace || e.target.source.kind === 'link') continue;
+        let keys = byNode.get(e.target);
+        if (!keys) byNode.set(e.target, (keys = new Set()));
+        keys.add(`${e.name}@${e.rawSpec}`);
+      }
+    }
+    const entries: [string, string][] = [];
+    for (const [n, keys] of byNode) {
+      const m: any = n.origin ?? n.pkg;
+      const tarball = n.origin?.dist.tarball ?? n.source.tarball!;
+      const shasum = n.origin ? n.origin.dist.shasum : n.source.shasum;
+      const integrity = n.origin ? n.origin.dist.integrity : n.source.integrity;
+      // (sorted by the unquoted patterns, like yarn)
+      const sorted = [...keys].sort();
+      const key = sorted.join(', ');
+      let text = `${sorted.map(yarnQuote).join(', ')}:\n  version ${yarnQuote(n.version)}\n  resolved ${yarnQuote(shasum ? `${tarball}#${shasum}` : tarball)}\n`;
+      if (integrity) text += `  integrity ${yarnQuote(integrity)}\n`;
+      for (const field of ['dependencies', 'optionalDependencies']) {
+        const deps = Object.entries<string>(m[field] ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+        if (deps.length) text += `  ${field}:\n` + deps.map(([k, v]) => `    ${yarnQuote(k)} ${yarnQuote(String(v))}\n`).join('');
+      }
+      entries.push([key, text]);
+    }
+    entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return '# THIS IS AN AUTOGENERATED FILE. DO NOT EDIT THIS FILE DIRECTLY.\n# yarn lockfile v1\n\n\n' + entries.map(([, t]) => t).join('\n');
+  }
+
   /** Flat list of installed packages (for `npm ls`). */
   listTop(): { name: string; version: string }[] {
     return [...this.root.children.values()].map((n) => ({ name: n.name, version: n.version }));
   }
+}
+
+/** Yarn's lockfile quoting: strings that could read as something else are written as JSON strings. */
+function yarnQuote(s: string): string {
+  return s.startsWith('true') || s.startsWith('false') || /[:\s\\",[\]]/.test(s) || /^[0-9]/.test(s) || !/^[a-zA-Z]/.test(s) ? JSON.stringify(s) : s;
 }
 
 export function readJsonFile(vfs: VFS, p: string): any | null {

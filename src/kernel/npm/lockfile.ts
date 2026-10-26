@@ -36,7 +36,25 @@ export function parsePackageLock(text: string, h: Map<string, Set<string>>) {
   }
 }
 
+/** The package a yarn.lock pattern installs: `name@range`, `alias@npm:real@range` (v1), `name@npm:range` (Berry). */
+function yarnPatternName(spec: string): string {
+  const npm = spec.indexOf('@npm:', 1);
+  if (npm > 0) {
+    const real = spec.slice(npm + 5);
+    const at = real.lastIndexOf('@');
+    return at > 0 ? real.slice(0, at) : spec.slice(0, npm);
+  }
+  const at = spec.lastIndexOf('@');
+  return at > 0 ? spec.slice(0, at) : spec;
+}
+
 export function parseYarnLock(text: string, h: Map<string, Set<string>>) {
+  // Yarn Berry (2+): YAML with `__metadata:`; each entry's `resolution: "name@npm:1.2.3"` names the
+  // package and version (its `checksum` is Yarn's own hash of the zip, not an npm integrity)
+  if (/^__metadata:/m.test(text)) {
+    for (const m of text.matchAll(/^\s+resolution:\s+"?((?:@[^@/"\s]+\/)?[^@"\s]+)@npm:([^"\s:]+)[^"\s]*"?\s*$/gm)) add(h, m[1], m[2]);
+    return;
+  }
   let names: string[] = [];
   for (const line of text.split('\n')) {
     if (!line.trim() || line.startsWith('#')) continue;
@@ -44,19 +62,7 @@ export function parseYarnLock(text: string, h: Map<string, Set<string>>) {
       names = line
         .replace(/:\s*$/, '')
         .split(/,\s*/)
-        .map((s) => s.trim().replace(/^"|"$/g, ''))
-        .map((spec) => {
-          const at = spec.lastIndexOf('@');
-          let name = at > 0 ? spec.slice(0, at) : spec;
-          // aliases: "alias@npm:real@^1" → real package name
-          const npm = spec.indexOf('@npm:');
-          if (npm > 0) {
-            const real = spec.slice(npm + 5);
-            const at2 = real.lastIndexOf('@');
-            name = at2 > 0 ? real.slice(0, at2) : real;
-          }
-          return name;
-        });
+        .map((s) => yarnPatternName(s.trim().replace(/^"|"$/g, '')));
       continue;
     }
     const m = /^\s+version:?\s+"?([^"\s]+)"?/.exec(line);
