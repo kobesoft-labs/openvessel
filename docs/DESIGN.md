@@ -20,13 +20,13 @@ WebContainer とは独立に（中身を見ずに）作る。
  ├ ランタイムの iframe（見えない）            origin R   runtime.html + sw.js
  │    ├ カーネル（Web Worker）                 VFS・プロセス表・パイプ・TTY・sh/coreutils/npm
  │    ├ プロセス（Web Worker 1 つ = node 1 つ） Node 互換の層・同期の syscall（SharedArrayBuffer）
- │    └ SW（R）                                ESM の配信・外への通信の関所
+ │    └ SW（R）                                ESM の配信・外部通信の制御
  ├ 中継の iframe（見えない）                  origin P   relay.html + sw.js
  └ プレビューの iframe                        origin P   SW が仮想のサーバーへ橋渡し
 ```
 
 - **H・R・P は全部別のオリジン**にする。P（プレビュー）にはサイトのコードと、サイトに入っている外のスクリプト（解析タグなど）が載るので、いちばん信用しない
-- R にはユーザーのコードと npm の依存が載る。ユーザーは自分のコードを自分のブラウザでいじる前提なので、R のコードは「ユーザーの持ち物」として扱う。ただし **外への通信だけは関所を通す**（npm の依存に悪いものが混ざっていても、勝手に外へ出せない）
+- R にはユーザーのコードと npm の依存が載る。ユーザーは自分のコードを自分のブラウザでいじる前提なので、R のコードは「ユーザーの持ち物」として扱う。ただし **外への通信だけはネットワークポリシーで制御する**（npm の依存に悪いものが混ざっていても、勝手に外へ出せない）
 - 多人数で使うとき（例: Cocoro）は、P を `https://{session}.preview.example` のように **セッションごとのサブドメイン** にする（プレビュー同士が同じオリジンにならないように）
 
 ### 1.1 プレビュー（P）から攻撃させない
@@ -86,7 +86,7 @@ Node の CJS の読み込み（`Module._load`・`_resolveFilename`・`_extension
 
 ### 3.4 組み込みモジュール
 
-`fs`・`path`・`events`・`stream`・`buffer`・`util`・`os`・`url`・`crypto`（ハッシュは同期の JS 実装）・`zlib`（fflate）・`child_process`・`worker_threads`・`http(s)`（クライアントは関所経由の fetch・サーバーは仮想ポート）・`net`（仮想のソケット）・`module`・`process`・`readline`・`tty`・`assert`・`async_hooks`（AsyncLocalStorage）・`vm`・`wasi`・`perf_hooks`・`timers`・`string_decoder`・`querystring`・`v8`/`inspector`/`dns` など（使われる所だけ）。
+`fs`・`path`・`events`・`stream`・`buffer`・`util`・`os`・`url`・`crypto`（ハッシュは同期の JS 実装）・`zlib`（fflate）・`child_process`・`worker_threads`・`http(s)`（クライアントはネットワークポリシーを通る fetch・サーバーは仮想ポート）・`net`（仮想のソケット）・`module`・`process`・`readline`・`tty`・`assert`・`async_hooks`（AsyncLocalStorage）・`vm`・`wasi`・`perf_hooks`・`timers`・`string_decoder`・`querystring`・`v8`/`inspector`/`dns` など（使われる所だけ）。
 
 ### 3.5 ネイティブの依存は WASM 版へ読み替える
 

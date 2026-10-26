@@ -41,7 +41,7 @@ OpenVessel はクリーンルームで作っています（ほかのブラウザ
   無いものには互換パッケージを用意します。多くは同じプロジェクトを `wasm32-wasi` にコンパイルしたものです
   （たとえば Pagefind）。
 - **外からは何にも届かない。** サーバーはカーネルの中の仮想のポートで待ち受け、プレビューの iframe は
-  Service Worker を通してつながります。外への通信は、埋め込む側のページが決める 1 つの関所を通ります。
+  Service Worker を通してつながります。外への通信は、埋め込む側のページが決めるネットワークポリシーで制御されます。
 - **オリジンで隔離。** ページ・ランタイム・プレビューは別々のオリジンなので、プレビューしているサイトの
   コードからランタイムやページには触れません（[docs/SECURITY.md](docs/SECURITY.md)）。
 
@@ -103,7 +103,7 @@ await vessel.spawn('npm', ['run', 'dev'], { cwd: '/home/user/app' });
 |---|---|
 | カーネル: メモリ上のファイルシステム・プロセス・パイプ・TTY・ソケット・`sh`・coreutils・npm・仮想ポート・外への HTTP | `src/kernel/` |
 | Node.js: 起動・イベントループ・`internalBinding()` の各モジュール | `src/nodejs/` |
-| ランタイムのオリジン: Service Worker（ES モジュールの配信・通信の関所） | `src/runtime/` |
+| ランタイムのオリジン: Service Worker（ES モジュールの配信・外部通信の制御） | `src/runtime/` |
 | プレビューのオリジン: HTTP/WebSocket を仮想ポートにつなぐ Service Worker | `src/preview/` |
 | ホストの API | `src/host/` |
 | ネイティブだけのパッケージの互換パッケージ | `compat/`・`scripts/build-compat.mjs` |
