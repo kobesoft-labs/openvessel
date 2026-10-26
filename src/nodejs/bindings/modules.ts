@@ -97,8 +97,33 @@ export function createModules() {
     enableCompileCache: () => [3 /* DISABLED */, 'the compile cache is not available in OpenVessel', undefined],
     getCompileCacheDir: () => undefined,
     flushCompileCache: () => {},
-    setLazyPathHelpers: () => {},
+    setLazyPathHelpers,
   });
+}
+
+/**
+ * import.meta.dirname and import.meta.filename of a file: module (InitImportMetaPathHelpers). Node
+ * defines them as lazy data properties; here they are computed right away, which looks the same
+ * (writable, enumerable, configurable data properties, in this order). dirname is the path up to its
+ * last '/', so a module at the root has ''. A URL that has no path (a host, an encoded '/') makes
+ * Node fail an assertion on first access; here that access throws the conversion's error.
+ */
+function setLazyPathHelpers(meta: object, url: string) {
+  let filename: string;
+  try {
+    // the common case without a lib round trip: no escapes, query or fragment
+    filename = /^file:\/\/\/[^%?#]*$/.test(url) ? url.slice(7) : lib('internal/url').fileURLToPath(url);
+  } catch (e) {
+    const fail = () => {
+      throw e;
+    };
+    Object.defineProperty(meta, 'dirname', { get: fail, enumerable: true, configurable: true });
+    Object.defineProperty(meta, 'filename', { get: fail, enumerable: true, configurable: true });
+    return;
+  }
+  const define = (k: string, value: string) => Object.defineProperty(meta, k, { value, writable: true, enumerable: true, configurable: true });
+  define('dirname', filename.slice(0, filename.lastIndexOf('/')));
+  define('filename', filename);
 }
 
 /** Drops cached package.json data (the VFS changed under it). */
