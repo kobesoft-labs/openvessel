@@ -135,7 +135,8 @@ export class Kernel {
       LANG: 'en_US.UTF-8',
       TMPDIR: '/tmp',
       HOSTNAME: this.hostname,
-      NAPI_RS_FORCE_WASI: '1',
+      // napi-rs loaders: older ones force WASI for any non-empty value, newer ones only for 'true' or 'error'
+      NAPI_RS_FORCE_WASI: 'true',
     };
   }
 
