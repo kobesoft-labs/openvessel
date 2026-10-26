@@ -10,6 +10,7 @@ import * as loop from '../loop.ts';
 import { S } from '../state.ts';
 import { Enc, encode } from './buffer.ts';
 import { fromShape } from './shape.ts';
+import { asyncDestroy, asyncIdOf, completeReq, emitAsyncInit, providerNumber, reqInit, withDefaultTrigger } from './process.ts';
 
 const UV_EOF = -4095;
 let streamBaseState: Int32Array;
@@ -74,14 +75,21 @@ export function readOnce(fd: number, len: number): Promise<Uint8Array> {
   });
 }
 
-/** HandleWrap: something that keeps the loop alive while active and ref'd. */
+/**
+ * HandleWrap: something that keeps the loop alive while active and ref'd. It is an AsyncWrap of
+ * its provider (TCPWRAP, PIPEWRAP…): an async id and the init hook when made, its callbacks in its
+ * async context, the destroy hook once closed.
+ */
 export class HandleWrap {
   #handle: loop.LoopHandle;
   #closed = false;
+  #provider: string;
   onclose: unknown;
-  constructor(resourceName: string, active = false) {
+  constructor(resourceName: string, active = false, provider = 'NONE') {
     this.#handle = { active, refed: true, resourceName, owner: this };
+    this.#provider = provider;
     loop.addHandle(this.#handle);
+    if (provider !== 'NONE') emitAsyncInit(this, provider);
   }
   protected setActive(v: boolean) {
     this.#handle.active = v;
@@ -103,6 +111,7 @@ export class HandleWrap {
       if (typeof cb === 'function') loop.scope(cb, this);
       const onclose = (this as any)[S.perIsolateSymbols.handle_onclose];
       if (typeof onclose === 'function') loop.scope(onclose, this);
+      asyncDestroy(this);
     });
   }
   protected _onClose() {}
@@ -118,10 +127,10 @@ export class HandleWrap {
     return !this.#closed && this.#handle.refed;
   }
   getAsyncId() {
-    return -1;
+    return asyncIdOf(this);
   }
   getProviderType() {
-    return 0;
+    return providerNumber(this.#provider);
   }
 }
 
@@ -265,7 +274,9 @@ export class LibuvStreamWrap extends HandleWrap {
         }
       }
       if (off < bytes.length) {
-        // uv_write: the rest is queued and completes later (req.oncomplete)
+        // uv_write: the rest is queued and completes later (req.oncomplete); only such a write
+        // has a native WriteWrap (StreamBase::Write tries the write first)
+        reqInit(req, 'WRITEWRAP', this);
         this.#queue.push({ req: req as QueuedWrite['req'], data: bytes.slice(off), done: loop.startReq('WriteWrap', req as object), sendHandle: entry.sendHandle });
         this.writeQueueSize += bytes.length - off;
         streamBaseState[kLastWriteWasAsync] = 1;
@@ -315,7 +326,7 @@ export class LibuvStreamWrap extends HandleWrap {
       }
       this.#queue.shift();
       w.done();
-      if (typeof w.req.oncomplete === 'function') loop.scope(w.req.oncomplete, w.req, 0, this, undefined);
+      completeReq(w.req, 0, this, undefined);
     }
     if (writers.get(this._fd) === this) writers.delete(this._fd);
     this.#runAfterQueue();
@@ -328,7 +339,7 @@ export class LibuvStreamWrap extends HandleWrap {
     if (writers.get(this._fd) === this) writers.delete(this._fd);
     for (const w of q) {
       w.done();
-      if (typeof w.req.oncomplete === 'function') loop.scope(w.req.oncomplete, w.req, status, this, undefined);
+      completeReq(w.req, status, this, undefined);
     }
     this.#runAfterQueue();
   }
@@ -397,10 +408,11 @@ export class LibuvStreamWrap extends HandleWrap {
         status = e instanceof SysError ? errno(e.code) : errno('EINVAL');
       }
     }
+    reqInit(req, 'SHUTDOWNWRAP', this);
     const done = loop.startReq('ShutdownWrap');
     loop.macrotask(() => {
       done();
-      if (typeof req.oncomplete === 'function') loop.scope(req.oncomplete, req, status);
+      completeReq(req, status);
     });
     return 0;
   }
@@ -425,7 +437,7 @@ export class LibuvStreamWrap extends HandleWrap {
       loop.macrotask(() => {
         for (const w of q) {
           w.done();
-          if (typeof w.req.oncomplete === 'function') loop.scope(w.req.oncomplete, w.req, canceled, this, undefined);
+          completeReq(w.req, canceled, this, undefined);
         }
       });
     }
@@ -483,7 +495,8 @@ function installPipeAccept() {
       } catch {}
       return;
     }
-    const client = new Pipe(0);
+    // the client handle is triggered by the server (ConnectionWrap::OnConnection)
+    const client = withDefaultTrigger(server, () => new Pipe(0));
     client._setFd(msg.fd);
     loop.scope(server.onconnection, server, 0, client);
   });
@@ -496,7 +509,7 @@ export class Pipe extends LibuvStreamWrap {
   _listening = false;
 
   constructor(public type = 0) {
-    super(type === 1 ? 'PipeServerWrap' : 'PipeWrap');
+    super(type === 1 ? 'PipeServerWrap' : 'PipeWrap', false, type === 1 ? 'PIPESERVERWRAP' : 'PIPEWRAP');
   }
   open(fd: number) {
     this._fd = fd;
@@ -529,11 +542,12 @@ export class Pipe extends LibuvStreamWrap {
     } catch (e) {
       status = e instanceof SysError ? errno(e.code) : errno('ECONNREFUSED');
     }
+    reqInit(req, 'PIPECONNECTWRAP', this);
     // libuv reports the result on a later turn, even failures
     const done = loop.startReq('PipeConnectWrap');
     loop.macrotask(() => {
       done();
-      if (typeof req.oncomplete === 'function') loop.scope(req.oncomplete, req, status, this, req, true, true);
+      completeReq(req, status, this, req, true, true);
     });
   }
   fchmod() {
@@ -556,7 +570,7 @@ export class Pipe extends LibuvStreamWrap {
 
 export class TTY extends LibuvStreamWrap {
   constructor(fd: number, ctx?: Record<string, unknown>) {
-    super('TTYWrap');
+    super('TTYWrap', false, 'TTYWRAP');
     this._fd = fd;
     void ctx;
   }
@@ -581,7 +595,17 @@ export class TTY extends LibuvStreamWrap {
   }
 }
 
-class WriteWrap {
+/**
+ * A request object lib makes (WriteWrap, ShutdownWrap, …): a plain object until the binding starts
+ * a request with it, which makes it an AsyncWrap (reqInit) until the request is done.
+ */
+export class ReqWrap {
+  getAsyncId() {
+    return asyncIdOf(this);
+  }
+}
+
+class WriteWrap extends ReqWrap {
   handle: unknown = null;
   oncomplete: unknown = null;
   async = false;
@@ -589,11 +613,12 @@ class WriteWrap {
   buffer: unknown = null;
   callback: unknown = null;
 }
-class ShutdownWrap {
+class ShutdownWrap extends ReqWrap {
   handle: unknown = null;
   oncomplete: unknown = null;
   callback: unknown = null;
 }
+class PipeConnectWrap extends ReqWrap {}
 
 export function createStreamWrap() {
   const b = fromShape('stream_wrap');
@@ -608,7 +633,7 @@ handleFactories.pipe = (d) => {
 };
 
 export function createPipeWrap() {
-  return Object.assign(fromShape('pipe_wrap'), { Pipe, PipeConnectWrap: class PipeConnectWrap {} });
+  return Object.assign(fromShape('pipe_wrap'), { Pipe, PipeConnectWrap });
 }
 
 export function createTtyWrap() {

@@ -209,7 +209,19 @@ function releaseRejections() {
   for (const [promise, reason] of held) rejectionSink?.(promise, reason);
 }
 
-/** Calls a JS entry point the way libuv → C++ → JS would, then drains ticks. */
+type AsyncScope = object;
+let enterAsync: ((resource: unknown) => AsyncScope | null) | null = null;
+let exitAsync: ((s: AsyncScope, resource: object, failed: boolean) => void) | null = null;
+/** The async_wrap side of a callback scope: the callee's async context and hooks (see bindings/process.ts). */
+export function setAsyncScope<T extends AsyncScope>(enter: (resource: unknown) => T | null, exit: (s: T, resource: object, failed: boolean) => void) {
+  enterAsync = enter;
+  exitAsync = exit as (s: AsyncScope, resource: object, failed: boolean) => void;
+}
+
+/**
+ * Calls a JS entry point the way libuv → C++ → JS would (MakeCallback), then drains ticks. When
+ * thisArg is a native resource (an AsyncWrap), the call runs in its async context.
+ */
 export function scope<T>(fn: (...a: any[]) => T, thisArg?: unknown, ...args: any[]): T | undefined {
   // ticks left by promise jobs, then the rejections they left unhandled, come before the next
   // callback from the loop
@@ -221,6 +233,7 @@ export function scope<T>(fn: (...a: any[]) => T, thisArg?: unknown, ...args: any
     }
   }
   scopeDepth++;
+  const asyncScope = enterAsync !== null && thisArg !== undefined ? enterAsync(thisArg) : null;
   let r: T | undefined;
   try {
     r = fn.apply(thisArg, args);
@@ -228,9 +241,11 @@ export function scope<T>(fn: (...a: any[]) => T, thisArg?: unknown, ...args: any
     scopeDepth--;
     scopeThrew = true;
     triggerUncaughtException(e, false);
+    if (asyncScope) exitAsync!(asyncScope, thisArg as object, true);
     afterCallback();
     return undefined;
   }
+  if (asyncScope) exitAsync!(asyncScope, thisArg as object, false);
   scopeDepth--;
   if (scopeDepth === 0) {
     runTicks();

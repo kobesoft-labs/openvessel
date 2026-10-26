@@ -3,6 +3,7 @@
 import { fromShape } from './shape.ts';
 import { asBuffer, latin1 } from './buffer.ts';
 import { S as State } from '../state.ts';
+import { providerNumber } from './process.ts';
 import { LLHTTP, Span, Err, ERRNO_NAMES, TYPE_REQUEST, TYPE_RESPONSE, type Settings } from './http/llhttp.ts';
 
 // Captured before Node's bootstrap replaces the web globals with lib implementations.
@@ -494,7 +495,8 @@ class HTTPParser extends AsyncWrap {
       if (!list) return; // ASSIGN_OR_RETURN_UNWRAP
     }
 
-    impl.providerType = type === TYPE_REQUEST ? 1 : 2;
+    // AsyncWrap::ProviderType: PROVIDER_HTTPINCOMINGMESSAGE (17) / PROVIDER_HTTPCLIENTREQUEST (18)
+    impl.providerType = providerNumber(type === TYPE_REQUEST ? 'HTTPINCOMINGMESSAGE' : 'HTTPCLIENTREQUEST');
     // AsyncWrap::AsyncReset(resource): a new async id and the init hook
     const hooks = asyncHooks();
     if (hooks) {
@@ -538,6 +540,24 @@ class HTTPParser extends AsyncWrap {
     const impl = implOf(this);
     const cur = impl?.currentBuffer;
     return asBuffer(cur ? cur.slice() : new Uint8Array(0));
+  }
+}
+
+// The methods have a V8 signature in Node: another receiver is an "Illegal invocation" TypeError
+// (a freed parser is still a parser: its calls just do nothing)
+for (const proto of [AsyncWrap.prototype, HTTPParser.prototype]) {
+  for (const key of Object.getOwnPropertyNames(proto)) {
+    const d = Object.getOwnPropertyDescriptor(proto, key)!;
+    if (key === 'constructor' || typeof d.value !== 'function') continue;
+    const method = d.value as (...a: unknown[]) => unknown;
+    const checked = {
+      [key](this: unknown, ...args: unknown[]) {
+        if (!(this instanceof HTTPParser)) throw new TypeError('Illegal invocation');
+        return method.apply(this, args);
+      },
+    }[key];
+    Object.defineProperty(checked, 'length', { value: method.length });
+    Object.defineProperty(proto, key, { ...d, value: checked });
   }
 }
 

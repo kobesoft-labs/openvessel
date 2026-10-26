@@ -351,22 +351,119 @@ export function createSymbols() {
 }
 
 /** The hooks lib registered with setupHooks (init/before/after/destroy/promise_resolve). */
-let nativeHooks: { init?: (asyncId: number, type: string, triggerAsyncId: number, resource: object) => void } | null = null;
+let nativeHooks: {
+  init?: (asyncId: number, type: string, triggerAsyncId: number, resource: object) => void;
+  before?: (asyncId: number) => void;
+  after?: (asyncId: number) => void;
+} | null = null;
 let asyncWrap: any = null;
+/** AsyncWrap::EmitDestroy (set up by createAsyncWrap) */
+let queueDestroy: (id: number) => void = () => {};
 
-/** AsyncWrap::AsyncWrap → EmitAsyncInit for a resource created on the native side (a handle). Returns its async id. */
-export function emitAsyncInit(resource: object, type: string): number {
+/** The AsyncWrap side of a native resource: its ids, and whether it is a one-shot request (ReqWrap). */
+interface AsyncResource {
+  id: number;
+  trigger: number;
+  req: boolean;
+}
+const asyncResources = new WeakMap<object, AsyncResource>();
+
+/**
+ * AsyncWrap::AsyncWrap → AsyncReset → EmitAsyncInit for a resource created on the native side
+ * (a handle, a request, a port…): a new async id, triggered by the default trigger id or else the
+ * current execution id, and the init hook when one is enabled. Returns its async id. A request
+ * (`req`) is destroyed once its callback ran (ReqWrap's lifetime); anything else by asyncDestroy().
+ */
+export function emitAsyncInit(resource: object, type: string, opts?: { req?: boolean; trigger?: number }): number {
   const b = asyncWrap;
   if (!b) return -1;
   const C = b.constants;
   const ids = b.async_id_fields as Float64Array;
   const id = ++ids[C.kAsyncIdCounter];
   const def = ids[C.kDefaultTriggerAsyncId];
-  const trigger = def >= 0 ? def : ids[C.kExecutionAsyncId];
+  const trigger = opts?.trigger ?? (def >= 0 ? def : ids[C.kExecutionAsyncId]);
+  asyncResources.set(resource, { id, trigger, req: opts?.req ?? false });
   if ((b.async_hook_fields as Uint32Array)[C.kInit] > 0 && typeof nativeHooks?.init === 'function') {
     nativeHooks.init(id, type, trigger, resource);
   }
   return id;
+}
+
+/** AsyncWrap::GetAsyncId: the resource's async id (-1: not an AsyncWrap). */
+export function asyncIdOf(resource: object): number {
+  return asyncResources.get(resource)?.id ?? -1;
+}
+
+/** AsyncHooks::DefaultTriggerAsyncIdScope: resources made inside fn are triggered by `parent`. */
+export function withDefaultTrigger<T>(parent: object, fn: () => T): T {
+  const b = asyncWrap;
+  const id = asyncIdOf(parent);
+  if (!b || id < 0) return fn();
+  const ids = b.async_id_fields as Float64Array;
+  const C = b.constants;
+  const prev = ids[C.kDefaultTriggerAsyncId];
+  ids[C.kDefaultTriggerAsyncId] = id;
+  try {
+    return fn();
+  } finally {
+    ids[C.kDefaultTriggerAsyncId] = prev;
+  }
+}
+
+/**
+ * The native request behind a request object lib made (a WriteWrap, TCPConnectWrap…): it becomes an
+ * AsyncWrap when the binding starts the request, triggered by `parent` (the handle) if given.
+ */
+export function reqInit(req: unknown, provider: string, parent?: object) {
+  if (typeof req !== 'object' || req === null) return;
+  const trigger = parent ? asyncIdOf(parent) : -1;
+  emitAsyncInit(req, provider, trigger >= 0 ? { req: true, trigger } : { req: true });
+}
+
+/** AsyncWrap::GetProviderType: the number lib's async_wrap.Providers gives the provider. */
+export function providerNumber(name: string): number {
+  return asyncWrap?.Providers?.[name] ?? 0;
+}
+
+/**
+ * A request is done (ReqWrap::Done → MakeCallback(oncomplete)): its callback runs in its async
+ * context, and then it is destroyed (also when it has no callback).
+ */
+export function completeReq(req: unknown, ...args: unknown[]) {
+  const cb = (req as { oncomplete?: unknown } | null)?.oncomplete;
+  if (typeof cb === 'function') loop.scope(cb as (...a: unknown[]) => unknown, req, ...args);
+  if (typeof req === 'object' && req !== null) asyncDestroy(req);
+}
+
+/** ~AsyncWrap: the destroy hook (queued), once. */
+export function asyncDestroy(resource: object) {
+  const r = asyncResources.get(resource);
+  if (!r) return;
+  asyncResources.delete(resource);
+  queueDestroy(r.id);
+}
+
+/**
+ * InternalCallbackScope for a callback into JS from the resource (MakeCallback): its async context
+ * is pushed and the before hook runs; on the way out the after hook (unless the callback threw:
+ * lib's fatal exception handler does that), the pop, and the end of a request.
+ */
+function enterAsyncScope(resource: unknown): AsyncResource | null {
+  if (typeof resource !== 'object' || resource === null) return null;
+  const r = asyncResources.get(resource);
+  if (!r) return null;
+  asyncWrap.pushAsyncContext(r.id, r.trigger, resource);
+  if ((asyncWrap.async_hook_fields as Uint32Array)[asyncWrap.constants.kBefore] > 0) nativeHooks?.before?.(r.id);
+  return r;
+}
+
+function exitAsyncScope(r: AsyncResource, resource: object, failed: boolean) {
+  const b = asyncWrap;
+  const C = b.constants;
+  if (!failed && (b.async_hook_fields as Uint32Array)[C.kAfter] > 0) nativeHooks?.after?.(r.id);
+  // after an exception the stack may have been cleared already
+  if ((b.async_hook_fields as Uint32Array)[C.kStackLength] > 0 && (b.async_id_fields as Float64Array)[C.kExecutionAsyncId] === r.id) b.popAsyncContext(r.id);
+  if (r.req) asyncDestroy(resource);
 }
 
 export function createAsyncWrap() {
@@ -376,7 +473,8 @@ export function createAsyncWrap() {
   // pushAsyncContext), the native side has its own list for resources pushed from C++
   const resources: unknown[] = [];
   const native: unknown[] = [];
-  // the dump was taken inside a callback: start from AsyncHooks' initial state instead
+  // the dump was taken inside a callback: start from AsyncHooks' initial state instead, as the
+  // bootstrap and the main script see it (execution id 1, nothing on the stack)
   const C = b.constants;
   (b.async_hook_fields as Uint32Array).fill(0);
   (b.async_hook_fields as Uint32Array)[C.kCheck] = 1;
@@ -396,6 +494,8 @@ export function createAsyncWrap() {
       for (const id of list) destroyHook?.(id);
     }
   };
+  queueDestroy = (id) => b.queueDestroyAsyncId(id);
+  loop.setAsyncScope(enterAsyncScope, exitAsyncScope);
   return Object.assign(b, {
     setupHooks: (hooks: typeof nativeHooks & { destroy?: (id: number) => void }) => {
       nativeHooks = hooks;
@@ -405,12 +505,16 @@ export function createAsyncWrap() {
     pushAsyncContext(asyncId: number, triggerId: number, resource: unknown) {
       const f = b.async_hook_fields as Uint32Array;
       const ids = b.async_id_fields as Float64Array;
-      const stack = b.async_ids_stack as Float64Array;
+      let stack = b.async_ids_stack as Float64Array;
       const offset = f[b.constants.kStackLength];
-      if (offset * 2 + 1 < stack.length) {
-        stack[2 * offset] = ids[0];
-        stack[2 * offset + 1] = ids[1];
+      // grow_async_ids_stack: lib reads the binding's array again after a push from here
+      if (offset * 2 >= stack.length) {
+        const grown = new Float64Array(stack.length * 3);
+        grown.set(stack);
+        b.async_ids_stack = stack = grown;
       }
+      stack[2 * offset] = ids[0];
+      stack[2 * offset + 1] = ids[1];
       f[b.constants.kStackLength]++;
       ids[0] = asyncId;
       ids[1] = triggerId;

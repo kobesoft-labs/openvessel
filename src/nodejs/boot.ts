@@ -531,8 +531,14 @@ function boot(init: InitMsg) {
   }
   const main = selectMain(S.optionValues, S.argv, S.hasEval);
   loop.scope(() => {
-    const r = run(main, process, require, internalBinding, primordials);
-    if (r && typeof (r as Promise<unknown>).then === 'function') (r as Promise<unknown>).catch((e) => loop.triggerUncaughtException(e, false));
+    try {
+      const r = run(main, process, require, internalBinding, primordials);
+      if (r && typeof (r as Promise<unknown>).then === 'function') (r as Promise<unknown>).catch((e) => loop.triggerUncaughtException(e, false));
+    } finally {
+      // the main script ran with execution id 1; what the loop calls later starts from 0
+      const aw = getInternalBinding('async_wrap');
+      if (aw.async_hook_fields[aw.constants.kStackLength] === 0) aw.async_id_fields.fill(0, 0, 2);
+    }
   });
   mark(main);
   if (init.env.OV_TIMING) {

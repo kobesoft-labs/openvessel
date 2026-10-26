@@ -5,7 +5,8 @@
 
 import { SysError, sys } from '../../node/sys.ts';
 import * as loop from '../loop.ts';
-import { encodeOut, pathString, uvError } from './fs.ts';
+import { FSReqPromise, encodeOut, pathString, uvError } from './fs.ts';
+import { asyncIdOf, completeReq, emitAsyncInit } from './process.ts';
 import { fromShape } from './shape.ts';
 
 const S_IFMT = 0o170000;
@@ -25,14 +26,17 @@ function run<T>(req: Req, syscall: string, path: unknown, fn: () => T): T | Prom
   }
   if (typeof req === 'symbol') {
     const done = loop.startReq('FSReqPromise');
+    const wrap = new FSReqPromise();
     return new Promise<T>((resolve, reject) => {
       loop.macrotask(() => {
         done();
-        try {
-          resolve(fn());
-        } catch (e) {
-          reject(uvError(e, syscall, path));
-        }
+        loop.scope(() => {
+          try {
+            resolve(fn());
+          } catch (e) {
+            reject(uvError(e, syscall, path));
+          }
+        }, wrap);
       });
     });
   }
@@ -46,11 +50,9 @@ function run<T>(req: Req, syscall: string, path: unknown, fn: () => T): T | Prom
       err = uvError(e, syscall, path);
     }
     done();
-    if (typeof req.oncomplete === 'function') {
-      if (err) loop.scope(req.oncomplete, req, err);
-      else if (result === undefined) loop.scope(req.oncomplete, req, null);
-      else loop.scope(req.oncomplete, req, null, result);
-    }
+    if (err) completeReq(req, err);
+    else if (result === undefined) completeReq(req, null);
+    else completeReq(req, null, result);
   });
   return undefined;
 }
@@ -61,9 +63,10 @@ export class DirHandle {
   #closed = false;
   constructor(entries: [string, number][]) {
     this.#entries = entries;
+    emitAsyncInit(this, 'DIRHANDLE');
   }
   getAsyncId() {
-    return -1;
+    return asyncIdOf(this);
   }
   /** [name, type, name, type, …] (at most bufferSize entries), or null at the end. */
   read(encoding: unknown, bufferSize: number, req?: Req) {

@@ -162,7 +162,7 @@ class TLSWrap extends LibuvStreamWrap {
   onerror: unknown = null;
 
   constructor(parent: LibuvStreamWrap, context: SecureContext | null, isServer: boolean) {
-    super('TLSWrap');
+    super('TLSWrap', false, 'TLSWRAP');
     this._parent = parent;
     this.#context = context;
     this.#isServer = isServer;

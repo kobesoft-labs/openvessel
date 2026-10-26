@@ -52,7 +52,7 @@ class UDPWrap extends HandleWrap {
   #joined = false;
 
   constructor() {
-    super('UDPWrap');
+    super('UDPWrap', false, 'UDPWRAP');
   }
 
   get fd() {

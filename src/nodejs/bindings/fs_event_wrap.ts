@@ -50,7 +50,7 @@ export class FSEvent extends HandleWrap {
   #stopped = false;
 
   constructor() {
-    super('FSEventWrap');
+    super('FSEventWrap', false, 'FSEVENTWRAP');
   }
 
   get initialized() {
