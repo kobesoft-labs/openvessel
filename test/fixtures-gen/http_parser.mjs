@@ -191,6 +191,18 @@ add({ name: 'empty chunks', type: REQ, chunks: ['', 'GET / HTTP/1.1\r\nHost: x',
 add({ name: 'body split with empty chunks', type: REQ, chunks: ['POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\n', '', 'ab', '', 'cd'] });
 add({ name: 'lenient all mixed', split: true, type: REQ, lenient: ALL, input: 'GET / HTTP/1.1\r\nHost : x\r\nA: b\x01c\r\nConnection: close\r\nTransfer-Encoding: chunked\r\nContent-Length: 4\r\n\r\n4 \nabcd\n0\n\nGARBAGE' });
 
+// every byte in the places where llhttp's character tables decide (they differ between llhttp versions)
+for (let b = 0; b < 256; b++) {
+  const ch = String.fromCharCode(b);
+  const hex = b.toString(16).padStart(2, '0');
+  add({ name: `byte ${hex} in header value`, type: REQ, input: `GET / HTTP/1.1\r\nA: x${ch}y\r\n\r\n` });
+  add({ name: `byte ${hex} in header value lenient`, type: REQ, lenient: L.kLenientHeaders, input: `GET / HTTP/1.1\r\nA: x${ch}y\r\n\r\n` });
+  add({ name: `byte ${hex} in header name`, type: REQ, input: `GET / HTTP/1.1\r\nA${ch}B: x\r\n\r\n` });
+  add({ name: `byte ${hex} in url`, type: REQ, input: `GET /a${ch}b HTTP/1.1\r\n\r\n` });
+  add({ name: `byte ${hex} in reason`, type: RES, input: `HTTP/1.1 200 O${ch}K\r\nContent-Length: 0\r\n\r\n` });
+  add({ name: `byte ${hex} in chunk extension`, type: REQ, input: `POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n1;a=${ch}\r\nz\r\n0\r\n\r\n` });
+}
+
 // pause/resume
 add({ name: 'pause then execute', type: REQ, ops: [['exec', 'GET /a HTTP/1.1\r\n\r\n'], ['pause'], ['exec', 'GET /b HTTP/1.1\r\n\r\n'], ['resume'], ['exec', 'GET /c HTTP/1.1\r\n\r\n']] });
 add({ name: 'pause inside callback', type: REQ, pauseInHeadersComplete: true, ops: [['exec', 'GET /a HTTP/1.1\r\n\r\nGET /b HTTP/1.1\r\n\r\n'], ['exec', 'GET /c HTTP/1.1\r\n\r\n'], ['resume'], ['exec', 'GET /d HTTP/1.1\r\n\r\n']] });
