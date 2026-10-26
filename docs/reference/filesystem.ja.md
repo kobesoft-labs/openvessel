@@ -43,7 +43,7 @@ OpenVessel には、カーネルの Worker の中にある、メモリ上の POS
 | シンボリックリンク | `S_IFLNK` 0o120000 | `symlink` | 0o777 |
 | キャラクタデバイス | `S_IFCHR` 0o020000 | 起動時のカーネルだけ | 0o666 |
 | FIFO | `S_IFIFO` 0o010000 | `mkfifo` のプログラム | `-m` の mode、または 0o666 から umask を除いたもの |
-| ソケット | `S_IFSOCK` 0o140000 | Unix ドメインソケットのパスでの `listen()` | 0o755 |
+| ソケット | `S_IFSOCK` 0o140000 | Unix ドメインソケットのパスでの `listen()` | 0o777 から umask を除いたもの |
 | ブロックデバイス | `S_IFBLK` 0o060000 | —（定義だけで作らない） | |
 
 `stat` の結果:
@@ -90,37 +90,47 @@ uid/gid 1000、大きさ 0、時刻はすべて「いま」で、mode は `S_IFI
 
 ### 調べること
 
-権限のビットを調べるのは、いくつかの場所だけで、しかも node のプロセスからのシステムコールだけです。組み込みの
-プログラムとホスト API では調べません。
+プロセスは root ではなく uid 1000 で動くので、Linux と同じく権限のビットが効きます。調べるのは node のプロセスからの
+システムコールです。組み込みのプログラムとホスト API では調べません。
 
 | 調べること | どこで | エラー |
 |---|---|---|
-| 項目が増える・減るディレクトリの書き込みと検索の権限（`w` と `x`） | 新しいファイルの `O_CREAT` 付きの `open`、新しいファイルの `writeFile`、`mkdir`（最初の新しい項目が入るディレクトリ）、`mkdtemp`、`rmdir`、`unlink`、`rename`（元と先のディレクトリ）、`link`、`symlink` | `EACCES` |
-| ファイルを実行するための `x` のビット（0o111 のどれか） | `spawn`・`execve`・シェル | `EACCES`（`Permission denied`） |
-| `access()` の `X_OK` | ディレクトリ以外で `x` のビットが 1 つも無いもの | `EACCES` |
+| すでにあるファイルの読み取りの権限（`r`） | 読むための `open`、`readFile`、`copyFile`（元） | `EACCES` |
+| すでにあるファイルの書き込みの権限（`w`） | 書くための、または `O_TRUNC` 付きの `open`、`writeFile`（`O_APPEND` 付きも）、`truncate`、`copyFile`（すでにある先） | `EACCES` |
+| ディレクトリの読み取りの権限 | ディレクトリの `open`、`readdir`（`fs.readdir`・`fs.opendir`） | `EACCES` |
+| ディレクトリの検索の権限（`x`） | `chdir` | `EACCES` |
+| 項目が増える・減るディレクトリの書き込みと検索の権限（`w` と `x`） | 新しいファイルの `O_CREAT` 付きの `open`、新しいファイルの `writeFile`、新しいファイルへの `copyFile`、`mkdir`（最初の新しい項目が入るディレクトリ）、`mkdtemp`、`rmdir`、`unlink`、`rename`（元と先のディレクトリ）、`link`、`symlink` | `EACCES` |
+| ファイルを実行するための実行の権限（`x`） | `spawn`・`execve`・シェル | `EACCES`（`Permission denied`） |
+| `access()` の `R_OK`・`W_OK`・`X_OK` | 対応するビット。ディレクトリの `X_OK` は検索の権限 | `EACCES` |
 
-ディレクトリを調べるときは、そのディレクトリの uid が 1000 なら持ち主のビット、そうでなく gid が 1000 なら
-グループのビット、どちらでもなければほかの人のビットを見ます。実際には、いつも持ち主のビットです。
+どれも、inode の uid が 1000 なら持ち主のビット、そうでなく gid が 1000 ならグループのビット、どちらでもなければ
+ほかの人のビットを見ます。実際には、いつも持ち主のビットです。Linux と同じく、ファイルの権限は開くときに調べます。
+`open(O_CREAT)` で mode 0o444 で作ったファイルも、作った記述子からは書けます。開いている記述子は、あとで `chmod`
+しても使えます。
 
-調べないこと: すでにあるファイルの読み書き（0444 のファイルも書き込み用に開いて書けます）、`access()` の
-`R_OK`/`W_OK`、`chmod`、`utimes`、`truncate`、`copyFile`、旧ランタイムの `rm` と `cp`、`/tmp` のスティッキービット。
+調べないこと: パスの途中のディレクトリの検索の権限（調べるのは `chdir` だけ）、`chmod` と `utimes`（持ち主はいつも
+できて、持ち主はいつもプロセスのユーザー）、旧ランタイムの `rm` と `cp`、`/tmp` のスティッキービット、カーネル自身が
+答える `/proc` と `/dev/tty` のパス。
 
 ### mode と umask
 
 | 操作 | できる権限のビット |
 |---|---|
-| ファイルを作る `open(O_CREAT)`・`writeFile` | `mode & ~umask & ~0o022`（mode の既定は 0o666） |
-| `mkdir` | `mode & ~0o022`。プロセスの umask は**使いません**（mode の既定は 0o777） |
-| `mkdtemp` | 0o700 |
+| ファイルを作る `open(O_CREAT)`・`writeFile` | `mode & ~umask`（mode の既定は 0o666） |
+| `mkdir` | `mode & 0o1777 & ~umask`（mode の既定は 0o777） |
+| `mkdtemp` | `0o700 & ~umask` |
+| Unix ドメインソケット（`listen(path)`） | `0o777 & ~umask` |
 | `copyFile` | 元のファイルのビットそのまま |
 | `chmod`・`fchmod` | `mode & 0o7777` そのまま |
+| 組み込みのプログラム（`mkdir`・`touch`・シェルのリダイレクトなど） | 上と同じ。umask はそのプログラムのもの |
 | ホストの `writeFile`・`mount` | 0o644。`mount` は `*.sh`・`*.bash` と、`#!` で始まる文字列に `x` のビットを足す |
 | ホストの `mkdir` | 0o755 |
 
-VFS 自身が、新しいファイルとディレクトリからいつも 0o022 を除くので、umask で削れるのはそれより多くのビットだけです。
-どのプロセスも umask 0o022 で始まります（親からは受け継ぎません）。変えるには `process.umask()`（移植ランタイム）か、
-シェルの組み込みの `umask` を使います（後者が効くのはシェル自身のリダイレクトで、シェルが起動するプログラムには
-効きません）。旧ランタイムは `process.umask()` をプロセスの中だけで持ち、カーネルには伝えません。
+umask はプロセスごとです。ホストが起動したプロセスは 0o022、それ以外は親の umask を受け継ぎます（`execve` でも
+変わりません）。umask を使うのはファイル・ディレクトリ・ソケットを作るときだけなので、`umask 0` なら新しい
+ディレクトリは 0o777 になります。変えるには `process.umask()`（移植ランタイム）か、シェルの組み込みの `umask` を
+使います。後者はシェル自身のリダイレクトと、そのあとシェルが起動するプログラムに効きます。旧ランタイムは
+`process.umask()` をプロセスの中だけで持ち、カーネルには伝えません。ホスト API とカーネル自身のファイルは 0o022 です。
 
 ## 時刻
 
@@ -141,8 +151,8 @@ VFS 自身が、新しいファイルとディレクトリからいつも 0o022 
 | `link` | — | — | 更新 | 更新 |
 | `rmdir` | — | — | — | 更新 |
 | `chmod` | — | — | 更新 | — |
-| `utimes`・`futimes` | 渡した値 | 渡した値 | `utimes` は更新、`futimes` は — | — |
-| `fchmod` | — | — | — | — |
+| `utimes`・`futimes` | 渡した値 | 渡した値 | 更新 | — |
+| `fchmod` | — | — | 更新 | — |
 
 ## リンク
 
@@ -152,7 +162,7 @@ VFS 自身が、新しいファイルとディレクトリからいつも 0o022 
 - `lstat().size` はリンク先の UTF-8 の長さです。
 - 行き先の無いシンボリックリンクを通してファイルを作ると（`open(O_CREAT)`・`writeFile`）、リンク先ができます。
   `O_EXCL` 付きなら `EEXIST` です。
-- `utimes` はいつもリンクをたどります。移植ランタイムの `fs.lutimes()` は、リンク先の時刻を変えます。
+- `utimes` はリンクをたどります。移植ランタイムの `fs.lutimes()` は、リンクそのものの時刻を変えます。
 - `chmod` はリンクをたどります（`lchmod` はありません）。
 
 ### ハードリンク
@@ -164,7 +174,7 @@ VFS 自身が、新しいファイルとディレクトリからいつも 0o022 
 ## ファイル記述子と open のフラグ
 
 ファイル記述子はプロセスごとです（[プロセス](processes.ja.md#ファイル記述子と標準入出力)）。`open` は、空いている 3 以上の
-最小の番号を返します。オープンファイル記述（位置とフラグ）は、それを指すすべての記述子が共有します。子が受け継いだもの
+最小の番号を返します。その番号がプロセスの `RLIMIT_NOFILE`（`ulimit -n`、既定は 1024）に届くときは `EMFILE` です。オープンファイル記述（位置とフラグ）は、それを指すすべての記述子が共有します。子が受け継いだもの
 やほかのプロセスに渡したものも同じなので、位置も共有します。
 
 | フラグ | 値 | ふるまい |
@@ -177,7 +187,7 @@ VFS 自身が、新しいファイルとディレクトリからいつも 0o022 
 | `O_APPEND` | 0o2000 | 書き込みはいつもファイルの末尾へ。`write` に渡した位置は無視 |
 | `O_NONBLOCK` | 0o4000 | `open` では無視 |
 | `O_DIRECTORY` | 0o200000 | ディレクトリでなければ `ENOTDIR` |
-| `O_NOFOLLOW` | 0o400000 | 最後の部品のシンボリックリンクをたどらない。リンクそのものが開き、読むと空（Linux では `ELOOP`） |
+| `O_NOFOLLOW` | 0o400000 | 最後の部品のシンボリックリンクをたどらない。`open` は `ELOOP` で失敗する |
 | `O_SYNC` | 0o4010000 | 無視（すべて同期） |
 
 `open` のほかの決まり:
@@ -214,9 +224,9 @@ VFS 自身が、新しいファイルとディレクトリからいつも 0o022 
 | 操作 | エラー | 補足 |
 |---|---|---|
 | `mkdir` | `EEXIST`（`/` でも）・`ENOENT`（親が無い。再帰でないとき）・`ENOTDIR` | 再帰なら最初に作ったディレクトリを返す。全部あったときは `undefined` |
-| `rmdir` | `ENOTDIR`・`ENOTEMPTY` | |
-| `unlink` | ディレクトリなら `EISDIR` | シンボリックリンクはリンクそのものを消す |
-| `rename` | `EINVAL`（ディレクトリを自分の中へ）・`EISDIR`（ファイルをディレクトリの上へ）・`ENOTDIR`（ディレクトリをファイルの上へ）・`ENOTEMPTY`（空でないディレクトリの上へ） | すでにあるファイルや空のディレクトリは置き換える。同じ inode の名前の上への rename は何もしない |
+| `rmdir` | `ENOTDIR`・`ENOTEMPTY`・`EBUSY`（`/`） | |
+| `unlink` | ディレクトリなら `EISDIR`（`/` も） | シンボリックリンクはリンクそのものを消す |
+| `rename` | `EINVAL`（ディレクトリを自分の中へ）・`EISDIR`（ファイルをディレクトリの上へ）・`ENOTDIR`（ディレクトリをファイルの上へ）・`ENOTEMPTY`（空でないディレクトリの上へ）・`EBUSY`（どちらかが `/`） | すでにあるファイルや空のディレクトリは置き換える。同じ inode の名前の上への rename は何もしない |
 | `link` | `EPERM`（ディレクトリ）・`EEXIST` | |
 | `symlink` | `EEXIST` | |
 | `readlink` | `EINVAL`（シンボリックリンクでない） | |
@@ -224,7 +234,7 @@ VFS 自身が、新しいファイルとディレクトリからいつも 0o022 
 | `read` | `EBADF`・`EISDIR` | |
 | `write` | `EBADF`・`EISDIR`・`EPIPE`（読む人のいないパイプ） | |
 | `writeFile` | `EEXIST`（`wx`）・`EISDIR`（`/` でも）・`ENOENT`（親が無い） | キャラクタデバイスに書くと、そのデバイスに書く |
-| `truncate`・`ftruncate` | `EISDIR`。inode の無い記述子の `ftruncate` は `EINVAL` | ほかの、通常のファイルでないものはそのまま |
+| `truncate`・`ftruncate` | `EISDIR`。inode の無い記述子や、書き込み用に開いていない記述子の `ftruncate` は `EINVAL` | ほかの、通常のファイルでないものはそのまま |
 | `copyFile` | `EISDIR`（元がディレクトリ）・`EEXIST`（`COPYFILE_EXCL`）・`ENOENT`（コピー先のディレクトリが無い） | 両側でシンボリックリンクをたどる。`COPYFILE_FICLONE*` のフラグは無視 |
 | `lseek` | `ESPIPE`（通常のファイルでない）・`EINVAL`（結果が負） | |
 | `fs.rm`（旧） | `force` でなければ `ENOENT`、`ERR_FS_EISDIR`（`recursive` 無しのディレクトリ） | 移植ランタイムは、上の呼び出しの上で Node 自身の `rm`（rimraf）を動かす |
@@ -243,7 +253,7 @@ VFS 自身が、新しいファイルとディレクトリからいつも 0o022 
 | `/proc/self` | `lstat` ではシンボリックリンク（大きさ = pid の桁数）、`readlink` は pid を返す、`stat` ではディレクトリ（mode 0o555） |
 | `/proc/<自分の pid>`・`/proc/<自分の pid>/fd` | `stat` ではディレクトリ（0o555 と 0o500） |
 | `readlink('/proc/self/fd/N')` | ファイルのパス・`/dev/tty`・`pipe:[id]`・`socket:[id]` |
-| `/proc/cpuinfo`・`/proc/meminfo`・`/proc/version` | 起動時に書いた固定のファイル |
+| `/proc/cpuinfo`・`/proc/meminfo`・`/proc/version` | 起動時に書いた固定のファイル。CPU・メモリ・カーネルのバージョンは移植ランタイムの `os` モジュールが返すものと同じ（[起動時のファイルシステム](kernel.ja.md#起動時のファイルシステム)） |
 | FIFO（`mkfifo`） | 下を参照 |
 | Unix ドメインソケット | `listen(path)` で作る。`open` ではつながらない（`net.connect(path)` を使う） |
 
@@ -272,8 +282,8 @@ VFS を変える操作はすべて、`{ type, path }` の通知をその場で�
 | 通知 | 出すもの |
 |---|---|
 | `rename` | ファイル・ディレクトリ・シンボリックリンク・ハードリンク・FIFO・ソケットを作る、`unlink`、`rmdir`、`rename`（古いパスに 1 回、新しいパスに 1 回） |
-| `change` | `writeFile`、記述子を通した書き込みのたびに、`truncate`/`ftruncate`/`O_TRUNC`、`chmod`、`utimes` |
-| 出さない | 読み取り、`fchmod`、`futimes`、`chown`、キャラクタデバイスへの書き込み |
+| `change` | `writeFile`、記述子を通した書き込みのたびに、`truncate`/`ftruncate`/`O_TRUNC`、`chmod`、`utimes`、`fchmod`/`futimes`（記述子を開いたときのパスで） |
+| 出さない | 読み取り、`chown`、キャラクタデバイスへの書き込み |
 
 通知はパスで届くので、別の名前（シンボリックリンク、ハードリンク、シンボリックリンクのディレクトリを通した別の書き方）
 で変えたときは、その名前でだけ知らされます。
@@ -284,7 +294,7 @@ VFS を変える操作はすべて、`{ type, path }` の通知をその場で�
 `{ t: 'watch', id, type, path }` として送ります。
 
 - 監視しているパスそのもの
-- `recursive` ならその下のすべてのパス、無ければ直下の子
+- `recursive` ならその下のすべてのパス（`/` の監視はすべてのパス）、無ければ直下の子
 
 カーネルはパスがあるかを調べません。監視は `unwatch`・`execve`・プロセスの終了で終わります。
 
@@ -350,7 +360,7 @@ Node の 3 つの形で動きます: 同期（例外を投げる）、コール�
 | `cp` | Node の `cp` と `cpSyncCheckPaths`/`cpSyncCopyDir`/`cpSyncOverrideFile`。`stat`・`readdir`・`mkdir`・`copyFile`・`symlink`・`readlink`・`realpath`・`unlink`・`utimes` を使う |
 | `chmod`・`fchmod` | `chmod`・`fchmod` |
 | `chown`・`fchown`・`lchown` | `stat`/`fstat` だけ（id は無視） |
-| `utimes`・`futimes`・`lutimes` | `utimes`・`futimes`（`lutimes` はリンクをたどる） |
+| `utimes`・`futimes`・`lutimes` | `utimes`（`lutimes` は `l` 付き）・`futimes` |
 | `fsync`・`fdatasync` | `fstat` だけ |
 | `watch` | `stat`・`watch`・`unwatch` |
 | `watchFile` | タイマーで `stat` |
@@ -370,7 +380,7 @@ Node の 3 つの形で動きます: 同期（例外を投げる）、コール�
 | `fs.writeFile(path, data)` | 無い親ディレクトリを作る。mode 0o644。`change`（新しければ `rename` も）を出す |
 | `fs.mkdir(path, { recursive = true })` | mode 0o755。最初に作ったディレクトリか `null` を返す |
 | `fs.readdir(path, { withFileTypes })` | 名前、または `{ name, type }`。`type` は `dir`・`symlink`・`file`（それ以外すべて） |
-| `fs.rm(path, { recursive, force })` | `recursive` なら木ごと消す。`force: false` でなければ、無くてもかまわない。そうでなければ、ディレクトリは `rmdir`（空であること）、ほかは `unlink` |
+| `fs.rm(path, { recursive, force })` | `recursive` なら木ごと消す。`force: false` でなければ、無くてもかまわない。`/` は何も消さずに `EBUSY` で失敗する。そうでなければ、ディレクトリは `rmdir`（空であること）、ほかは `unlink` |
 | `fs.stat(path)` | stat の項目と `isDirectory`・`isFile`（シンボリックリンクはたどる） |
 | `fs.exists(path)` | パスが解決できれば `true`（シンボリックリンクはたどる） |
 | `fs.rename(from, to)` | `rename` と同じ |

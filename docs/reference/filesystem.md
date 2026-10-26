@@ -45,7 +45,7 @@ system system calls are in the [system call table](kernel.md#files).
 | Symbolic link | `S_IFLNK` 0o120000 | `symlink` | 0o777 |
 | Character device | `S_IFCHR` 0o020000 | the kernel at start only | 0o666 |
 | FIFO | `S_IFIFO` 0o010000 | the `mkfifo` program | `-m` mode, or 0o666 minus the umask |
-| Socket | `S_IFSOCK` 0o140000 | `listen()` on a Unix domain socket path | 0o755 |
+| Socket | `S_IFSOCK` 0o140000 | `listen()` on a Unix domain socket path | 0o777 minus the umask |
 | Block device | `S_IFBLK` 0o060000 | — (defined, never created) | |
 
 `stat` results:
@@ -94,39 +94,48 @@ nothing; the `chown` program does nothing.
 
 ### What is checked
 
-Permission bits are checked in a few places only, and only for system calls from node processes.
-Builtin programs and the host API are not checked.
+Processes run as uid 1000, not as root, so the permission bits apply to them as on Linux. They are
+checked for system calls from node processes; builtin programs and the host API are not checked.
 
 | Check | Where | Error |
 |---|---|---|
-| Write and search permission (`w` and `x`) on the directory that gets or loses an entry | `open` with `O_CREAT` of a new file, `writeFile` of a new file, `mkdir` (the directory that gets the first new entry), `mkdtemp`, `rmdir`, `unlink`, `rename` (source and destination directories), `link`, `symlink` | `EACCES` |
-| An `x` bit (any of 0o111) to execute a file | `spawn`, `execve`, the shell | `EACCES` (`Permission denied`) |
-| `X_OK` in `access()` | a non-directory without any `x` bit | `EACCES` |
+| Read permission (`r`) on an existing file | `open` for reading, `readFile`, `copyFile` (source) | `EACCES` |
+| Write permission (`w`) on an existing file | `open` for writing or with `O_TRUNC`, `writeFile` (also with `O_APPEND`), `truncate`, `copyFile` (an existing destination) | `EACCES` |
+| Read permission on a directory | `open` of a directory, `readdir` (`fs.readdir`, `fs.opendir`) | `EACCES` |
+| Search permission (`x`) on a directory | `chdir` | `EACCES` |
+| Write and search permission (`w` and `x`) on the directory that gets or loses an entry | `open` with `O_CREAT` of a new file, `writeFile` of a new file, `copyFile` to a new file, `mkdir` (the directory that gets the first new entry), `mkdtemp`, `rmdir`, `unlink`, `rename` (source and destination directories), `link`, `symlink` | `EACCES` |
+| Execute permission (`x`) to run a file | `spawn`, `execve`, the shell | `EACCES` (`Permission denied`) |
+| `R_OK`, `W_OK`, `X_OK` in `access()` | the matching bits; `X_OK` on a directory is search permission | `EACCES` |
 
-The directory check uses the owner bits when the directory's uid is 1000, else the group bits when its
-gid is 1000, else the other bits — in practice always the owner bits.
+Each check uses the owner bits when the inode's uid is 1000, else the group bits when its gid is 1000,
+else the other bits — in practice always the owner bits. As on Linux, the permission of a file is
+checked when it is opened: a file created by `open(O_CREAT)` with mode 0o444 can be written through
+the descriptor that created it, and an open descriptor keeps working after a `chmod`.
 
-Not checked: reading or writing an existing file (a 0444 file can be opened for writing and written),
-`R_OK`/`W_OK` in `access()`, `chmod`, `utimes`, `truncate`, `copyFile`, the legacy runtime's `rm` and
-`cp`, and the sticky bit of `/tmp`.
+Not checked: search permission on the directories along a path (only `chdir` checks it), `chmod` and
+`utimes` (the owner may always do them, and the owner is always the process's user), the legacy
+runtime's `rm` and `cp`, the sticky bit of `/tmp`, and the kernel's own `/proc` and `/dev/tty` paths.
 
 ### Modes and umask
 
 | Operation | Resulting permission bits |
 |---|---|
-| `open(O_CREAT)`, `writeFile` creating a file | `mode & ~umask & ~0o022` (mode defaults to 0o666) |
-| `mkdir` | `mode & ~0o022` — the process umask is **not** applied (mode defaults to 0o777) |
-| `mkdtemp` | 0o700 |
+| `open(O_CREAT)`, `writeFile` creating a file | `mode & ~umask` (mode defaults to 0o666) |
+| `mkdir` | `mode & 0o1777 & ~umask` (mode defaults to 0o777) |
+| `mkdtemp` | `0o700 & ~umask` |
+| Unix domain socket (`listen(path)`) | `0o777 & ~umask` |
 | `copyFile` | the source's bits, exactly |
 | `chmod`, `fchmod` | `mode & 0o7777`, exactly |
+| Builtin programs (`mkdir`, `touch`, the shell's redirections, …) | as above, with the program's umask |
 | Host `writeFile`, `mount` | 0o644; `mount` adds `x` bits to `*.sh`, `*.bash` and to strings starting with `#!` |
 | Host `mkdir` | 0o755 |
 
-The VFS itself always clears 0o022 from new files and directories, so a umask can only remove more
-bits. Every process starts with a umask of 0o022 — it is not inherited from the parent. It is changed with
-`process.umask()` (ported runtime) or the shell's `umask` builtin (which affects the shell's own
-redirections, not the programs it starts). The legacy runtime keeps `process.umask()` inside the
-process and never tells the kernel.
+The umask is per process: 0o022 for a process the host starts, otherwise a copy of its parent's (also
+across `execve`). It is applied when a file, directory or socket is created and nowhere else, so with
+`umask 0` a new directory gets 0o777. It is changed with `process.umask()` (ported runtime) or the
+shell's `umask` builtin, which affects the shell's own redirections and the programs it starts
+afterwards. The legacy runtime keeps `process.umask()` inside the process and never tells the kernel.
+The host API and the kernel's own files use 0o022.
 
 ## Timestamps
 
@@ -148,8 +157,8 @@ changes.
 | `link` | — | — | updated | updated |
 | `rmdir` | — | — | — | updated |
 | `chmod` | — | — | updated | — |
-| `utimes`, `futimes` | given value | given value | `utimes`: updated; `futimes`: — | — |
-| `fchmod` | — | — | — | — |
+| `utimes`, `futimes` | given value | given value | updated | — |
+| `fchmod` | — | — | updated | — |
 
 ## Links
 
@@ -159,7 +168,7 @@ changes.
 - `lstat().size` is the UTF-8 length of the target.
 - Creating a file through a dangling symlink (`open(O_CREAT)`, `writeFile`) creates the target;
   with `O_EXCL` it fails with `EEXIST`.
-- `utimes` always follows the link: `fs.lutimes()` changes the target's times in the ported runtime.
+- `utimes` follows the link; `fs.lutimes()` (ported runtime) changes the times of the link itself.
 - `chmod` follows the link (there is no `lchmod`).
 
 ### Hard links
@@ -171,7 +180,8 @@ with `EPERM`. A hard link to a symlink links the symlink itself.
 ## File descriptors and open flags
 
 File descriptors are per process ([Processes](processes.md#file-descriptors-and-stdio)). `open`
-returns the lowest free number ≥ 3. An open file description (offset, flags) is shared by all
+returns the lowest free number ≥ 3, or fails with `EMFILE` when that would reach the process's
+`RLIMIT_NOFILE` (`ulimit -n`, 1024 by default). An open file description (offset, flags) is shared by all
 descriptors that refer to it — inherited by a child or passed to another process — so they share the
 offset.
 
@@ -185,7 +195,7 @@ offset.
 | `O_APPEND` | 0o2000 | Every write goes to the end of the file; a position passed to `write` is ignored |
 | `O_NONBLOCK` | 0o4000 | Ignored by `open` |
 | `O_DIRECTORY` | 0o200000 | `ENOTDIR` if the path is not a directory |
-| `O_NOFOLLOW` | 0o400000 | A symlink in the last component is not followed: the link itself is opened and reads as empty (Linux fails with `ELOOP`) |
+| `O_NOFOLLOW` | 0o400000 | A symlink in the last component is not followed: `open` fails with `ELOOP` |
 | `O_SYNC` | 0o4010000 | Ignored (everything is synchronous) |
 
 Other rules of `open`:
@@ -229,9 +239,9 @@ Errors of each operation besides the path lookup errors (`ENOENT`, `ENOTDIR`, `E
 | Operation | Errors | Notes |
 |---|---|---|
 | `mkdir` | `EEXIST` (also for `/`), `ENOENT` (missing parent, not recursive), `ENOTDIR` | Recursive: returns the first directory created, `undefined` when all existed |
-| `rmdir` | `ENOTDIR`, `ENOTEMPTY` | |
-| `unlink` | `EISDIR` for a directory | Removes symlinks themselves |
-| `rename` | `EINVAL` (a directory into itself), `EISDIR` (file onto a directory), `ENOTDIR` (directory onto a file), `ENOTEMPTY` (onto a non-empty directory) | Replaces an existing file or empty directory; renaming a name onto the same inode does nothing |
+| `rmdir` | `ENOTDIR`, `ENOTEMPTY`, `EBUSY` (`/`) | |
+| `unlink` | `EISDIR` for a directory (also `/`) | Removes symlinks themselves |
+| `rename` | `EINVAL` (a directory into itself), `EISDIR` (file onto a directory), `ENOTDIR` (directory onto a file), `ENOTEMPTY` (onto a non-empty directory), `EBUSY` (`/` on either side) | Replaces an existing file or empty directory; renaming a name onto the same inode does nothing |
 | `link` | `EPERM` (directory), `EEXIST` | |
 | `symlink` | `EEXIST` | |
 | `readlink` | `EINVAL` (not a symlink) | |
@@ -239,7 +249,7 @@ Errors of each operation besides the path lookup errors (`ENOENT`, `ENOTDIR`, `E
 | `read` | `EBADF`, `EISDIR` | |
 | `write` | `EBADF`, `EISDIR`, `EPIPE` (pipe without readers) | |
 | `writeFile` | `EEXIST` (`wx`), `EISDIR` (also for `/`), `ENOENT` (missing parent) | Writing to a character device writes to the device |
-| `truncate`, `ftruncate` | `EISDIR`; `ftruncate` of a descriptor without an inode: `EINVAL` | Other non-regular files are left unchanged |
+| `truncate`, `ftruncate` | `EISDIR`; `ftruncate` of a descriptor without an inode or not open for writing: `EINVAL` | Other non-regular files are left unchanged |
 | `copyFile` | `EISDIR` (source is a directory), `EEXIST` (`COPYFILE_EXCL`), `ENOENT` (missing destination directory) | Follows symlinks on both sides; `COPYFILE_FICLONE*` flags are ignored |
 | `lseek` | `ESPIPE` (not a regular file), `EINVAL` (negative result) | |
 | `fs.rm` (legacy) | `ENOENT` unless `force`, `ERR_FS_EISDIR` (directory without `recursive`) | The ported runtime runs Node's own `rm` (rimraf) on top of the calls above |
@@ -258,7 +268,7 @@ Errors of each operation besides the path lookup errors (`ENOENT`, `ENOTDIR`, `E
 | `/proc/self` | `lstat`: a symlink (size = digits of the pid); `readlink` returns the pid; `stat`: a directory (mode 0o555) |
 | `/proc/<own pid>`, `/proc/<own pid>/fd` | Directories in `stat` (0o555 and 0o500) |
 | `readlink('/proc/self/fd/N')` | The file's path, `/dev/tty`, `pipe:[id]` or `socket:[id]` |
-| `/proc/cpuinfo`, `/proc/meminfo`, `/proc/version` | Static files written at start |
+| `/proc/cpuinfo`, `/proc/meminfo`, `/proc/version` | Static files written at start, with the CPUs, memory and kernel version the ported runtime's `os` module reports ([initial file system](kernel.md#initial-file-system)) |
 | FIFOs (`mkfifo`) | See below |
 | Unix domain sockets | Created by `listen(path)`; `open` doesn't connect to them (use `net.connect(path)`) |
 
@@ -288,8 +298,8 @@ calls, as given for the host API):
 | Event | Produced by |
 |---|---|
 | `rename` | creating a file, directory, symlink, hard link, FIFO or socket; `unlink`; `rmdir`; `rename` (one event for the old path, one for the new) |
-| `change` | `writeFile`, every write through a descriptor, `truncate`/`ftruncate`/`O_TRUNC`, `chmod`, `utimes` |
-| none | reads, `fchmod`, `futimes`, `chown`, writes to character devices |
+| `change` | `writeFile`, every write through a descriptor, `truncate`/`ftruncate`/`O_TRUNC`, `chmod`, `utimes`, and `fchmod`/`futimes` (under the path the descriptor was opened with) |
+| none | reads, `chown`, writes to character devices |
 
 Because events carry paths, a change made through another name (a symlink, a hard link, a different
 spelling through a symlinked directory) is reported under that name only.
@@ -300,7 +310,7 @@ spelling through a symlinked directory) is reported under that name only.
 the thread that called it as `{ t: 'watch', id, type, path }`:
 
 - the watched path itself,
-- with `recursive`, any path below it; without, its direct children.
+- with `recursive`, any path below it (a watch on `/` sees every path); without, its direct children.
 
 The kernel doesn't check that the path exists. Watches end with `unwatch`, `execve` or the process's
 exit.
@@ -368,7 +378,7 @@ on a later turn) and promise (`kUsePromises`). Errors become Node's `UVException
 | `cp` | Node's `cp` with `cpSyncCheckPaths`/`cpSyncCopyDir`/`cpSyncOverrideFile` over `stat`, `readdir`, `mkdir`, `copyFile`, `symlink`, `readlink`, `realpath`, `unlink`, `utimes` |
 | `chmod`, `fchmod` | `chmod`, `fchmod` |
 | `chown`, `fchown`, `lchown` | `stat`/`fstat` only (ids ignored) |
-| `utimes`, `futimes`, `lutimes` | `utimes`, `futimes` (`lutimes` follows the link) |
+| `utimes`, `futimes`, `lutimes` | `utimes` (`lutimes` with `l`), `futimes` |
 | `fsync`, `fdatasync` | `fstat` only |
 | `watch` | `stat`, `watch`, `unwatch` |
 | `watchFile` | `stat` on a timer |
@@ -389,7 +399,7 @@ The host page's calls go to the VFS directly, without permission checks and with
 | `fs.writeFile(path, data)` | Creates missing parent directories, mode 0o644; `change` (and `rename` when new) events |
 | `fs.mkdir(path, { recursive = true })` | Mode 0o755; returns the first directory created, or `null` |
 | `fs.readdir(path, { withFileTypes })` | Names, or `{ name, type }` with `type` `dir`, `symlink` or `file` (everything else) |
-| `fs.rm(path, { recursive, force })` | `recursive`: removes the tree, missing is fine unless `force: false`. Otherwise: `rmdir` for a directory (must be empty), `unlink` for anything else |
+| `fs.rm(path, { recursive, force })` | `recursive`: removes the tree, missing is fine unless `force: false`; `/` fails with `EBUSY` before anything is removed. Otherwise: `rmdir` for a directory (must be empty), `unlink` for anything else |
 | `fs.stat(path)` | The stat fields plus `isDirectory` and `isFile` (follows symlinks) |
 | `fs.exists(path)` | `true` if the path resolves (follows symlinks) |
 | `fs.rename(from, to)` | As `rename` |
