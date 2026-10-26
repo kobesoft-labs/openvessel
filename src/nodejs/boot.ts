@@ -15,7 +15,9 @@ import { moduleUrlForServed } from './bindings/module_wrap.ts';
 import { fromShape } from './bindings/shape.ts';
 import * as loop from './loop.ts';
 import { createEnvProxy } from './env.ts';
-import { parseCommandLine } from './options.ts';
+import { parseCommandLine, v8Help } from './options.ts';
+import { parseEnv } from './bindings/util.ts';
+import { runTask } from './task_runner.ts';
 import { S, type InitMsg } from './state.ts';
 import './typescript.ts';
 import './fetch.ts';
@@ -321,9 +323,11 @@ function shapeGlobal() {
 function selectMain(values: Record<string, unknown>, argv: string[], hasEval: boolean): string {
   if (!S.isMainThread) return 'internal/main/worker_thread';
   if (values['--help']) return 'internal/main/print_help';
+  if (values['--prof-process']) return 'internal/main/prof_process';
   if (hasEval && !values['--interactive']) return 'internal/main/eval_string';
   if (values['--check']) return 'internal/main/check_syntax';
   if (values['--test']) return 'internal/main/test_runner';
+  if (values['--watch']) return 'internal/main/watch_mode';
   if (argv[1] && argv[1] !== '-') return 'internal/main/run_main_module';
   let stdinIsTty = false;
   try {
@@ -331,6 +335,40 @@ function selectMain(values: Record<string, unknown>, argv: string[], hasEval: bo
   } catch {}
   if (values['--interactive'] || stdinIsTty) return 'internal/main/repl';
   return 'internal/main/eval_stdin';
+}
+
+/**
+ * Dotenv::GetDataFromArgs + ParsePath, as node.cc does it before parsing options: every
+ * --env-file / --env-file-if-exists on the command line (up to a "--"), read in order; later files
+ * win. A file that can't be opened is an error (an optional one only a note); one that can't be
+ * read is "invalid format".
+ */
+function readEnvFiles(argv: string[]): { store: Record<string, string>; errors: string[] } {
+  const store: Record<string, string> = {};
+  const errors: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--') break;
+    const m = /^--env-file(-if-exists)?(?:=([^]*))?$/.exec(a);
+    if (!m) continue;
+    const path = m[2] ?? argv[i + 1];
+    if (path === undefined) break;
+    const optional = m[1] !== undefined;
+    let text: string;
+    try {
+      text = new TextDecoder().decode(sys<Uint8Array>('readFile', { p: path }));
+    } catch (e) {
+      if ((e as { code?: string }).code === 'EISDIR') {
+        errors.push(`${path}: invalid format`);
+        continue;
+      }
+      if (optional) writeFd(2, `${path} not found. Continuing without it.\n`);
+      else errors.push(`${path}: not found`);
+      continue;
+    }
+    Object.assign(store, parseEnv(text));
+  }
+  return { store, errors };
 }
 
 // OV_TIMING=1 prints how long each bootstrap stage took
@@ -367,14 +405,25 @@ function boot(init: InitMsg) {
   initSys(init.sab, (m, t) => scopePost(m, t ?? []));
 
   // command line (node_options.cc)
+  let envFile: Record<string, string> | null = null;
   if (S.isMainThread) {
-    const cl = parseCommandLine(init.argv, init.env.NODE_OPTIONS ?? '');
-    if (cl.error) {
-      writeFd(2, cl.error.split('\n').map((l) => `${init.argv[0] ?? 'node'}: ${l}\n`).join(''));
+    // the --env-file files are read first: their NODE_OPTIONS counts when the environment has none
+    const dotenv = readEnvFiles(init.argv);
+    envFile = dotenv.store;
+    const nodeOptions = init.env.NODE_OPTIONS ?? dotenv.store.NODE_OPTIONS ?? '';
+    const cl = parseCommandLine(init.argv, nodeOptions);
+    const errors = [...dotenv.errors, ...(cl.error ? cl.error.split('\n') : [])];
+    if (errors.length) {
+      writeFd(2, (cl.v8Error ?? '') + errors.map((l) => `${init.argv[0] ?? 'node'}: ${l}\n`).join(''));
       loop.reallyExit(9);
     }
-    if (cl.values['--version']) {
+    // --run comes first (node.cc), then the options that print something and exit
+    if (cl.values['--version'] && !cl.values['--run']) {
       writeFd(1, `${NODE_VERSION}\n`);
+      loop.reallyExit(0);
+    }
+    if (cl.values['--v8-options'] && !cl.values['--run']) {
+      writeFd(1, v8Help);
       loop.reallyExit(0);
     }
     S.optionValues = cl.values;
@@ -388,6 +437,9 @@ function boot(init: InitMsg) {
     S.execArgv = cl.execArgv;
     S.argv = init.argv;
   }
+
+  // a V8 flag that Node also reads (PerIsolateOptions::stack_trace_limit)
+  (Error as any).stackTraceLimit = Number(S.optionValues['--stack-trace-limit'] ?? 10);
 
   // unhandled rejections and stray errors from browser callbacks
   scopeListen('unhandledrejection', (e: PromiseRejectionEvent) => {
@@ -466,6 +518,17 @@ function boot(init: InitMsg) {
 
   shapeGlobal();
   mark('web + switches');
+  // node.cc runs the task before it creates an environment, so the env files don't apply to it
+  if (S.isMainThread && S.optionValues['--run']) {
+    loop.scope(() => runTask(String(S.optionValues['--run']), init.argv));
+    loop.startLoop();
+    return;
+  }
+  // Dotenv::SetEnvironment: variables the environment doesn't have yet. Watch mode leaves them to
+  // the child it starts (which gets the --env-file options again).
+  if (envFile && S.optionValues['[has_env_file_string]'] && !S.optionValues['--watch']) {
+    for (const [k, v] of Object.entries(envFile)) if (process.env[k] === undefined) process.env[k] = v;
+  }
   const main = selectMain(S.optionValues, S.argv, S.hasEval);
   loop.scope(() => {
     const r = run(main, process, require, internalBinding, primordials);
