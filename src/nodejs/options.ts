@@ -108,6 +108,8 @@ function apply(values: Record<string, unknown>, arg: string, next: string | unde
       return v8 ? { v8, error: `bad option: ${arg}` } : `bad option: ${arg}`;
     }
     if (fromEnv && info.envVarSettings === proc.envSettings.kDisallowedInEnvvar) return `${name} is not allowed in NODE_OPTIONS`;
+    // only a boolean takes --no- (V8 checks its own flags)
+    if (negated && info.type !== T.kBoolean && info.type !== T.kV8Option) return `--no-${name.slice(2)} is an invalid negation because it is not a boolean option`;
     // options V8 reads too: V8 checks the value
     if (info.type === T.kV8Option || name === '--stack-trace-limit') {
       const v8 = v8Check(arg, negated ? '--no-' + name.slice(2) : name, isLastValue(names, i, value));

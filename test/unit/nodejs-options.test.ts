@@ -16,6 +16,8 @@ test('V8 flags are checked against V8 list', () => {
   assert.equal(parseCommandLine(['node', '--use-strict', '--no-use-strict', '--max_old_space_size=100', 'a.js']).error, undefined);
   assert.equal(parseCommandLine(['node', '--foo_bar']).error, 'bad option: --foo_bar');
   assert.equal(parseCommandLine(['node', '--no-foo']).error, 'bad option: --no-foo');
+  assert.equal(parseCommandLine(['node', '--no-expose-gc', 'a.js']).error, undefined);
+  assert.equal(parseCommandLine(['node', '--no-max-http-header-size']).error, '--no-max-http-header-size is an invalid negation because it is not a boolean option');
   const bool = parseCommandLine(['node', '--expose-gc=1']);
   assert.equal(bool.error, 'bad option: --expose-gc=1');
   assert.equal(bool.v8Error, 'Error: illegal value for flag --expose-gc=1 of type bool\nTo set or unset a boolean flag, use --flag or --no-flag.\nTry --help for options\n');
