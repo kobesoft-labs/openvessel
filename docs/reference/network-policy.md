@@ -2,10 +2,10 @@
 
 [日本語](network-policy.ja.md)
 
-Everything inside OpenVessel that reaches a host outside the tab is checked against one network policy,
-and the embedding page decides what that policy lets through. This page specifies the policy model
+Every request from inside OpenVessel to a host outside the tab is checked against a single network
+policy, and the embedding page decides what that policy allows. This page describes the policy model
 (`src/shared/policy.ts`), the order in which a request is decided, how the user is asked
-(`src/kernel/index.ts`), where the policy is enforced (`src/runtime/sw.ts`, `src/preview/sw.ts`) and
+(`src/kernel/index.ts`), where the policy is enforced (`src/runtime/sw.ts`, `src/preview/sw.ts`), and
 what each kind of client sees when a request is refused.
 
 ## What the policy covers
@@ -21,10 +21,10 @@ what each kind of client sees when a request is refused.
 | WebSockets of a previewed page to outside hosts | `__ov/inject.js` asks the preview service worker before connecting | `preview` / `preview` |
 | Where a redirect ends (runtime and preview) | The service worker checks the final URL again after the browser followed the redirects | as for the first URL |
 
-The decision is always made in the kernel, with one policy and one set of session decisions for both
-the runtime and the preview.
+The decision is always made in the kernel. The runtime and the preview share one policy and one set of
+session decisions.
 
-Not checked by the policy:
+The policy does not check the following:
 
 - Requests to virtual ports: loopback names (from processes, `curl`/`wget`/package managers and the
   preview) and same-origin requests of the preview
@@ -33,9 +33,9 @@ Not checked by the policy:
   origin.
 - npm tarballs already in the runtime origin's Cache Storage (`openvessel-npm-v1`); they are verified
   against their `integrity` before use.
-- The hosts *between* the first URL and the final one of a redirect chain: the browser follows
-  redirects inside the service worker without showing the hops, so they are contacted; only the final
-  URL is checked, and nothing from a refused final host is handed back ([Redirects](#redirects)).
+- The hosts between the first URL and the final one of a redirect chain. The browser follows
+  redirects inside the service worker without showing the hops, so those hosts are contacted. Only the
+  final URL is checked, and nothing from a refused final host is handed back ([Redirects](#redirects)).
 - WebSockets that processes open with the browser's `WebSocket` global ([WebSockets](#websockets)).
 
 ## The policy object
@@ -57,10 +57,11 @@ interface NetworkPolicy {
 | `deny` | `[]` | Hosts to refuse; wins over everything, including `allow-all`. |
 
 The policy passed to `boot({ network })` or `vessel.network.setPolicy()` is a `Partial<NetworkPolicy>`
-and is normalised by `normalizePolicy()`: each missing field takes the default above (not the current
-value), preset names that don't exist are dropped (only `PRESETS`' own keys count, so `toString` and
-other inherited names are dropped too), and `allow`/`deny` entries that aren't strings are dropped. `vessel.network.getPolicy()` returns the
-normalised policy. Without a `network` option the kernel starts with the defaults.
+and is normalised by `normalizePolicy()`. Each missing field takes the default above (the default, not
+the current value). Preset names that don't exist are dropped; only `PRESETS`' own keys count, so
+`toString` and other inherited names are dropped too. `allow`/`deny` entries that aren't strings are
+also dropped. `vessel.network.getPolicy()` returns the normalised policy. Without a `network` option the
+kernel starts with the defaults.
 
 ## Modes
 
@@ -70,11 +71,11 @@ normalised policy. Without a `network` option the kernel starts with the default
 | `allowlist` | allowed | denied |
 | `allow-all` | allowed | allowed |
 
-In every mode `deny` patterns, "deny for this session" decisions and non-HTTP URLs are refused.
+In every mode, `deny` patterns, "deny for this session" decisions and non-HTTP URLs are refused.
 
 ## Presets
 
-`PRESETS` is exported from `openvessel`. Each entry is an exact host name (no wildcards, any port):
+`PRESETS` is exported from `openvessel`. Each entry is an exact host name (no wildcards, any port).
 
 | Preset | Hosts |
 |---|---|
@@ -104,9 +105,9 @@ scheme and path are not part of a pattern.
 
 Rules (`matches()` in `src/shared/policy.ts`):
 
-- Patterns are trimmed and compared in lower case; host names are lower-cased by the URL parser. An
+- Patterns are trimmed and compared in lower case. Host names are lower-cased by the URL parser. An
   empty pattern matches nothing.
-- `*` is a wildcard only as the whole pattern or as a leading `*.`; anywhere else it is a literal
+- `*` is a wildcard only as the whole pattern or as a leading `*.`. Anywhere else it is a literal
   character.
 - A port in a pattern is compared with the URL's port, where a URL without a port has `443` for
   `https:` and `80` for `http:` (`example.com:443` matches `https://example.com/`).
@@ -116,29 +117,29 @@ Rules (`matches()` in `src/shared/policy.ts`):
 
 ## The decision order
 
-`decide()` returns `allow`, `deny` or `ask` for a URL, checking in this order:
+`decide()` returns `allow`, `deny` or `ask` for a URL. It checks the following in order:
 
-1. The URL doesn't parse → **deny**.
-2. The scheme is not `http:` or `https:` → **deny**.
+1. The URL doesn't parse → deny.
+2. The scheme is not `http:` or `https:` → deny.
 3. The host is a loopback name (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`, `0.0.0.0`, `::`,
-   IPv4-mapped loopback) → **deny**, in every mode. Clients route loopback to virtual ports before they
-   get here; the policy check never sends such a request to the user's machine.
-4. A `deny` pattern matches → **deny**.
-5. The host is in the session deny set → **deny**.
-6. `mode` is `allow-all` → **allow**.
-7. The host is in the session allow set → **allow**.
-8. A host of an enabled preset matches → **allow**.
-9. An `allow` pattern matches → **allow**.
-10. `mode` is `ask` → **ask**; otherwise (`allowlist`) → **deny**.
+   IPv4-mapped loopback) → deny, in every mode. Clients route loopback to virtual ports before they
+   get here, and the policy check never sends such a request to the user's machine.
+4. A `deny` pattern matches → deny.
+5. The host is in the session deny set → deny.
+6. `mode` is `allow-all` → allow.
+7. The host is in the session allow set → allow.
+8. A host of an enabled preset matches → allow.
+9. An `allow` pattern matches → allow.
+10. `mode` is `ask` → ask; otherwise (`allowlist`) → deny.
 
-So a "deny for this session" answer also overrides `allow-all`, while a session allow never overrides
-a `deny` pattern.
+This means a "deny for this session" answer also overrides `allow-all`, but a session allow never
+overrides a `deny` pattern.
 
 ## Session decisions
 
-The kernel keeps two sets, session allow and session deny. Their keys are **host names only**: lower
-case, without the port, and without brackets for IPv6. Allowing a host for the session allows every port
-of it.
+The kernel keeps two sets, session allow and session deny. Their keys are host names only (lower
+case, without the port, and without brackets for IPv6), so allowing a host for the session allows every
+port of it.
 
 | Answer | Waiting requests | Later requests to the host |
 |---|---|---|
@@ -147,31 +148,32 @@ of it.
 | `deny` | denied | asked again |
 | `deny-session` | denied | denied (added to session deny) |
 
-The sets live as long as the kernel. `setPolicy()` doesn't touch them; `vessel.network.clearSession()`
+The sets live as long as the kernel. `setPolicy()` doesn't touch them, and `vessel.network.clearSession()`
 empties both. Both calls also make the preview service worker forget the allows it cached
 ([The preview](#the-preview)), so a host that is no longer allowed is decided again.
 
 ## Permission requests
 
-When `decide()` returns `ask`, `checkNetwork()` in the kernel:
+When `decide()` returns `ask`, `checkNetwork()` in the kernel handles the request as follows:
 
-1. Denies at once if no host page is connected.
-2. Coalesces by host name: if a request for the same host is already waiting, the new one waits for the
-   same answer and nothing new is sent. Requests that differ only in port or path share one prompt.
-3. Otherwise sends `permission-request` to the host page with a new `id`, the full `url`, the `host`,
+1. If no host page is connected, it denies at once.
+2. It coalesces requests by host name. If a request for the same host is already waiting, the new one
+   waits for the same answer and nothing new is sent, so requests that differ only in port or path share
+   one prompt.
+3. Otherwise it sends `permission-request` to the host page with a new `id`, the full `url`, the `host`,
    the `initiator` and the `source`, and starts a 5-minute timer.
-4. Settles when the host page answers (`permission.respond`) or when the timer fires (deny). All
-   waiting requests get the same result; the kernel then sends
+4. The request settles when the host page answers (`permission.respond`) or when the timer fires (deny).
+   All waiting requests get the same result. The kernel then sends
    `permission-settled` `{ id, host, allowed, decision }`, where `decision` is the answer (`once`,
-   `session`, `deny`, `deny-session`) or `timeout`. It is sent on a timeout too, so the host can take
-   down its dialog. An answer for a request that already settled is ignored.
+   `session`, `deny`, `deny-session`) or `timeout`. This is sent on a timeout too, so the host can close
+   its dialog. An answer for a request that has already settled is ignored.
 
-On the host page the request goes to `onPermissionRequest` or to the built-in dialog; listeners of the
+On the host page the request goes to `onPermissionRequest` or to the built-in dialog. Listeners of the
 `permission-request` event see it first. A handler that throws counts as `deny`. The handler, the dialog
 and both events are specified in [Host API](host-api.md#permission-requests).
 
-`initiator` is set by the kernel. Requests of the kernel's own clients carry a secret token that only
-the kernel knows, so their label is believed: `npm` for the package managers, the pid and command line
+`initiator` is set by the kernel. Requests from the kernel's own clients carry a secret token that only
+the kernel knows, so their label is trusted: `npm` for the package managers, and the pid and command line
 for `curl` and `wget`. For any other request (a process) the kernel takes the pid from the `x-ov-by`
 header and shows that process's command line from its process table, or `process` if no running
 process has that pid. A process can still name another running process's pid, but it can't make up a
@@ -190,19 +192,19 @@ const current = await vessel.network.getPolicy();
 await vessel.network.clearSession();
 ```
 
-The policy can be changed at any time; it applies to requests decided after the change. Requests
-already waiting for an answer are not re-decided. Only the host page can change the policy: the
-runtime's service worker accepts its kernel channel only from the runtime window, and the preview's
+The policy can be changed at any time, and the change applies to requests decided after it. Requests
+already waiting for an answer are not decided again. Only the host page can change the policy, because
+the runtime's service worker accepts its kernel channel only from the runtime window, and the preview's
 channel to the kernel carries only HTTP, WebSocket and network checks.
 
 ## Enforcement
 
 ### The runtime: `/__ov/net`
 
-The runtime service worker (`src/runtime/sw.ts`) answers `<runtime base>/__ov/net?url=<target>` and is
+The runtime service worker (`src/runtime/sw.ts`) answers `<runtime base>/__ov/net?url=<target>`. It is
 the only code in the runtime that fetches other origins. The kernel's base is `/__ov/k/<kernel id>/`
 under the runtime's directory, so the request reaches the kernel of the frame that made it
-([Deployment](deployment.md)). For each request it:
+([Deployment](deployment.md)). For each request the service worker does the following:
 
 1. Asks that kernel `{ k: 'net', url, initiator, token }`. If it has no kernel connection and gets none
    within 15 s, it answers `502` with `x-ov-error: network` (`OpenVessel kernel is not connected`).
@@ -220,7 +222,7 @@ under the runtime's directory, so the request reaches the kernel of the frame th
    is `error`, else `'follow'`.
 5. If the fetch throws, answers `502` with `x-ov-error: network` and
    `request to <host> failed: <reason>. The server may not allow cross-origin requests (CORS) from the browser.`
-6. If the response was redirected, asks the kernel again about the final URL; a deny or timeout is
+6. If the response was redirected, asks the kernel again about the final URL. A deny or timeout is
    answered as in step 2 (with the final host in the message) and the body is dropped.
 7. Otherwise answers `200` with the real status, status text, final URL, redirect flag and response
    headers in `x-ov-status`, `x-ov-status-text`, `x-ov-url`, `x-ov-redirected` and `x-ov-rh`, and the
@@ -240,7 +242,7 @@ The message format is in [Protocol](protocol.md).
 | `curl`, `wget` | `curl: (7) <message>`, exit status 7 | `curl: (7) <message>`, exit status 7 |
 | The preview page | `403` with an empty body and status text `Blocked by OpenVessel network policy` (`… (not answered in time)` after a timeout) | The browser's own network error |
 
-For the ported runtime's socket clients only HTTP/1.1 goes out: a connection whose first bytes aren't
+For the ported runtime's socket clients only HTTP/1.1 goes out. A connection whose first bytes aren't
 a request line is closed, and a WebSocket upgrade is answered `501 Not Implemented`
 ([Kernel](kernel.md)).
 
@@ -249,21 +251,21 @@ a request line is closed, and a WebSocket upgrade is answered `501 Not Implement
 The preview service worker (`src/preview/sw.ts`) sees every request made by pages in its scope (the
 preview iframes and the relay):
 
-- Same origin as the preview: forwarded to the virtual port — never checked.
+- Same origin as the preview: forwarded to the virtual port and never checked.
 - A loopback host (`localhost`, `127.0.0.1`, `[::1]`…): forwarded to the virtual port in the URL (the
-  page's port if the URL has none) — never checked, never the user's machine.
-- Another origin, `http:` or `https:`: checked with the kernel (`source: 'preview'`); if allowed, the
+  page's port if the URL has none). Never checked, and never sent to the user's machine.
+- Another origin, `http:` or `https:`: checked with the kernel (`source: 'preview'`). If allowed, the
   service worker fetches the original request unchanged (same mode and credentials as the page asked
   for), so the page's own CORS rules apply as usual. A `no-cors` request (`<img>`, a classic
   `<script>`…) works from any server, CORS or not, but its response is opaque and doesn't show where a
-  redirect led: for these only the first URL is checked, and a redirect from an allowed host to a
-  denied one is not caught. Every other redirected response is checked again at the URL it ended at.
+  redirect led. For these requests only the first URL is checked, and a redirect from an allowed host to
+  a denied one is not caught. Every other redirected response is checked again at the URL it ended at.
 - Other schemes (`data:`, `blob:`, …): not intercepted.
 
 Differences from the runtime side:
 
 - An allow that follows from the policy or from a "for this session" answer is cached in the service
-  worker per origin. `once` is not cached: it allows that one request. The cache is emptied when the
+  worker per origin. `once` is not cached, since it allows only that one request. The cache is emptied when the
   host calls `setPolicy()` or `clearSession()` and when the service worker gets a new kernel channel.
   Denials are not cached.
 - If the service worker can't reach the kernel within 15 s, the request is refused (`403`), and the next
@@ -273,11 +275,12 @@ Differences from the runtime side:
 
 The browser follows redirects inside a service worker's `fetch()` without showing the hops (a
 `redirect: 'manual'` fetch of another origin gives an opaque response without its `Location`). Both
-service workers therefore check where a redirected response ended: the final URL goes through the
-policy like the first one, and if it is refused the response is dropped and the request is answered as
-denied. The hosts in between have been contacted by then, but nothing they sent reaches the process or
-the page. `curl`, `wget` and the package managers that hit a loopback URL follow its redirects
-themselves: a hop to a loopback URL stays on the virtual ports, any other goes through the policy check.
+service workers therefore check where a redirected response ended. The final URL goes through the
+policy in the same way as the first one, and if it is refused, the response is dropped and the request
+is answered as denied. The hosts in between have been contacted by then, but nothing they sent reaches
+the process or the page. When `curl`, `wget` or a package manager requests a loopback URL, it follows the
+redirects itself. A hop to a loopback URL stays on the virtual ports, and any other hop goes through the
+policy check.
 
 ### WebSockets
 
@@ -285,13 +288,13 @@ Service workers don't see WebSocket connections:
 
 - In the preview, `__ov/inject.js` replaces `WebSocket`. Connections to the page's own host or a
   loopback name are tunnelled to the virtual server (this is how HMR works). For any other URL the
-  socket asks the preview service worker first (`ws-check`, decided like an `http:`/`https:` request
-  to the same host); it opens the browser's WebSocket only if allowed, else it fails with `error` and
-  `close` `1006`, reason `blocked by OpenVessel network policy`. A page can still bypass the wrapper
+  socket first asks the preview service worker (`ws-check`, decided like an `http:`/`https:` request
+  to the same host). It opens the browser's WebSocket only if allowed. Otherwise it fails with `error`
+  and `close` `1006`, reason `blocked by OpenVessel network policy`. A page can still bypass the wrapper
   (for example from a worker of its own, whose `WebSocket` is the browser's).
 - In processes, the ported runtime's `WebSocket` global is the browser's. On the runtime origin it is
   limited by the `connect-src` of the Content-Security-Policy below, so it can only connect to the
-  runtime origin itself — not to outside hosts and not to virtual ports. Through `net`/`tls` sockets,
+  runtime origin itself, and not to outside hosts or virtual ports. Through `net`/`tls` sockets,
   an upgrade to an outside host is answered `501`.
 
 ### Content Security Policy
@@ -300,20 +303,29 @@ The policy only works if nothing else can leave the runtime. `scripts/serve.mjs`
 file except `sw.js` with a CSP whose `connect-src` is `'self' data: blob:`, so a process's direct
 `fetch`, `XMLHttpRequest`, `WebSocket` or `EventSource` to another origin is refused by the browser and
 only `/__ov/net` (same origin) is reachable. `sw.js` must be served without that CSP. Deployments need
-the same headers ([Deployment](deployment.md)). The preview origin has no such CSP: the previewed
+the same headers ([Deployment](deployment.md)). The preview origin has no such CSP; the previewed
 site is limited by the preview service worker as described above.
 
 ## Localhost and virtual ports
 
-Servers inside OpenVessel listen on virtual ports; nothing listens on the real machine.
+Servers inside OpenVessel listen on virtual ports; nothing listens on the real machine. Requests to
+`localhost`, `127.0.0.1`, `::1`/`[::1]`, `0.0.0.0` and `*.localhost` are handled as follows for each
+client:
 
-| Client | `localhost`, `127.0.0.1`, `::1`/`[::1]`, `0.0.0.0`, `*.localhost` |
-|---|---|
-| `fetch()` in a process | Sent to the virtual port through Node's `http` module (ported) or directly (legacy). Not checked by the policy. `ECONNREFUSED` if nothing listens. The legacy runtime also treats an empty host name as loopback. |
-| `http`/`net` clients in a process | Connected to the virtual port. Not checked. `ECONNREFUSED` if nothing listens. |
-| `curl`, `wget`, package managers (kernel) | Sent to the virtual port by the kernel (`curl http://localhost:4321/` reaches a dev server inside OpenVessel). Not checked. `ECONNREFUSED` if nothing listens. Redirects are followed: to the virtual ports for loopback, through the policy check otherwise. |
-| Preview page | Its own origin, and `http://localhost:<port>/` (any loopback name), reach the virtual server; a loopback URL without a port uses the page's port. Not checked. WebSockets to loopback names are tunnelled to the port in the URL, else the page's port (see above). |
-| Anything that reaches the policy check anyway | Denied by the policy in every mode ([The decision order](#the-decision-order)). |
+- `fetch()` in a process: sent to the virtual port through Node's `http` module (ported) or directly
+  (legacy). Not checked by the policy. `ECONNREFUSED` if nothing listens. The legacy runtime also treats
+  an empty host name as loopback.
+- `http`/`net` clients in a process: connected to the virtual port. Not checked. `ECONNREFUSED` if
+  nothing listens.
+- `curl`, `wget` and the package managers (kernel): sent to the virtual port by the kernel
+  (`curl http://localhost:4321/` reaches a dev server inside OpenVessel). Not checked. `ECONNREFUSED` if
+  nothing listens. Redirects are followed, to the virtual ports for loopback and through the policy check
+  otherwise.
+- The preview page: its own origin and `http://localhost:<port>/` (any loopback name) reach the virtual
+  server, and a loopback URL without a port uses the page's port. Not checked. WebSockets to loopback
+  names are tunnelled to the port in the URL, or else to the page's port (see above).
+- Anything that reaches the policy check anyway is denied by the policy in every mode
+  ([The decision order](#the-decision-order)).
 
 ## Other schemes
 
@@ -326,30 +338,30 @@ Servers inside OpenVessel listen on virtual ports; nothing listens on the real m
 ## CORS
 
 Outgoing requests are made by the browser's `fetch` in the runtime service worker with
-`mode: 'cors'` and `credentials: 'omit'`. A request the policy allows can still fail or come back
-reduced because of what the browser enforces:
+`mode: 'cors'` and `credentials: 'omit'`. Even when the policy allows a request, it can still fail or
+come back with less information because of the rules the browser enforces:
 
-- The server must allow the runtime origin: `Access-Control-Allow-Origin: *` or the runtime origin.
+- The server must allow the runtime origin with `Access-Control-Allow-Origin: *` or the runtime origin.
   Requests that need a preflight (methods other than `GET`, `HEAD`, `POST`, or headers that aren't
   CORS-safelisted, such as `Authorization` or custom headers) also need the server to answer the
   `OPTIONS` preflight. Otherwise the request fails with the CORS hint (`ECONNREFUSED`). Google Fonts
   metadata and many RSS feeds are in this group ([Compatibility](../compatibility.md#network)).
 - No cookies are sent or stored, and the forbidden headers listed above are dropped.
-- The process sees only the response headers the browser exposes: the CORS-safelisted ones and those
-  in `Access-Control-Expose-Headers`. `Set-Cookie` never arrives.
+- The process sees only the response headers the browser exposes, which are the CORS-safelisted ones
+  and those in `Access-Control-Expose-Headers`. `Set-Cookie` never arrives.
 - Bodies arrive already decoded by the browser, so a `Content-Length` header, when exposed, may not
   match the body.
 - TLS is done and verified by the browser.
 
 ## Examples
 
-Only npm, nothing else, no prompts:
+Only npm, nothing else, and no prompts:
 
 ```ts
 network: { mode: 'allowlist', presets: ['npm'] }
 ```
 
-The defaults, plus an API, with the user asked about anything else:
+The defaults plus an API, asking the user about anything else:
 
 ```ts
 network: { mode: 'ask', presets: ['npm', 'fonts', 'icons', 'cdn'], allow: ['api.example.com', '*.example.org'] }
@@ -377,8 +389,9 @@ const vessel = await OpenVessel.boot({
 });
 ```
 
-With `mode: 'allowlist'` the handler would never be called, because nothing is ever asked. `'deny-session'`
-logs each host once; `'deny'` logs every refused request (coalesced per host while one is waiting).
+With `mode: 'allowlist'` the handler would never be called, because nothing is ever asked. With
+`'deny-session'` each host is logged once, and with `'deny'` every refused request is logged (coalesced
+per host while one is waiting).
 
 An app-specific prompt:
 

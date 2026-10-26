@@ -1,25 +1,25 @@
-# 配信
+# デプロイ
 
 [English](deployment.md)
 
-OpenVessel を本番に置く方法です。`dist/` の中身、どのディレクトリをどのオリジンに置くか、各オリジンに必要な
-HTTP ヘッダーとその理由、キャッシュ、ヘッダーを付けられないホスト、パスの下での配信、セッションごとのプレビューの
-オリジン、サーバーの設定例をまとめます。
+OpenVessel を本番環境にデプロイする方法を説明します。`dist/` の中身、どのディレクトリをどのオリジンに配置するか、各オリジンに必要な
+HTTP ヘッダーとその理由、キャッシュ、ヘッダーを設定できないホスティング、パスの下での配信、セッションごとのプレビューの
+オリジン、サーバーの設定例を扱います。
 
 ## 3 つのオリジン
 
 OpenVessel は 3 つのオリジンで動きます。ブラウザから見ると、それぞれが別のサイトです。
 
-| オリジン | 置くもの | 読み込まれ方 | 持つもの |
+| オリジン | 配信するもの | 読み込まれ方 | 動くもの |
 |---|---|---|---|
-| ホスト | 埋め込む側のアプリ（`dist/host/index.js` はふつうアプリに同梱） | 一番上のページ | 画面とホスト API |
-| ランタイム | `dist/runtime/` | `OpenVessel.boot()` が作る見えない iframe（`runtime.html`） | カーネルの Worker・プロセスの Worker・通信の出口 |
-| プレビュー | `dist/preview/` | 見えない中継の iframe（`__ov/relay.html`）と、プレビューごとの iframe | 開発中のサイト（仮想ポートから配信） |
+| ホスト | 埋め込む側のアプリケーション（`dist/host/index.js` は通常アプリケーションにバンドルする） | トップレベルのページ | UI とホスト API |
+| ランタイム | `dist/runtime/` | `OpenVessel.boot()` が作る非表示の iframe（`runtime.html`） | カーネルの Worker、プロセスの Worker、ネットワークポリシーの確認 |
+| プレビュー | `dist/preview/` | 非表示の中継用 iframe（`__ov/relay.html`）と、プレビューごとの iframe | 開発中のサイト（仮想ポートから配信） |
 
-[../SECURITY.md](../SECURITY.md) にある分離が成り立つには、3 つを別のオリジンにする必要があります。ランタイムが
-ホストと同じオリジンにあっても、ホストは警告（`console.warn('OpenVessel: the runtime should be served from its own origin')`）
-を出すだけで、起動は止めません。自分だけが使うデモなら 3 つを 1 つのオリジンに置けます（公開デモはそうしています。
-[GitHub Pages](#ヘッダーを付けられないホストgithub-pages) を参照）。自分で管理していないコードを動かすなら、そうしないでください。
+[../SECURITY.md](../SECURITY.md) で説明している分離を成り立たせるには、3 つを別々のオリジンにする必要があります。ランタイムが
+ホストと同じオリジンにある場合、ホストは警告（`console.warn('OpenVessel: the runtime should be served from its own origin')`）
+を出すだけで、起動は止めません。自分だけが使うデモであれば、3 つを 1 つのオリジンにまとめても構いません（公開デモはそうしています。
+[GitHub Pages](#ヘッダーを付けられないホストgithub-pages) を参照）。自分で管理していないコードを動かす場合は、まとめないでください。
 
 ```ts
 import { OpenVessel } from 'openvessel';
@@ -31,73 +31,71 @@ const vessel = await OpenVessel.boot({
 ```
 
 `runtimeUrl` は `new URL('runtime.html', runtimeUrl)`、`previewUrl` は `new URL('./', previewUrl)` で解決します
-（`src/host/index.ts`）。そのため、最後に `/` のない URL は親のディレクトリを指します。
-`https://example.com/runtime` なら `https://example.com/runtime.html` を読みます。最後に `/` を付けたディレクトリか、
-`…/runtime.html` の URL を渡してください。
+（`src/host/index.ts`）。そのため、末尾に `/` のない URL は親ディレクトリを指します。たとえば
+`https://example.com/runtime` を渡すと `https://example.com/runtime.html` を読み込みます。末尾に `/` を付けたディレクトリか、
+`…/runtime.html` の完全な URL を渡してください。
 
 ## `dist/` の中身
 
-`npm run build`（`scripts/build.mjs`）が `dist/` を書き出します。静的なファイルとして配置するのは `dist/runtime/` と
-`dist/preview/` だけです。`dist/host/` は、アプリが import する npm パッケージの入口です。
+`npm run build`（`scripts/build.mjs`）が `dist/` を書き出します。静的ファイルとしてデプロイするのは `dist/runtime/` と
+`dist/preview/` だけです。`dist/host/` は、アプリケーションが import する npm パッケージのエントリーポイントです。
 
 ### `dist/runtime/`（ランタイムのオリジン）
 
-| ファイル | 中身 | 読み込まれるとき |
+| ファイル | 内容 | 読み込まれるタイミング |
 |---|---|---|
-| `runtime.html` | ランタイムの iframe の文書。`<meta name="openvessel-allowed-hosts" content="*">` を含む | ホストが `OpenVessel.boot()` を呼んだとき |
-| `runtime.js` | `runtime.html` のふつうのスクリプト（IIFE）。オリジンの確認、Service Worker の登録、カーネルの起動、ホストへの通り道の受け渡し（`src/runtime/runtime.ts`） | `runtime.html` と一緒に |
-| `sw.js` | ランタイムの Service Worker（`src/runtime/sw.ts`）。`/__ov/esm/`・`/__ov/builtin/`・`/__ov/mw/`・`/__ov/esm-error` の ES モジュールの配信、通信の出口 `/__ov/net`、`/__ov/ping`、カーネルごとの `/__ov/k/<id>/` の下のランタイム自身のファイル、ランタイム自身のファイルへの分離のヘッダー | `runtime.js` がスコープ `./` で登録 |
-| `kernel.js` | カーネル。ES モジュールの Worker（`src/kernel/index.ts`） | 起動ごとに 1 回、`new Worker('__ov/k/<id>/kernel.js', { type: 'module' })`。`<id>` はランタイムのフレームごとのでたらめなカーネルの id で、Service Worker が `kernel.js` を返す |
-| `process.js` | **旧ランタイム**: 以前からの手書きの Node 互換の層（`src/node/worker.ts`）。プロセスごとに 1 つのモジュール Worker | VFS のファイル `/etc/openvessel/node` が `legacy` のとき、すべての `node` プロセス |
-| `node-process.js` | **移植版ランタイム**: Node.js 自身の `lib/` を、作り直した `internalBinding()` の上で動かす（`src/nodejs/boot.ts`）。プロセスごとに 1 つのモジュール Worker | 既定で、すべての `node` プロセス |
-| `nodelib.js` | Node.js v22.23.4 の `lib/`（と `deps/`）のソースを文字列で持つもの。`scripts/gen-nodelib.mjs` が作る（約 4.5 MB）。ビルドのときに `vendor/node/` があった場合だけ書き出される | `node-process.js` が静的に import |
-| `ts-strip.js` | sucrase（ふつうのスクリプト）。移植版ランタイムが `require(esm)` の ESM → CommonJS の書き換えに使う | 移植版ランタイムで初めて使うとき。同期の `XMLHttpRequest` で取って評価 |
-| `amaro.js` | Node 自身の `amaro`（swc を WebAssembly にしたもの。JavaScript に埋め込み、約 3.4 MB）。Node が同梱するのと同じ版 | 移植版ランタイムで初めて TypeScript の型を取り除くとき。同期の `XMLHttpRequest` |
-| `chunks/chunk-<hash>.js` | `kernel.js` と `process.js` が共有するコード（esbuild の分割） | その 2 つが静的に import |
-| `chunks/esm-<hash>.js` | 分割した sucrase | カーネルか旧ランタイムが初めて TypeScript を取り除く、または ESM を書き換えるときに動的 `import()` |
-| `chunks/legacy-<hash>.js` | `@noble/hashes` の古いハッシュ | 組み込みの `md5sum` が動的 `import()` |
-| `compat/index.json` | 互換パッケージの一覧。パッケージ名 → `{ range, file, integrity, pkg }` | npm のインストーラ（`src/kernel/npm/install.ts`）が 1 回だけ取る |
-| `compat/<id>-<version>.tgz` | ネイティブのバイナリしか出していないパッケージの代わりの互換パッケージ（npm の tarball）。このビルドでは `pagefind-1.5.2.tgz`・`cn-font-split-7.4.3.tgz`・`resvg-js-2.6.2.tgz` | `npm install` がそのパッケージを置き換えるとき。完全性（`sha512`）を確かめる |
-| `NODE-LICENSE.txt` | Node.js のライセンスと、同梱する依存の告知（`nodelib.js` と一緒に配る） | 読み込まれない。配置からは外さない |
-| `AMARO-LICENSE.txt` | amaro と swc のライセンス（`amaro.js` と一緒に配る） | 読み込まれない。配置からは外さない |
-| `*.map` | ソースマップ（`sourcemap: 'linked'`） | 開発者ツールだけ。なくてもよい |
+| `runtime.html` | ランタイムの iframe のドキュメント。`<meta name="openvessel-allowed-hosts" content="*">` を含む | ホストが `OpenVessel.boot()` を呼んだとき |
+| `runtime.js` | `runtime.html` のクラシックスクリプト（IIFE）。オリジンの確認、Service Worker の登録、カーネルの起動、ホストへのチャネルの受け渡しを行う（`src/runtime/runtime.ts`） | `runtime.html` と一緒に |
+| `sw.js` | ランタイムの Service Worker（`src/runtime/sw.ts`）。`/__ov/esm/`・`/__ov/builtin/`・`/__ov/mw/`・`/__ov/esm-error` での ES モジュールの配信、ネットワークポリシーを確認する外部通信のプロキシ `/__ov/net`、`/__ov/ping`、カーネルごとの `/__ov/k/<id>/` の下でのランタイム自身のファイルの配信、ランタイム自身のファイルへの分離用ヘッダーの付与を行う | `runtime.js` がスコープ `./` で登録 |
+| `kernel.js` | カーネル。ES モジュールの Worker（`src/kernel/index.ts`） | 起動ごとに 1 回、`new Worker('__ov/k/<id>/kernel.js', { type: 'module' })` として。`<id>` はランタイムのフレームごとにランダムに決まるカーネル ID で、Service Worker が `kernel.js` の中身を返す |
+| `process.js` | 旧ランタイム: 以前からある手書きの Node 互換レイヤー（`src/node/worker.ts`）。プロセスごとに 1 つのモジュール Worker | VFS のファイル `/etc/openvessel/node` が `legacy` のとき、すべての `node` プロセスで |
+| `node-process.js` | 移植版ランタイム: Node.js 自身の `lib/` を、再実装した `internalBinding()` の上で動かす（`src/nodejs/boot.ts`）。プロセスごとに 1 つのモジュール Worker | 既定で、すべての `node` プロセスで |
+| `nodelib.js` | Node.js v22.23.4 の `lib/`（と `deps/`）のソースを文字列として持つファイル。`scripts/gen-nodelib.mjs` が生成する（約 4.5 MB）。ビルド時に `vendor/node/` があった場合だけ書き出される | `node-process.js` が静的に import |
+| `ts-strip.js` | sucrase（クラシックスクリプト）。移植版ランタイムが `require(esm)` で ESM → CommonJS に書き換えるときに使う | 移植版ランタイムで初めて使うとき。同期の `XMLHttpRequest` で取得して評価する |
+| `amaro.js` | Node 自身の `amaro`（swc を WebAssembly にしたもの。JavaScript に埋め込まれていて約 3.4 MB）。Node が同梱しているのと同じバージョン | 移植版ランタイムで初めて TypeScript の型を除去するとき。同期の `XMLHttpRequest` |
+| `chunks/chunk-<hash>.js` | `kernel.js` と `process.js` が共有するコード（esbuild のコード分割） | その 2 つが静的に import |
+| `chunks/esm-<hash>.js` | 分割した sucrase | カーネルか旧ランタイムが初めて TypeScript の型を除去するとき、または ESM を書き換えるときに動的 `import()` |
+| `chunks/legacy-<hash>.js` | `@noble/hashes` のレガシーなハッシュ | 組み込みの `md5sum` が動的 `import()` |
+| `compat/index.json` | 互換パッケージの一覧。パッケージ名 → `{ range, file, integrity, pkg }` | npm のインストーラー（`src/kernel/npm/install.ts`）が 1 回だけ取得 |
+| `compat/<id>-<version>.tgz` | ネイティブバイナリしか提供していないパッケージの代わりになる互換パッケージ（npm の tarball）。このビルドでは `pagefind-1.5.2.tgz`・`cn-font-split-7.4.3.tgz`・`resvg-js-2.6.2.tgz` | `npm install` がそのパッケージを置き換えるとき。整合性（`sha512`）を検証する |
+| `NODE-LICENSE.txt` | Node.js のライセンスと、同梱している依存ライブラリの告知（`nodelib.js` と一緒に配布する） | 読み込まれない。ただしデプロイには含める |
+| `AMARO-LICENSE.txt` | amaro と swc のライセンス（`amaro.js` と一緒に配布する） | 読み込まれない。ただしデプロイには含める |
+| `*.map` | ソースマップ（`sourcemap: 'linked'`） | 開発者ツールのみ。省略可 |
 
-チャンクのハッシュはビルドごとに変わります。名前の一覧ではなく、ディレクトリをまるごと配置してください。
+チャンクのハッシュはビルドごとに変わります。ファイル名を列挙するのではなく、ディレクトリをまるごとデプロイしてください。
 
-`node` のプロセスにどちらのスクリプトを使うかは、プロセスを起動するたびに決まります。カーネルは
-`/etc/openvessel/node` を読み、前後の空白を除いた中身が `legacy` なら `process.js`、そうでなければ `node-process.js`
-を起動します（`src/kernel/index.ts` の `processScript()`）。公開している互換性の数字は移植版ランタイムのもので、
-こちらは設定なしで使われます。旧ランタイムで動かしたいときは、プロセスを起動する前にこのファイルを書き込みます。
+`node` プロセスにどちらのスクリプトを使うかは、プロセスを起動するたびに決まります。カーネルは
+`/etc/openvessel/node` を読み、前後の空白を除いた内容が `legacy` なら `process.js`、それ以外なら `node-process.js`
+を起動します（`src/kernel/index.ts` の `processScript()`）。公開している互換性の数値は移植版ランタイムのもので、
+こちらは設定なしで使われます。プロセスを旧ランタイムで動かしたい場合は、プロセスを起動する前にこのファイルを書き込みます。
 
 ```ts
 await vessel.mount({ node: 'legacy' }, { path: '/etc/openvessel' });
 ```
 
-カーネルは、最後に起動したスクリプトの Worker を 2 つ待機させておきます（`WARM = 2`）。最初の `node` のあとは、
-読み込み済みの Worker から始まります。
+カーネルは、最後に起動したスクリプトの Worker を 2 つ待機させておきます（`WARM = 2`）。そのため、最初の `node` プロセス以降は、
+読み込み済みの Worker から起動します。
 
 ### `dist/preview/`（プレビューのオリジン）
 
-| ファイル | 中身 |
+| ファイル | 内容 |
 |---|---|
-| `__ov-sw.js` | プレビューの Service Worker（`src/preview/sw.ts`）。プレビューのディレクトリの一番上にあるので、既定のスコープがプレビュー全体になる |
-| `__ov/relay.html` | 見えない中継の iframe の文書 |
-| `__ov/relay.js` | 中継のふつうのスクリプト。`../__ov-sw.js` をスコープ `../` で登録し、カーネルへの通り道を渡す（`src/preview/relay.ts`） |
-| `__ov/inject.js` | プレビューが表示するすべての HTML に差し込む。WebSocket のトンネルと、パスの下で配信するときの `fetch`/`XMLHttpRequest` のパスの補正（`src/preview/inject.ts`） |
-| `*.map` | ソースマップ。なくてもよい |
+| `__ov-sw.js` | プレビューの Service Worker（`src/preview/sw.ts`）。プレビューのディレクトリの最上位にあるので、既定のスコープがプレビュー全体になる |
+| `__ov/relay.html` | 非表示の中継用 iframe のドキュメント |
+| `__ov/relay.js` | 中継用のクラシックスクリプト。`../__ov-sw.js` をスコープ `../` で登録し、カーネルへのチャネルを渡す（`src/preview/relay.ts`） |
+| `__ov/inject.js` | プレビューで表示するすべての HTML ページに注入する。WebSocket のトンネリングと、パスの下で配信するときの `fetch`/`XMLHttpRequest` のパス補正を行う（`src/preview/inject.ts`） |
+| `*.map` | ソースマップ。省略可 |
 
-プレビューのオリジンのそれ以外の URL は、すべて Service Worker が仮想ポートから答えます。そのため、プレビューする
-サイトは（プレビューのディレクトリから見て）`__ov-sw.js`・`__ov/relay.html`・`__ov/relay.js`・`__ov/inject.js`・
-`__ov/open` のパスを使えません。[プレビュー](preview.ja.md) を参照してください。
+プレビューのオリジンでそれ以外の URL への要求には、すべて Service Worker が仮想ポートから応答します。そのため、プレビューする
+サイトでは（プレビューのディレクトリからの相対で）`__ov-sw.js`・`__ov/relay.html`・`__ov/relay.js`・`__ov/inject.js`・
+`__ov/open` のパスを使えません。詳しくは [プレビュー](preview.ja.md) を参照してください。
 
 ### `dist/host/` と `dist/types/`
 
-| ファイル | 中身 |
-|---|---|
-| `dist/host/index.js` | ホスト API の ES モジュール（`package.json` の `main`/`exports`）。アプリから import する。ふつうはバンドルする |
-| `dist/types/host/index.d.ts`・`dist/types/shared/policy.d.ts` | TypeScript の型宣言（`package.json` の `types`） |
+- `dist/host/index.js` は、ホスト API の ES モジュールです（`package.json` の `main`/`exports`）。アプリケーションから import します。通常はアプリケーションにバンドルします。
+- `dist/types/host/index.d.ts` と `dist/types/shared/policy.d.ts` は TypeScript の型宣言です（`package.json` の `types`）。
 
-`dist/playground/` は `npm run serve` が出す開発用の playground で、配置には含めません。
+`dist/playground/` は `npm run serve` で配信する開発用の playground で、デプロイには含めません。
 
 ## ヘッダー
 
@@ -106,39 +104,43 @@ await vessel.mount({ node: 'legacy' }, { path: '/etc/openvessel' });
 | ヘッダー | ホストのページ | ランタイム（`dist/runtime/`） | プレビュー（`dist/preview/`） |
 |---|---|---|---|
 | `Cross-Origin-Opener-Policy` | `same-origin`（必須） | `same-origin` | `same-origin` |
-| `Cross-Origin-Embedder-Policy` | `require-corp` か `credentialless`（必須） | `require-corp` | `require-corp`。**`__ov-sw.js` だけ `credentialless`** |
-| `Cross-Origin-Resource-Policy` | アプリに合わせて（`scripts/serve.mjs` は `same-origin`） | `cross-origin` | `cross-origin` |
-| `Content-Security-Policy` | アプリのもの | 下のランタイムの CSP を、**`sw.js` を除く**すべてのファイルに | 要らない |
+| `Cross-Origin-Embedder-Policy` | `require-corp` か `credentialless`（必須） | `require-corp` | `require-corp`。`__ov-sw.js` だけ `credentialless` |
+| `Cross-Origin-Resource-Policy` | アプリケーションに合わせる（`scripts/serve.mjs` は `same-origin`） | `cross-origin` | `cross-origin` |
+| `Content-Security-Policy` | アプリケーション独自のもの | 後述のランタイムの CSP を、`sw.js` を除くすべてのファイルに | 不要 |
 | `Content-Security-Policy: frame-ancestors` | — | ホストのオリジン | — |
-| `Service-Worker-Allowed` | — | 要らない | 要らない |
+| `Service-Worker-Allowed` | — | 不要 | 不要 |
 
-`scripts/serve.mjs` が使うヘッダーの組と同じです。serve.mjs はエラーの応答にも同じヘッダーを付けます。
+これは `scripts/serve.mjs` が使っているヘッダーの組み合わせです。serve.mjs ではエラーレスポンスにも同じヘッダーを付けています。
 
-プレビューの `__ov-sw.js` だけを `credentialless` で配るのは、Service Worker がページの `no-cors` の読み込み（ほかの
-サーバーの画像やふつうのスクリプト）を自分の `fetch()` でそのまま通すためです。`require-corp` のもとでは、相手のサーバーが
-`Cross-Origin-Resource-Policy` を返さない限り失敗します。`credentialless` なら資格情報なしで送られ、CORP は要りません。
-`credentialless` の無いブラウザー（Safari）では、こうした読み込みは失敗します。
+プレビューの `__ov-sw.js` だけを `credentialless` で配信するのは、Service Worker がページの `no-cors` の読み込み（ほかの
+サーバーの画像やクラシックスクリプト）を自身の `fetch()` で中継するためです。`require-corp` の場合、相手のサーバーが
+`Cross-Origin-Resource-Policy` を返さない限り、その読み込みは失敗します。`credentialless` なら認証情報なしで送信されるので、CORP は不要です。
+`credentialless` に対応していないブラウザ（Safari）では、こうした読み込みは拒否されます。
 
 ### それぞれのヘッダーが要る理由
 
-**cross-origin isolation（COOP + COEP）。** システムコールは `SharedArrayBuffer` の上で `Atomics.wait` を使って待ちます
-（[通信の形式](protocol.ja.md#同期のシステムコールの通り道)）。`SharedArrayBuffer` は cross-origin isolated な環境にしかありません。
+#### cross-origin isolation（COOP + COEP）
 
-- ホストのページは isolated である必要があります。`crossOriginIsolated` が false だと、`OpenVessel.boot()` は
+システムコールは、`SharedArrayBuffer` 上で `Atomics.wait` を使ってブロックします
+（[通信の形式](protocol.ja.md#同期のシステムコールのチャネル)）。`SharedArrayBuffer` は cross-origin isolated な環境でしか使えません。
+
+- ホストのページは isolated である必要があります。`crossOriginIsolated` が false の場合、`OpenVessel.boot()` は
   `OpenVessel: the host page must be cross-origin isolated (COOP: same-origin, COEP: require-corp or credentialless).`
   を投げます。
-- ランタイムの文書も isolated である必要があります。`runtime.js` はまず `sw.js` を登録します（ランタイムのファイルに
-  分離のヘッダーを付けます。[下](#ヘッダーを付けられないホストgithub-pages)を参照）。Worker が制御したあとも isolated で
-  なければ 1 回だけ読み直し（`sessionStorage` の印で 1 回に限る）、それでもだめなら
+- ランタイムのドキュメントも isolated である必要があります。`runtime.js` はまず `sw.js` を登録します（この Worker がランタイムのファイルに
+  分離用のヘッダーを付けます。[後述](#ヘッダーを付けられないホストgithub-pages)を参照）。Worker の制御下に入っても isolated で
+  なければ 1 回だけリロードします（`sessionStorage` のフラグで 1 回に制限）。それでも isolated にならなければ
   `OpenVessel needs a cross-origin isolated page (COOP: same-origin and COEP: require-corp/credentialless on the host page, and allow="cross-origin-isolated" on the iframe).`
-  で失敗します。ホストはランタイムの iframe に `allow="cross-origin-isolated"` を付けて作ります。
-- COEP のページに埋め込む文書は、それ自身にも COEP が要り、別オリジンなら `Cross-Origin-Resource-Policy: cross-origin`
-  も要ります。`runtime.html` とプレビューの文書の両方に COEP と CORP `cross-origin` を付けるのはこのためです。
-- カーネルとプロセスの Worker は、ランタイムのオリジンから読むモジュール Worker です。ほかのランタイムのファイルと
+  というエラーで失敗します。ホストはランタイムの iframe を `allow="cross-origin-isolated"` 付きで作成します。
+- COEP のページに埋め込むドキュメントは、それ自身も COEP 付きで配信する必要があり、別オリジンの場合は `Cross-Origin-Resource-Policy: cross-origin`
+  も必要です。`runtime.html` とプレビューのドキュメントの両方に COEP と CORP `cross-origin` を付けているのはこのためです。
+- カーネルとプロセスの Worker は、ランタイムのオリジンから読み込むモジュール Worker です。ランタイムのほかのファイルと
   同じヘッダーで配信します。
 
-**ランタイムの CSP。** ランタイムの中のコード（プロジェクトとその依存）が届く先を絞ります。`scripts/serve.mjs` は
-次を送ります。
+#### ランタイムの CSP
+
+この CSP は、ランタイム内のコード（プロジェクトとその依存パッケージ）がアクセスできる範囲を制限します。`scripts/serve.mjs` は
+次の内容を送ります。
 
 ```text
 default-src 'self';
@@ -150,100 +152,110 @@ style-src 'self' 'unsafe-inline';
 frame-ancestors <ホストのオリジン>
 ```
 
-| ディレクティブ | コードが必要とする理由 |
+| ディレクティブ | 必要な理由 |
 |---|---|
-| `script-src 'unsafe-eval'` | Node の組み込みモジュールは、`nodelib.js` から間接 `eval` でコンパイルする（`src/nodejs/boot.ts` の `compileBuiltin()`）。`vm`・CommonJS の包み・`amaro.js`・`ts-strip.js` も同じように評価する |
+| `script-src 'unsafe-eval'` | Node の組み込みモジュールは、`nodelib.js` から間接 `eval` でコンパイルする（`src/nodejs/boot.ts` の `compileBuiltin()`）。`vm`、CommonJS のラッパー、`amaro.js`、`ts-strip.js` も同じ方法で評価する |
 | `script-src 'wasm-unsafe-eval'` | esbuild・rollup・rolldown・lightningcss・amaro（swc）・互換パッケージは WebAssembly で動く |
-| `script-src data:` | 移植版ランタイムのモジュールローダーは `data:text/javascript,…` のモジュールを import する（`src/nodejs/bindings/module_wrap.ts`）。旧ランタイムも `eval` で ES モジュールを動かす `worker_threads` で使う |
-| `connect-src 'self'` | この CSP の目的。プロセスは `fetch` や `WebSocket` でランタイムのオリジンの外へ出られないので、出口は `/__ov/net` だけになる。そこで Service Worker が通信の方針を確かめる |
-| `frame-ancestors` | `runtime.html` を埋め込めるのをホストのページだけにする |
+| `script-src data:` | 移植版ランタイムのモジュールローダーは `data:text/javascript,…` のモジュールを import する（`src/nodejs/bindings/module_wrap.ts`）。旧ランタイムも、`eval` と ES モジュールを使う `worker_threads` で使う |
+| `connect-src 'self'` | この CSP の目的。プロセスは `fetch` や `WebSocket` でランタイムのオリジン以外に接続できないため、外へ出る経路は `/__ov/net` だけになる。そこで Service Worker がネットワークポリシーと照合する |
+| `frame-ancestors` | `runtime.html` を埋め込めるのをホストのページだけに限る |
 
-**`sw.js` には CSP を付けません。** Service Worker 自身の `fetch()` は、Worker のスクリプトと一緒に届いた CSP に従います。
-ランタイムの Service Worker は通信の出口で、方針が許したあと本物の外への要求をします。`sw.js` に `connect-src 'self'`
-があると、許したはずの要求がすべて失敗します。`scripts/serve.mjs` は `/sw.js` だけ CSP を外します。
+#### `sw.js` には CSP を付けない
 
-**`frame-ancestors` とランタイム自身のオリジンの確認。** ランタイムは、誰が自分を埋め込んでいるかを 3 つの方法で確かめます。
+Service Worker 自身の `fetch()` には、Worker のスクリプトと一緒に配信された CSP が適用されます。
+ランタイムの Service Worker は外部通信のプロキシで、ポリシーで許可されたあとに実際の外部リクエストを送ります。`sw.js` に `connect-src 'self'`
+が付いていると、許可したリクエストがすべて失敗します。`scripts/serve.mjs` は `/sw.js` に対してだけ CSP を外しています。
+
+#### `frame-ancestors` とランタイム自身のオリジンの確認
+
+ランタイムは、自分を埋め込んでいる相手を 3 つの方法で確認します。
 
 | 確認 | 場所 | 失敗したとき |
 |---|---|---|
-| CSP の `frame-ancestors` | サーバー | ブラウザが iframe を表示しない。`boot()` は時間切れになる |
-| `runtime.html` の `<meta name="openvessel-allowed-hosts">`。オリジンを空白かカンマで区切る。`*` はどこでも（配布時の既定） | `runtime.js` が `openvessel-connect` のメッセージの `origin` と比べる | `origin <origin> is not allowed to use this runtime` |
-| `location.ancestorOrigins`（ブラウザにあれば）が 2 つ以上でないこと | `runtime.js` | `the runtime must be embedded directly by the host page` |
+| CSP の `frame-ancestors` | サーバー | ブラウザが iframe を表示しない。その結果 `boot()` はタイムアウトする |
+| `runtime.html` の `<meta name="openvessel-allowed-hosts">`。オリジンを空白かカンマで区切る。`*` は任意のオリジン（配布時の既定） | `runtime.js` が `openvessel-connect` メッセージの `origin` と比較する | `origin <origin> is not allowed to use this runtime` |
+| `location.ancestorOrigins`（ブラウザが対応している場合）のエントリーが 2 つ以上ないこと | `runtime.js` | `the runtime must be embedded directly by the host page` |
 
-ホストではどれも `boot()` の失敗になります。下の 2 つは `OpenVessel: <メッセージ>`、1 つ目は（`timeout`、既定 30000 ms
-のあと）`OpenVessel: runtime did not start in time` です。配置する `runtime.html` の meta を書き換えてください。
+ホスト側では、どれも `boot()` の reject になります。下の 2 つは `OpenVessel: <メッセージ>`、1 つ目は（`timeout`、既定 30000 ms
+の経過後に）`OpenVessel: runtime did not start in time` です。デプロイする `runtime.html` の meta タグを書き換えてください。
 
 ```html
 <meta name="openvessel-allowed-hosts" content="https://app.example.com https://staging.example.com">
 ```
 
-**プレビューのオリジン。** プレビューの静的なファイルには、上の COOP/COEP/CORP が要ります。プレビューが表示するものは
-すべて Service Worker から来ます。Service Worker は、各応答に `cross-origin-embedder-policy: credentialless`・
-`cross-origin-resource-policy: cross-origin`・`cross-origin-opener-policy: same-origin` を（まだ無ければ）付けます。
-そのため開発サーバーがこれらを送る必要はありません。`credentialless` なので、CORP を送らない外の画像やスクリプトも
-読めます。プレビューのオリジンにランタイムの CSP は付けないでください。プレビューは Service Worker で独自に方針を
-確かめます（[プレビュー](preview.ja.md#外への要求と通信の方針)）。
+#### プレビューのオリジン
 
-**`Service-Worker-Allowed`** は要りません。ランタイムは `sw.js` をスコープ `./`（自分のディレクトリ）で、中継は
-`../__ov-sw.js` をスコープ `../`（プレビューのディレクトリ。Worker のスクリプトがあるディレクトリでもある）で登録します。
+プレビューの静的ファイルには、前述の COOP/COEP/CORP が必要です。プレビューで表示するものは
+すべて Service Worker から返されます。Service Worker は、各レスポンスに `cross-origin-embedder-policy: credentialless`・
+`cross-origin-resource-policy: cross-origin`・`cross-origin-opener-policy: same-origin` が無ければ付けます。
+そのため、開発サーバーがこれらのヘッダーを送る必要はありません。また `credentialless` なので、CORP を返さない外部の画像やスクリプトも
+読み込めます。プレビューのオリジンにはランタイムの CSP を付けないでください。プレビューは Service Worker で独自にポリシーを
+確認します（[プレビュー](preview.ja.md#外部へのリクエストとネットワークポリシー)）。
+
+#### `Service-Worker-Allowed`
+
+このヘッダーは不要です。ランタイムは `sw.js` をスコープ `./`（自身のディレクトリ）で、中継は
+`../__ov-sw.js` をスコープ `../`（プレビューのディレクトリ。Worker のスクリプトがあるディレクトリでもある）で登録するためです。
 
 ### MIME タイプ
 
-| 拡張子 | タイプ | 注意 |
+| 拡張子 | タイプ | 備考 |
 |---|---|---|
 | `.html` | `text/html; charset=utf-8` | |
-| `.js` | `text/javascript; charset=utf-8` | 必須。JavaScript 以外のタイプだと、モジュール Worker・`import`・Service Worker のスクリプトは拒まれる |
+| `.js` | `text/javascript; charset=utf-8` | 必須。JavaScript 以外のタイプだと、モジュール Worker・`import`・Service Worker のスクリプトは拒否される |
 | `.json` | `application/json` | `compat/index.json`・ソースマップ |
 | `.map` | `application/json` | |
-| `.tgz` | `application/gzip` か `application/octet-stream` | `fetch().arrayBuffer()` で読む。タイプは確かめない |
-| `.txt` | `text/plain; charset=utf-8` | ライセンスのファイル |
+| `.tgz` | `application/gzip` か `application/octet-stream` | `fetch().arrayBuffer()` で読む。タイプはチェックしない |
+| `.txt` | `text/plain; charset=utf-8` | ライセンスファイル |
 
-`dist/` に `.wasm` のファイルはありません。WebAssembly は JavaScript に埋め込まれているか（`amaro.js`）、互換パッケージの
-tarball の中にあるか、npm からメモリ上のファイルシステムに入れてバイト列からコンパイルします。自分でファイルを足すなら、
-`.wasm` は `application/wasm` で配信してください。
+`dist/` に `.wasm` ファイルはありません。WebAssembly は JavaScript に埋め込まれている（`amaro.js`）か、互換パッケージの
+tarball に含まれているか、npm からメモリ上のファイルシステムにインストールしてバイト列からコンパイルするかのいずれかです。独自にファイルを追加する場合は、
+`.wasm` を `application/wasm` で配信してください。
 
 ## キャッシュ
 
-ファイルの名前の付け方から決まります。
+ファイルの命名規則から、次のように設定することをおすすめします。
 
-| ファイル | おすすめ | 理由 |
+| ファイル | 推奨 | 理由 |
 |---|---|---|
-| `runtime/chunks/*-<hash>.js` | 長く、`immutable` | 中身が変わると名前も変わる |
-| `runtime/compat/<id>-<version>.tgz` | 長く | 名前に版がある。どのみち `index.json` の `integrity` で確かめる |
-| `runtime/sw.js`・`preview/__ov-sw.js` | `no-cache` | Service Worker の更新が届く必要がある。ランタイムは `updateViaCache: 'none'` で登録する |
-| ほかのすべて（`runtime.html`・`runtime.js`・`kernel.js`・`process.js`・`node-process.js`・`nodelib.js`・`amaro.js`・`ts-strip.js`・`compat/index.json`・`__ov/*`） | `no-cache`（`ETag`/`Last-Modified` で確かめ直す） | 名前は固定で、中身はリリースごとに変わる。`kernel.js` と `process.js` は同じビルドのハッシュ付きチャンクを名前で指す |
+| `runtime/chunks/*-<hash>.js` | 長期、`immutable` | 内容が変わると名前も変わる |
+| `runtime/compat/<id>-<version>.tgz` | 長期 | 名前にバージョンを含む。いずれにしても `index.json` の `integrity` で検証する |
+| `runtime/sw.js`・`preview/__ov-sw.js` | `no-cache` | Service Worker の更新を確実に反映する必要がある。ランタイムは `updateViaCache: 'none'` で登録する |
+| その他すべて（`runtime.html`・`runtime.js`・`kernel.js`・`process.js`・`node-process.js`・`nodelib.js`・`amaro.js`・`ts-strip.js`・`compat/index.json`・`__ov/*`） | `no-cache`（`ETag`/`Last-Modified` で再検証） | 名前は固定で、内容はリリースごとに変わる。`kernel.js` と `process.js` は同じビルドのハッシュ付きチャンクを名前で参照している |
 
-`scripts/serve.mjs` はすべてに `cache-control: no-cache` を付けます。Service Worker が自分で作る応答はキャッシュされません。
-`/__ov/esm/`・`/__ov/builtin/`・`/__ov/mw/`・`/__ov/esm-error` のモジュールと `/__ov/net` の応答には `cache-control: no-store` が付きます。
+`scripts/serve.mjs` はすべてのファイルに `cache-control: no-cache` を付けます。Service Worker が自身で生成するレスポンスはキャッシュされません。
+`/__ov/esm/`・`/__ov/builtin/`・`/__ov/mw/`・`/__ov/esm-error` のモジュールと `/__ov/net` のレスポンスには `cache-control: no-store` が付きます。
 
-npm のクライアントは、確かめた tarball をランタイムのオリジンの Cache Storage（キャッシュ名 `openvessel-npm-v1`）に置き、
-読み戻すときにも完全性を確かめ直します。これはブラウザごと、ランタイムのオリジンごとです。
+npm クライアントは、検証済みの tarball をランタイムのオリジンの Cache Storage（キャッシュ名 `openvessel-npm-v1`）に保存し、
+読み出すときにも整合性を再検証します。このキャッシュはブラウザごと、ランタイムのオリジンごとに分かれます。
 
 ## ヘッダーを付けられないホスト（GitHub Pages）
 
-2 つの Service Worker は、自分が配信するファイルに分離のヘッダーを付けます。サーバーが送ったヘッダーはそのまま残します。
+2 つの Service Worker は、自身が配信するファイルに分離用のヘッダーを付けます。サーバーが送ったヘッダーはそのまま残し、足りないものだけを追加します。
 
-| Service Worker | 付ける対象 | 無いときに付けるヘッダー |
-|---|---|---|
-| ランタイムの `sw.js` | スコープの中の同じオリジンへの `GET` のうち、`/__ov/…` の窓口でないものすべて（opaque とステータス 0 の応答はそのまま） | `cross-origin-opener-policy: same-origin`・`cross-origin-embedder-policy: require-corp`・`cross-origin-resource-policy: cross-origin` |
-| プレビューの `__ov-sw.js` | 自分のファイル（`__ov/relay.html`・`__ov/relay.js`・`__ov/inject.js`・`__ov-sw.js`）、`__ov/open` のリダイレクト、仮想ポートからのすべての応答 | `cross-origin-embedder-policy: credentialless`・`cross-origin-resource-policy: cross-origin`・`cross-origin-opener-policy: same-origin` |
+- ランタイムの `sw.js` は、スコープ内の同一オリジンへの `GET` のうち `/__ov/…` のエンドポイント以外のすべてに、
+  `cross-origin-opener-policy: same-origin`・`cross-origin-embedder-policy: require-corp`・`cross-origin-resource-policy: cross-origin`
+  を付けます。opaque なレスポンスとステータス 0 のレスポンスはそのまま返します。
+- プレビューの `__ov-sw.js` は、自身のファイル（`__ov/relay.html`・`__ov/relay.js`・`__ov/inject.js`・`__ov-sw.js`）、
+  `__ov/open` のリダイレクト、仮想ポートからのすべてのレスポンスに、`cross-origin-embedder-policy: credentialless`・
+  `cross-origin-resource-policy: cross-origin`・`cross-origin-opener-policy: same-origin` を付けます。
 
-Service Worker が制御するのは、インストールされたあとに読み込んだ文書だけです。`runtime.html` と `__ov/relay.html` の
-最初の読み込みは、これらの Worker の制御の外です。`runtime.js` は `sw.js` を登録してフレームを 1 回読み直すので、
-読み直した `runtime.html` には Worker がヘッダーを付けます。ただしこれが効くのはフレームがそもそも読み込めたときだけで、
-isolated なホストのページの中では、最初の読み込みにも COEP と CORP が要ります。そのため、ヘッダーをまったく送らない
-ホストでは、最初の読み込みを isolated にするものが別に必要です。
-デモ（[openvessel-demo](https://github.com/kobesoft-labs/openvessel-demo)）は次のようにしています。
+Service Worker が制御するのは、インストール後に読み込まれたドキュメントだけです。`runtime.html` と `__ov/relay.html` の
+最初の読み込みは、これらの Worker の制御下にありません。`runtime.js` は `sw.js` を登録してからフレームを 1 回リロードするので、
+リロード後の `runtime.html` には Worker がヘッダーを付けます。ただし、これが役に立つのはフレームをそもそも読み込めた場合だけで、
+isolated なホストのページの中では、最初の読み込みにも COEP と CORP が必要です。そのため、ヘッダーをまったく送らない
+ホスティングでは、最初の読み込みを isolated にする仕組みが別に必要です。
+デモ（[openvessel-demo](https://github.com/kobesoft-labs/openvessel-demo)）では、次のようにしています。
 
-- ページ・`runtime/`・`preview/` を 1 つのオリジン（GitHub Pages）の、1 つのサイトのディレクトリに置く。`runtime/` は
-  `dist/runtime` の、`preview/` は `dist/preview` のコピー。
-- ページはサイトの一番上から自分の `coi-sw.js` を登録する。そのスコープ（サイトのディレクトリ）は `runtime/` と
-  `preview/` も含むので、それぞれの Worker が入るまでは、`coi-sw.js` が同じオリジンへのすべての `GET`（`runtime.html` と
+- ページ・`runtime/`・`preview/` を 1 つのオリジン（GitHub Pages）の、1 つのサイトディレクトリの下に配置する。`runtime/` は
+  `dist/runtime` のコピー、`preview/` は `dist/preview` のコピー。
+- ページはサイトのルートから独自の `coi-sw.js` を登録する。そのスコープ（サイトディレクトリ）は `runtime/` と
+  `preview/` も含むので、それぞれの Worker がインストールされるまでは、`coi-sw.js` が同一オリジンへのすべての `GET`（`runtime.html` と
   `relay.html` を含む）に `cross-origin-opener-policy: same-origin`・`cross-origin-embedder-policy: require-corp`・
-  `cross-origin-resource-policy: cross-origin` を付ける。登録が済むと、ランタイムとプレビューの Worker が、より狭い
-  自分のスコープを引き継ぐ。
-- ページは `coi-sw.js` を登録したあと 1 回だけ読み直す（`sessionStorage` の印で 1 回に限る）。それでも isolated に
-  ならなければ「対応していない」と表示する。
+  `cross-origin-resource-policy: cross-origin` を付ける。登録が済むと、ランタイムとプレビューの Worker が、それぞれのより狭い
+  スコープを引き継ぐ。
+- ページは `coi-sw.js` を登録したあと 1 回だけリロードする（`sessionStorage` のフラグで 1 回に制限）。それでも isolated に
+  ならなければ「非対応」のメッセージを表示する。
 
 ```html
 <script>
@@ -278,7 +290,7 @@ self.addEventListener('fetch', (e) => {
 });
 ```
 
-デモはページからの相対 URL で起動します。
+デモは、ページからの相対 URL で起動します。
 
 ```ts
 const here = new URL('./', location.href);
@@ -290,54 +302,54 @@ const vessel = await OpenVessel.boot({
 ```
 
 デモの `build.mjs` は `dist/runtime` を `site/runtime` に、`dist/preview` を `site/preview` にコピーし、空の `.nojekyll`
-（GitHub Pages がすべてのファイルをそのまま配信するように）を置きます。`deploy.mjs` は `site/` を `gh-pages` の枝に
-force-push します。ヘッダーが無いので、ランタイムの CSP も `frame-ancestors` もありません。この形では、外への
-`connect-src` の絞り込みと、埋め込みの制限をあきらめることになります。1 つのオリジンなので、オリジンの分離も
-あきらめます。デモだけに使ってください。
+（GitHub Pages がすべてのファイルをそのまま配信するようにするため）を追加します。`deploy.mjs` は `site/` を `gh-pages` ブランチに
+force push します。ヘッダーを送れないので、ランタイムの CSP も `frame-ancestors` もありません。つまりこの構成では、
+`connect-src` による外部通信の制限と、埋め込み元の制限が効きません。オリジンも 1 つなので、オリジンの分離も
+ありません。デモ以外では使わないでください。
 
 ## パスの下での配信
 
-ランタイムもプレビューも、サブディレクトリから配信できます（例: `https://example.com/demo/runtime/` と
+ランタイムとプレビューは、どちらもサブディレクトリから配信できます（例: `https://example.com/demo/runtime/` と
 `https://example.com/demo/preview/`）。
 
-**ランタイム。** カーネルは自分の基準の URL を `kernel.js` のディレクトリから（`src/kernel/base.ts` の `RUNTIME_BASE`）、
-それぞれのランタイムは自分の Worker のスクリプト（`node-process.js`・`process.js`）のディレクトリから取ります。
-Service Worker は要求のパスからスコープ（とカーネルの `/__ov/k/<id>/` の前置き）を取り除いてから `/__ov/…` と照らし合わせます。
-npm のクライアントの `/__ov/net` と `compat/` の取得、移植版ランタイムの `/__ov/net` と `/__ov/mw/` の URL、旧ランタイムの
-`/__ov/esm/`・`/__ov/builtin/`・`/__ov/net` の URL（カーネルが配るモジュールに書き込むものも）は、どれもこの基準からの相対です。
-`kernel.js` は `__ov/k/<id>/kernel.js` として起動し、プロセスの Worker を自分と同じ場所から起動するので、基準は
-`<ランタイムのディレクトリ>/__ov/k/<id>` です。Service Worker はその下の `/__ov/…` をカーネル `<id>` への要求として
-答え、その下のランタイム自身のファイルはランタイムのディレクトリから返します。なので、いくつものランタイムのフレーム
-（複数のタブや、1 つのページでの複数の `boot()`）が、それぞれのカーネルで Service Worker を共有できます。前置きの無い
-`/__ov/…` の要求は、参照元（あるカーネルの前置きの下のファイルか、そのカーネルが返したモジュール）から決めたカーネルへ、
-分からなければ最後につながったカーネルへ送ります。
+ランタイムのオリジンでは、カーネルは自身のベース URL を `kernel.js` のディレクトリから取得し（`src/kernel/base.ts` の `RUNTIME_BASE`）、
+各ランタイムは自身の Worker スクリプト（`node-process.js`・`process.js`）のディレクトリから取得します。
+Service Worker は、リクエストのパスからスコープ（とカーネルの `/__ov/k/<id>/` プレフィックス）を取り除いてから `/__ov/…` と照合します。
+npm クライアントの `/__ov/net` へのリクエストと `compat/` のダウンロード、移植版ランタイムの `/__ov/net` と `/__ov/mw/` の URL、旧ランタイムの
+`/__ov/esm/`・`/__ov/builtin/`・`/__ov/net` の URL（カーネルが配信するモジュールに書き込むものも含む）は、すべてこのベースからの相対です。
+`kernel.js` は `__ov/k/<id>/kernel.js` として起動され、プロセスの Worker を自身と同じ場所から起動するので、ベースは
+`<ランタイムのディレクトリ>/__ov/k/<id>` になります。Service Worker はその下の `/__ov/…` のエンドポイントをカーネル `<id>` へのリクエストとして
+処理し、その下のランタイム自身のファイルはランタイムのディレクトリから返します。これにより、複数のランタイムのフレーム
+（複数のタブや、1 つのページでの複数回の `boot()`）が、それぞれ別のカーネルを持ちながら Service Worker を共有できます。プレフィックスの無い
+`/__ov/…` のリクエストは、リファラー（あるカーネルのプレフィックスの下にあるファイルか、そのカーネルが返したモジュール）から判断したカーネルへ送り、
+判断できなければ最後に接続したカーネルへ送ります。
 
-**プレビュー。** Service Worker のスコープはプレビューのディレクトリです。OpenVessel の中の開発サーバーは、サイトを
-あくまで `/` で配信するので、Service Worker が両者を対応させます。
+プレビューのオリジンでは、Service Worker のスコープはプレビューのディレクトリです。一方、OpenVessel 内の開発サーバーは、サイトを
+あくまで `/` で配信するので、Service Worker が両者の間を変換します。
 
-- 要求のパスからスコープを取り除いてから仮想ポートに渡す
-- HTML のページでは、ルートからの相対の `src`・`href`・`action`・`poster`・`formaction`・`srcset` の値の前にスコープを
-  付ける。差し込むスクリプトと一緒に import map `{"imports": {"/": "<scope>", "<scope>": "<scope>"}}` を入れ、ルートからの
-  モジュール指定子（`/@vite/client`・`/src/…`）がスコープの下に解決されるようにする
-- ルートからの相対の `Location` ヘッダーも同じように書き換える
-- `inject.js` が `fetch()` と `XMLHttpRequest.prototype.open` を包み、ルートからの相対の文字列の URL にもスコープを付ける
+- リクエストのパスからスコープを取り除いてから仮想ポートに渡す。
+- HTML ページでは、ルート相対の `src`・`href`・`action`・`poster`・`formaction`・`srcset` の値の先頭にスコープを
+  付ける。また、注入するスクリプトと一緒に import map `{"imports": {"/": "<scope>", "<scope>": "<scope>"}}` を挿入し、ルート相対の
+  モジュール指定子（`/@vite/client`・`/src/…`）がスコープの下に解決されるようにする。
+- ルート相対の `Location` ヘッダーも同じように書き換える。
+- `inject.js` が `fetch()` と `XMLHttpRequest.prototype.open` をラップし、ルート相対の文字列の URL にもスコープを付ける。
 
-ほかの方法で作った URL（たとえば `new URL('/x', location.href)` を `fetch` に渡す、CSS の `url(/…)`）は書き換えません。
-プレビューを専用のオリジンの一番上で配信すれば、これらはすべて不要です。
+それ以外の方法で組み立てた URL（たとえば `fetch` に渡した `new URL('/x', location.href)` や、CSS の `url(/…)`）は書き換えません。
+プレビューを専用のオリジンのルートで配信すれば、こうした変換はすべて不要になります。
 
 ## セッションごとのプレビューのオリジン
 
-多人数で使うときは、セッション（利用者・ワークスペース）ごとにプレビューのオリジンを分けます。たとえば
-`https://<session>.preview.example.com/` です（[../SECURITY.md](../SECURITY.md)）。サブドメインが違えばオリジンも違うので、
-あるセッションのプレビューのページは、ほかのセッションのクッキー・ストレージ・Service Worker の状態を読めません。
+マルチテナントで使う場合は、セッション（ユーザーやワークスペース）ごとにプレビューのオリジンを分けてください。たとえば
+`https://<session>.preview.example.com/` のようにします（[../SECURITY.md](../SECURITY.md)）。サブドメインが違えばオリジンも別になるので、
+あるセッションのプレビューのページから、ほかのセッションの Cookie・ストレージ・Service Worker の状態は読めません。
 
-- すべてのサブドメインで同じ `dist/preview/` を配信する（ワイルドカードの DNS のレコードと証明書、ワイルドカードの
-  `server_name` を持つ 1 つの server ブロック）
-- 起動のときにセッションの URL を `previewUrl` に渡す。ホストはそこからプレビューのオリジンを求め、中継のメッセージは
-  そのオリジンのその iframe からだけ受け取る
-- 各サブドメインは、初めて使うときにプレビューの Service Worker を自分で登録する
-- ランタイムのオリジンは共有できる。ランタイムは `boot()` ごとに作られ、プレビューへの通り道はホストが自分でカーネルに
-  渡すので、カーネルはプレビューのオリジンを知る必要がない
+- すべてのサブドメインで同じ `dist/preview/` のファイルを配信します（ワイルドカードの DNS レコードと証明書、ワイルドカードの
+  `server_name` を持つ 1 つの server ブロック）。
+- 起動時に、セッションの URL を `previewUrl` として渡します。ホストはそこからプレビューのオリジンを求め、中継からのメッセージは
+  そのオリジンのその iframe からのものだけを受け付けます。
+- 各サブドメインは、初めて使われるときにプレビューの Service Worker を個別に登録します。
+- ランタイムのオリジンは共有できます。ランタイムのインスタンスは `boot()` ごとに作られ、プレビューへのチャネルはホストが直接カーネルに
+  渡すので、カーネルがプレビューのオリジンを知る必要はありません。
 
 ```ts
 const vessel = await OpenVessel.boot({
@@ -352,37 +364,37 @@ const vessel = await OpenVessel.boot({
 |---|---|---|
 | install | `skipWaiting()` | `skipWaiting()` |
 | activate | `clients.claim()` | `clients.claim()` |
-| 登録 | `register('./sw.js', { scope: './', updateViaCache: 'none' })` のあと `reg.update()` | 中継が `register('../__ov-sw.js', { scope: '../' })` |
-| 起動のとき | Worker が installing か waiting のあいだ、`runtime.js` は `controllerchange` を待つ。古い Worker のままカーネルを起動しない | 中継は `navigator.serviceWorker.ready` を待つ |
-| 動いている途中の更新 | `controllerchange` で、`runtime.js` が新しい Worker にカーネルへの新しい通り道を渡す | 新しい Worker は、初めて必要になったときに通り道を求める |
+| 登録 | `register('./sw.js', { scope: './', updateViaCache: 'none' })` のあと `reg.update()` | 中継から `register('../__ov-sw.js', { scope: '../' })` |
+| 起動時 | Worker が installing か waiting の間、`runtime.js` は `controllerchange` を待つ。古い Worker の制御下でカーネルを起動することはない | 中継は `navigator.serviceWorker.ready` を待つ |
+| 実行中の更新 | `controllerchange` のとき、`runtime.js` が新しい Worker にカーネルへの新しいチャネルを渡す | 新しい Worker は、初めて必要になったときにチャネルを要求する |
 
-どちらの Worker も、カーネルへの通り道をメモリに持ちます。ブラウザが暇な Worker を止めて、また起動すると、Worker は
-新しい通り道を求めます（`need-kernel-port`）。ランタイムの Worker は `runtime.html` に、プレビューの Worker は中継に
-求め、中継はホストに求めます。要求は通り道を最大 15 秒待ちます。プレビューの Worker がメモリに持つ状態（どのプレビューの
-ページがどのポートのものか、許可したホスト）は、こうして起動し直すと空に戻ります。[通信の形式](protocol.ja.md) を参照してください。
+どちらの Worker も、カーネルへのチャネルをメモリ上に保持します。ブラウザがアイドル状態の Worker を停止して再起動すると、Worker は
+新しいチャネルを要求します（`need-kernel-port`）。ランタイムの Worker は `runtime.html` に要求し、プレビューの Worker は中継に要求し、
+中継はさらにホストに要求します。リクエストはチャネルを最大 15 秒待ちます。プレビューの Worker がメモリ上に持つ状態（どのプレビューの
+ページがどのポートに属するか、許可したホスト）は、このような再起動のあとは空に戻ります。詳しくは [通信の形式](protocol.ja.md) を参照してください。
 
 ## ブラウザの条件
 
-OpenVessel は Chromium 系のブラウザで開発・テストしています（エンドツーエンドのテストは Chrome を動かします）。
-コードが頼っているのは次のものです。
+OpenVessel は Chromium 系のブラウザで開発・テストしています（E2E テストは Chrome で実行しています）。
+コードは次の機能を前提にしています。
 
-- cross-origin isolation、`SharedArrayBuffer`、Worker の中の `Atomics.wait`
-- モジュール Worker（`new Worker(url, { type: 'module' })`）と、カーネルの Worker から作る入れ子の Worker
-- ランタイムとプレビューのオリジンの、別オリジンの iframe の中の Service Worker
-- iframe の `allow="cross-origin-isolated"`
-- Worker の中の同期の `XMLHttpRequest`（移植版ランタイム: `amaro.js`・`ts-strip.js`）
-- 組み込みの許可のダイアログのための `<dialog>`（`onPermissionRequest` を渡さないときだけ）
+- cross-origin isolation、`SharedArrayBuffer`、Worker 内での `Atomics.wait`
+- モジュール Worker（`new Worker(url, { type: 'module' })`）と、カーネルの Worker から作成するネストした Worker
+- 別オリジンの iframe 内での、ランタイムとプレビューのオリジンの Service Worker
+- iframe の `allow="cross-origin-isolated"` パーミッション
+- Worker 内での同期 `XMLHttpRequest`（移植版ランタイム: `amaro.js`・`ts-strip.js`）
+- 組み込みの許可ダイアログ用の `<dialog>`（`onPermissionRequest` を指定しない場合のみ）
 
-`location.ancestorOrigins` はあれば使います。
+`location.ancestorOrigins` は、ある場合に使います。
 
 ## 設定例
 
-上のヘッダーの組をそのまま送る設定です。ホスト名は置き換えてください。`app.example.com` がホストのページです。
+以下の設定は、上記のヘッダーの組み合わせをそのまま送ります。ホスト名は置き換えてください。`app.example.com` がホストのページです。
 
 ### nginx
 
-nginx では、自分の `add_header` を持つ `location` の中で、server の階層の `add_header` が効かなくなります。そのため共通の
-ヘッダーは snippet にして、必要な所で include します。
+nginx では、独自の `add_header` を持つ `location` の中では、server レベルの `add_header` が無視されます。そのため、共通の
+ヘッダーは snippet にまとめ、必要な箇所で include しています。
 
 ```text
 # /etc/nginx/snippets/openvessel-isolation.conf
@@ -440,7 +452,7 @@ server {
 }
 ```
 
-nginx の既定の `mime.types` は `.js` を `application/javascript` にします。ブラウザはこれも JavaScript として受け付けます。
+nginx の既定の `mime.types` では `.js` が `application/javascript` になりますが、ブラウザはこれも JavaScript として受け付けます。
 
 ### Caddy
 
@@ -482,28 +494,28 @@ app.example.com {
 }
 ```
 
-（`*.preview.example.com` のワイルドカードの証明書には、Caddy の DNS チャレンジが要ります。）
+（`*.preview.example.com` のワイルドカード証明書を取得するには、Caddy の DNS チャレンジが必要です。）
 
 ### Node.js（`scripts/serve.mjs`）
 
-リポジトリの開発用サーバーが、ヘッダーの組の手本です。`dist/playground`（ホスト）・`dist/runtime`・`dist/preview` を
-3 つのポート、`OV_PORT_BASE`（既定 5170）とその次の 2 つで配信します。`OV_HOST_PORT`・`OV_RUNTIME_PORT`・
-`OV_PREVIEW_PORT` でそれぞれを変えられます。待ち受けは `127.0.0.1` だけで、`frame-ancestors` は
-`http://localhost:<ホストのポート>` です。
+リポジトリの開発用サーバーが、ヘッダーの組み合わせのリファレンスです。`dist/playground`（ホスト）・`dist/runtime`・`dist/preview` を
+3 つのポート、つまり `OV_PORT_BASE`（既定 5170）とそれに続く 2 つのポートで配信します。`OV_HOST_PORT`・`OV_RUNTIME_PORT`・
+`OV_PREVIEW_PORT` でそれぞれを個別に変更できます。待ち受けるのは `127.0.0.1` だけで、`frame-ancestors` は
+`http://localhost:<ホストのポート>` に設定します。
 
 ## 確認の一覧
 
-- [ ] ホスト・ランタイム・プレビューが 3 つの別のオリジンになっている（多人数で 1 つの配置を使うなら、プレビューの
-      オリジンがセッションごとになっている）
+- [ ] ホスト・ランタイム・プレビューが 3 つの別々のオリジンになっている（複数のユーザーで 1 つの環境を共有する場合は、プレビューの
+      オリジンがセッションごとに分かれている）
 - [ ] ホストのページが `Cross-Origin-Opener-Policy: same-origin` と `Cross-Origin-Embedder-Policy: require-corp`
-      （か `credentialless`）を送り、`crossOriginIsolated` が `true` になる
+      （または `credentialless`）を送り、`crossOriginIsolated` が `true` になっている
 - [ ] `dist/runtime/` と `dist/preview/` のすべてのファイルが、COOP `same-origin`・COEP `require-corp`・CORP `cross-origin`
-      を送る
-- [ ] `sw.js` を除くランタイムのすべてのファイルがランタイムの CSP を送り、`frame-ancestors` にホストのオリジンがある
-- [ ] `runtime.html` の `openvessel-allowed-hosts` が `*` ではなくホストのオリジンになっている
+      を送っている
+- [ ] `sw.js` を除くランタイムのすべてのファイルがランタイムの CSP を送り、`frame-ancestors` にホストのオリジンが入っている
+- [ ] `runtime.html` の `openvessel-allowed-hosts` が `*` ではなく、ホストのオリジンになっている
 - [ ] `.js` を JavaScript の MIME タイプで配信している
-- [ ] `dist/runtime/` をまるごと配置している（`chunks/`・`compat/`・`nodelib.js`・`amaro.js`・`ts-strip.js`・ライセンスの
+- [ ] `dist/runtime/` ディレクトリ全体をデプロイしている（`chunks/`・`compat/`・`nodelib.js`・`amaro.js`・`ts-strip.js`・ライセンス
       ファイルを含む）
-- [ ] `runtimeUrl` と `previewUrl` が `/` で終わっている（か、`runtimeUrl` が `runtime.html` の URL）
-- [ ] ハッシュ付きのチャンクは長くキャッシュしてよい。ほか、特に Service Worker は確かめ直す
-- [ ] 旧ランタイムで動かすつもりがないなら、`/etc/openvessel/node` が `legacy` になっていない
+- [ ] `runtimeUrl` と `previewUrl` が `/` で終わっている（または `runtimeUrl` が `runtime.html` の URL になっている）
+- [ ] ハッシュ付きのチャンクは長期間キャッシュしてよい。それ以外、特に Service Worker は再検証させている
+- [ ] 旧ランタイムで動かすつもりがなければ、`/etc/openvessel/node` が `legacy` になっていない

@@ -3,8 +3,8 @@
 [日本語](bindings.ja.md)
 
 Node's `lib/` talks to its C++ half through `internalBinding(name)`. This page lists every binding name
-the ported runtime knows, which file implements it, how complete it is, and how it is emulated; and it
-explains how the bindings are tested against real Node. How the runtime as a whole behaves is in
+the ported runtime knows, with the file that implements it, how complete it is and how it is emulated. The
+last section covers how the bindings are tested against real Node. How the runtime as a whole behaves is in
 [Node.js runtime](nodejs-runtime.md).
 
 ## How a binding is resolved
@@ -161,7 +161,7 @@ has no implementation fails loudly when called instead of being `undefined`.
 `internalBinding('crypto')` (`crypto.ts`) is assembled from the files under `src/nodejs/bindings/crypto/`,
 on `@noble/hashes`, `@noble/ciphers` and `@noble/curves` plus BigInt arithmetic. What Node does
 synchronously stays synchronous; asynchronous `CryptoJob`s complete on a later task through the event
-loop. Errors are shaped like OpenSSL's (`ERR_OSSL_*` codes, library and reason). Status: **partial** —
+loop. Errors are shaped like OpenSSL's (`ERR_OSSL_*` codes, library and reason). The status is partial:
 `DHKeyExportJob`, `DHBitsJob` and `internalVerifyIntegrity` are stubs, and `SecureContext` holds no
 OpenSSL context.
 
@@ -191,7 +191,7 @@ Also in `crypto.ts`: `timingSafeEqual`; certificate stores are empty (`getBundle
 
 ## Compression
 
-`internalBinding('zlib')` (`zlib.ts`), status **implemented**:
+`internalBinding('zlib')` (`zlib.ts`) has the status implemented:
 
 | Class / function | Backed by |
 |---|---|
@@ -257,7 +257,7 @@ end to end instead: by Node's own test suite run in OpenVessel (`test/node-compa
 ## Related pages
 
 - [Node.js runtime](nodejs-runtime.md)
-- [Building](building.md) — `gen-node-data.mjs` and `node-upgrade-check.mjs`, which produce the shapes
+- [Building](building.md): `gen-node-data.mjs` and `node-upgrade-check.mjs`, which produce the shapes
   and report binding changes between Node versions
 - [Testing](testing.md)
 - [Compatibility](../compatibility.md)

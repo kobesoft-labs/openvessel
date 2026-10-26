@@ -2,10 +2,10 @@
 
 [English](preview.md)
 
-OpenVessel の中で動くサーバーを iframe に表示するしくみです。中継の iframe とプレビューの Service Worker、
-`__ov/open` の URL、HTTP の要求・応答と WebSocket を仮想ポートまで運んで戻す方法、差し込むスクリプトの役目、
-プレビューにできることとできないことをまとめます。メッセージの形は [通信の形式](protocol.ja.md) に、ヘッダーと
-配信は [配信](deployment.ja.md) にあります。
+OpenVessel の中で動くサーバーを iframe に表示する仕組みを説明します。中継用の iframe とプレビューの Service Worker、
+`__ov/open` の URL、HTTP のリクエスト・レスポンスと WebSocket を仮想ポートとの間でやり取りする方法、挿入するスクリプトの
+役割、プレビューにできることとできないことを扱います。メッセージの形式は [通信プロトコル](protocol.ja.md) に、ヘッダーと
+ホスティングについては [デプロイ](deployment.ja.md) にあります。
 
 ## 全体像
 
@@ -20,36 +20,37 @@ OpenVessel ─ creates ─▶ relay iframe (__ov/relay.html)
                  inject.js ──ws-connect──▶                                     └ legacy runtime: http-req messages
 ```
 
-| 部品 | ソース | 役目 |
+| 部品 | ソース | 役割 |
 |---|---|---|
-| 中継の iframe | `src/preview/relay.html`・`src/preview/relay.ts` | 見えない。プレビューのオリジンにある。プレビューの Service Worker を登録し、ホストが作ったカーネルへの通り道を渡す |
-| プレビューの Service Worker | `src/preview/sw.ts`（`dist/preview/__ov-sw.js`） | プレビューのページのすべての要求に仮想ポートから答える。WebSocket をトンネルする。HTML に `inject.js` を差し込む。ほかのオリジンへの要求に通信の方針を当てる |
-| 差し込むスクリプト | `src/preview/inject.ts`（`dist/preview/__ov/inject.js`） | ローカルの URL への `window.WebSocket` を置き換える。パスの下で配信するときは、ルートからの `fetch`/XHR の URL を補正する |
-| カーネルの側 | `src/kernel/index.ts`（`attachPreview`）・`src/kernel/net.ts`・`src/kernel/tcp.ts` | ポートで待ち受けているプロセスへ要求を回す |
-| ホストの側 | `src/host/index.ts`（`previewUrl`・`createPreview`） | 中継とプレビューの iframe を作り、中継をカーネルにつなぐ |
+| 中継用の iframe | `src/preview/relay.html`・`src/preview/relay.ts` | 非表示で、プレビューのオリジンに置く。プレビューの Service Worker を登録し、ホストが作ったカーネルとのチャネルを渡す |
+| プレビューの Service Worker | `src/preview/sw.ts`（`dist/preview/__ov-sw.js`） | プレビューのページのすべてのリクエストに仮想ポートから応答する。WebSocket をトンネルする。HTML に `inject.js` を挿入する。他のオリジンへのリクエストにネットワークポリシーを適用する |
+| 挿入するスクリプト | `src/preview/inject.ts`（`dist/preview/__ov/inject.js`） | ローカルの URL 向けに `window.WebSocket` を置き換える。パスの下で配信するときは、ルート相対の `fetch`/XHR の URL を補正する |
+| カーネル側 | `src/kernel/index.ts`（`attachPreview`）・`src/kernel/net.ts`・`src/kernel/tcp.ts` | ポートで待ち受けているプロセスへリクエストを振り分ける |
+| ホスト側 | `src/host/index.ts`（`previewUrl`・`createPreview`） | 中継用とプレビューの iframe を作り、中継をカーネルに接続する |
 
-手元のマシンには何も開きません。ポートはカーネルの表の項目で、ブラウザのページからそこへ届く道は、この Service Worker
-だけです。
+実際のマシン上では何もポートを開きません。ポートはカーネルのテーブルの項目にすぎず、ブラウザのページからそこへ
+アクセスする方法は、この Service Worker を経由するものだけです。
 
 ## プレビューの始まり
 
-`vessel.previewUrl(port, path?)` と `vessel.createPreview(port, opts?)` には、`OpenVessel.boot()` の `previewUrl` が要ります。
-無いときは `OpenVessel: previewUrl was not configured` で reject します。
+`vessel.previewUrl(port, path?)` と `vessel.createPreview(port, opts?)` を使うには、`OpenVessel.boot()` に `previewUrl` を
+指定する必要があります。指定がない場合は `OpenVessel: previewUrl was not configured` で reject します。
 
-最初の呼び出しで中継を作ります（2 回目からは使い回します）。
+最初の呼び出しで中継を作り、2 回目以降はそれを再利用します。
 
-1. ホストが見えない iframe `<previewUrl>__ov/relay.html` を足す（`aria-hidden`・`tabIndex = -1`・大きさ 0・`visibility:hidden`）。
-2. `relay.js` が `../__ov-sw.js` をスコープ `../` で登録し、`navigator.serviceWorker.ready` を待って、親に
-   `openvessel-preview-loaded` を送る。
-3. ホストが `MessageChannel` を作り、片方をカーネルに（カーネルへの通り道で `{ t: 'preview-port', port }`）、もう片方を
-   中継に（`defaultPort` 付きの `openvessel-preview-connect`）送る。
-4. 中継がそのポートを動いている Service Worker に渡し（`kernel-port`）、`openvessel-preview-ready` を送る。ホストの
-   promise が解決する。中継がこれらのメッセージを受けるのは親からだけで、それも親が別のオリジン（ホスト）のときだけ
-   （中継を自分の iframe に入れたプレビューのページからは受けない）。新しい通り道は古いものに代わり、Service Worker は
-   古いほうを閉じる。カーネルはそこでまだ開いていた要求とソケットを打ち切る。
+1. ホストが非表示の iframe `<previewUrl>__ov/relay.html` を追加します（`aria-hidden`、`tabIndex = -1`、サイズ 0、
+   `visibility:hidden`）。
+2. `relay.js` が `../__ov-sw.js` をスコープ `../` で登録し、`navigator.serviceWorker.ready` を待ってから、親に
+   `openvessel-preview-loaded` を送ります。
+3. ホストが `MessageChannel` を作り、一方をカーネルに（カーネルとのチャネルで `{ t: 'preview-port', port }`）、もう一方を
+   中継に（`defaultPort` 付きの `openvessel-preview-connect`）送ります。
+4. 中継がそのポートをアクティブな Service Worker に渡し（`kernel-port`）、`openvessel-preview-ready` を送ると、ホストの
+   promise が解決します。中継がこれらのメッセージを受け付けるのは親からだけで、しかも親が別のオリジン（ホスト）の
+   場合だけです（中継を iframe に埋め込んだプレビューのページからは受け付けません）。新しいチャネルは古いチャネルを
+   置き換え、Service Worker は古いほうを閉じます。カーネルは、そのチャネルでまだ開いていたリクエストとソケットを中断します。
 
-20000 ms のうちに中継の準備ができなければ、`OpenVessel: preview relay did not start` で reject します。2 回目からの
-`previewUrl()`・`createPreview()` は、そのポートを `openvessel-preview-default-port` で送り、既定のポートにします。
+20000 ms 以内に中継の準備ができなければ、`OpenVessel: preview relay did not start` で reject します。2 回目以降の
+`previewUrl()`・`createPreview()` は、そのポートを `openvessel-preview-default-port` で送り、デフォルトのポートにします。
 
 ## `__ov/open` の URL
 
@@ -57,59 +58,61 @@ OpenVessel ─ creates ─▶ relay iframe (__ov/relay.html)
 <previewUrl>__ov/open?port=<port>&path=<url-encoded path>
 ```
 
-| パラメーター | 意味 | 既定 |
-|---|---|---|
-| `port` | このページが属する仮想ポート | 既定のポート（無い・`0`・数でないとき） |
-| `path` | サーバーで開くパスとクエリ | `/` |
+この URL は次の 2 つのパラメーターを取ります。
 
-Service Worker は、プレビューのオリジンの `path` への `302` で答えます（パスの下で配信するときはスコープを前に付けます。
-[配信](deployment.ja.md#パスの下での配信) を参照）。このリダイレクトには分離のヘッダーが付いています。ただの
-`Response.redirect()` は、COEP のホストのページの中では拒まれるためです。Service Worker はさらに、この移動で生まれる
-ページ（`resultingClientId`）に `port` を記録します。そのページの要求は、すべてそのポートへ行きます。
+- `port`: このページが属する仮想ポート。指定がない、`0`、または数値でない場合は、デフォルトのポートを使います。
+- `path`: サーバーで開くパスとクエリ。デフォルトは `/` です。
+
+Service Worker は、プレビューのオリジンの `path` への `302` で応答します（パスの下で配信するときはスコープを前に付けます。
+[デプロイ](deployment.ja.md#パスの下での配信) を参照）。このリダイレクトには分離用のヘッダーを付けています。単純な
+`Response.redirect()` は、COEP を設定したホストページの中では拒否されるためです。また Service Worker は、このナビゲーションで
+作られるページ（`resultingClientId`）に `port` を記録します。そのページのリクエストは、すべてそのポートに送られます。
 
 ```ts
 const url = await vessel.previewUrl(4321, '/blog/?draft=1');
 // https://preview.example.com/__ov/open?port=4321&path=%2Fblog%2F%3Fdraft%3D1
 ```
 
-`server-ready` のイベントは、`/` を開く同じ形の URL を `url` に持ちます（`previewUrl` が無ければ `null`）。この URL は
-中継を待たずに作るので、中継がつながっていることを確かめたいときは `previewUrl()` か `createPreview()` を使ってください。
+`server-ready` イベントの `url` には、`/` を開く同じ形式の URL が入ります（`previewUrl` がなければ `null`）。この URL は
+中継を待たずに作るので、中継が接続済みであることを確実にしたい場合は `previewUrl()` か `createPreview()` を使ってください。
 
 ### `createPreview()`
 
-`createPreview(port, { path, container })` は `previewUrl(port, path)` を待ってから、新しい iframe を返します。
+`createPreview(port, { path, container })` は `previewUrl(port, path)` の完了を待ってから、新しい iframe を返します。
 
 | 属性 | 値 |
 |---|---|
-| `sandbox` | `allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads allow-pointer-lock`（`allow-top-navigation` は無い。プレビューはホストのページを移動させられない） |
+| `sandbox` | `allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads allow-pointer-lock`（`allow-top-navigation` はないので、プレビューからホストのページを遷移させることはできない） |
 | `allow` | `clipboard-write; fullscreen` |
 | `referrerPolicy` | `no-referrer` |
 | `style` | `width:100%;height:100%;border:0;background:#fff` |
 
-`container` を渡せば、その中に足します。`allow-same-origin` は、iframe を本物のプレビューのオリジンに置くためのものです。
-Service Worker がその iframe を制御するのに必要です。
+`container` を渡すと、その中に追加します。`allow-same-origin` は iframe を実際のプレビューのオリジンに置くためのもので、
+Service Worker がその iframe を制御するために必要です。
 
 ### 要求がどのポートへ行くか
 
-| 要求 | ポート |
+| リクエスト | ポート |
 |---|---|
-| `__ov/open` への移動 | URL の `port`（生まれるページに記録する） |
-| プレビューの iframe の中のほかの移動（リンク・フォーム・`location` の変更・読み直し） | 移動を始めたページのポート。無ければ既定のポート |
-| サブリソース（`fetch`・XHR・スクリプト・画像など） | 要求したページに記録したポート。無ければ既定のポート |
-| `http://localhost:<port>/…`（ほかのループバックの名前も）への要求 | URL の `port`。無ければ要求したページのポート。それも無ければ既定のポート |
-| ローカルの URL への WebSocket | ホストがループバックの名前でポートを明示した URL なら、そのポート。そうでなければ要求したページのポート。それも無ければ既定のポート |
+| `__ov/open` へのナビゲーション | URL の `port`（作られるページに記録する） |
+| プレビューの iframe 内のその他のナビゲーション（リンク、フォーム、`location` の変更、再読み込み） | ナビゲーションを始めたページのポート。なければデフォルトのポート |
+| サブリソース（`fetch`、XHR、スクリプト、画像など） | リクエストしたページに記録したポート。なければデフォルトのポート |
+| `http://localhost:<port>/…`（他のループバックの名前も含む）へのリクエスト | URL の `port`。なければリクエストしたページのポート。それもなければデフォルトのポート |
+| ローカルの URL への WebSocket | ホストがループバックの名前でポートを明示した URL ならそのポート。そうでなければリクエストしたページのポート。それもなければデフォルトのポート |
 
-ポート 4000 で開いた iframe の中で移動しても、ポート 4000 のままです。別々のポートのプレビューを同時に開いておけます。
-既定のポートは、いちばん最近の `previewUrl()`・`createPreview()` の `port` です。
+ポート 4000 で開いた iframe の中で遷移しても、ポート 4000 のままです。異なるポートのプレビューを同時に開いておくことも
+できます。デフォルトのポートは、最後に呼んだ `previewUrl()`・`createPreview()` の `port` です。
 
-ポートの記録と既定のポートは、メモリのほか、プレビューのオリジンの Cache Storage（キャッシュ `openvessel-preview-ports`）
-にも置きます。なので、ブラウザが暇な Service Worker を起動し直しても、開いたままのページはポートを保ちます。もう無い
-ページの記録は、Service Worker が起動するときに捨てます。許可したホストの控えはメモリだけです。
+ポートの記録とデフォルトのポートは、メモリに加えて、プレビューのオリジンの Cache Storage（キャッシュ
+`openvessel-preview-ports`）にも保存します。そのため、ブラウザがアイドル状態の Service Worker を再起動しても、開いている
+ページはポートを維持します。なくなったページの記録は、Service Worker の起動時に削除します。許可したホストのキャッシュは
+メモリにだけ持ちます。
 
 ## HTTP の要求
 
-制御しているページの同じオリジンへの要求は、すべて Service Worker が扱います。例外は自分のファイル（`__ov/relay.html`・
-`__ov/relay.js`・`__ov/inject.js`・`__ov-sw.js`。サーバーから取り、分離のヘッダーを足す）と `__ov/open` です。
+Service Worker は、制御しているページからの同一オリジンへのリクエストをすべて処理します。例外は `__ov/open` と
+Service Worker 自身のファイル（`__ov/relay.html`・`__ov/relay.js`・`__ov/inject.js`・`__ov-sw.js`）で、これらはサーバーから
+取得して分離用のヘッダーを追加します。
 
 ### 要求
 
@@ -117,81 +120,91 @@ Service Worker がその iframe を制御するのに必要です。
 |---|---|
 | メソッド | そのまま |
 | URL | パスとクエリ（フラグメントは送らない）。パスの下で配信するときはスコープを取り除く |
-| ヘッダー | 要求のヘッダーから `sec-*`・`cookie`・`accept-encoding` を除き、`host: localhost:<port>` を足したもの。`Referer` は渡らない |
-| 本文 | `GET` と `HEAD` 以外のすべてのメソッド。全部を読んで（`req.arrayBuffer()`）1 つのメッセージで送り、終わりの印を送る。要求の本文はストリームしない |
+| ヘッダー | リクエストのヘッダーから `sec-*`・`cookie`・`accept-encoding` を除き、`host: localhost:<port>` を加えたもの。`Referer` は渡さない |
+| ボディ | `GET` と `HEAD` 以外のすべてのメソッド。全体を読み込み（`req.arrayBuffer()`）、1 つのメッセージで送ってから終端を送る。リクエストのボディはストリーミングしない |
 
-`accept-encoding` を除くので、サーバーは圧縮せずに答えます。
+`accept-encoding` を除くので、サーバーは圧縮せずに応答します。
 
 ### カーネルの側
 
-カーネルは待ち受けの表でポートを引きます（`src/kernel/net.ts` の `NetRouter.request`）。
+カーネルは待ち受けのテーブルでポートを探します（`src/kernel/net.ts` の `NetRouter.request`）。
 
-| 待ち受け | 作るもの | 届け方 | `server-ready`・`ports()` に出るか |
+| 待ち受け | 作成元 | 届け方 | `server-ready`・`ports()` に出るか |
 |---|---|---|---|
-| `raw` | 移植版ランタイム: すべての TCP サーバー（`net.Server`・`http.Server` など） | `TcpBridge`: 要求ごとに socketpair の新しい接続を作り、HTTP/1.1 のバイト列で | 出る |
-| `http`（記録のホストは待ち受けのアドレスか空） | 旧ランタイムの `http.Server` | プロセスへの `http-req`／`http-res` のメッセージ（[通信の形式](protocol.ja.md#カーネルとプロセスのメッセージ)） | 出る |
+| `raw` | 移植版ランタイムのすべての TCP サーバー（`net.Server`、`http.Server` など） | `TcpBridge`: リクエストごとに socketpair の新しい接続を作り、HTTP/1.1 のバイト列で送る | 出る |
+| `http`（記録するホストは待ち受けアドレスか空） | 旧ランタイムの `http.Server` | プロセスへの `http-req`／`http-res` メッセージ（[通信プロトコル](protocol.ja.md#カーネルとプロセスのメッセージ)） | 出る |
 | `tcp-only` | 旧ランタイムの `net.Server` | 届かない: `connect ECONNREFUSED 127.0.0.1:<port>` | 出ない |
-| 無い、またはプロセスが動いていない | — | `connect ECONNREFUSED 127.0.0.1:<port>` | — |
+| なし、またはプロセスが動いていない | — | `connect ECONNREFUSED 127.0.0.1:<port>` | — |
 
-`listen(0)` は 49152〜65151 の空いたポートを選びます。表にすでにあるポートは `EADDRINUSE` になります。待ち受けは、
-そのプロセスが終わるか、`exec` でほかのプログラムになるか、サーバーを閉じると消え、ホストに `port-closed` が届きます。
-プロセスのあいだで共有した待ち受けのソケット（`cluster` のように IPC で渡したもの）は、接続を順番に（ラウンドロビンで）
-受け取ります。
+`listen(0)` は 49152〜65151 から空いているポートを選びます。テーブルにすでにあるポートは `EADDRINUSE` になります。
+待ち受けは、プロセスが終了したとき、`exec` で別のプログラムに置き換わったとき、またはサーバーを閉じたときに消え、
+ホストに `port-closed` が届きます。プロセス間で共有した待ち受けソケット（`cluster` のように IPC で渡したもの）は、
+接続を順番に（ラウンドロビンで）受け取ります。
 
 #### 移植版ランタイム: ソケットの上の HTTP/1.1（`src/kernel/tcp.ts`）
 
-待ち受けているプロセスに新しい接続（`tcp-accept`）が届きます。相手のアドレスは `127.0.0.1`、相手のポートは 40000 から
-60000 まで数え上げて一周します。カーネルが要求の頭を書きます。
+待ち受けているプロセスに新しい接続（`tcp-accept`）が届きます。リモートアドレスは `127.0.0.1` で、リモートポートは 40000
+から 60000 まで順に増え、上限に達すると最初に戻ります。カーネルは次の内容のリクエストヘッドを書き込みます。
 
-- 要求の行 `<METHOD> <url> HTTP/1.1`
-- 上のヘッダーから `connection`・`keep-alive`・`transfer-encoding`・`upgrade`・`sec-websocket-key`・`sec-websocket-version`
-  を除いたもの。`Host` が無ければ `Host: localhost:<port>` を先頭に
-- `Connection: close`（要求ごとに 1 接続）。本文があって `content-length` が無いときは `Transfer-Encoding: chunked`
-  （本文を chunk で送り、`0\r\n\r\n` で終える）
+- リクエスト行 `<METHOD> <url> HTTP/1.1`
+- 上記のヘッダーから `connection`・`keep-alive`・`transfer-encoding`・`upgrade`・`sec-websocket-key`・
+  `sec-websocket-version` を除いたもの。`Host` がなければ先頭に `Host: localhost:<port>` を付ける
+- `Connection: close`（リクエストごとに 1 接続）。ボディがあって `content-length` がない場合は
+  `Transfer-Encoding: chunked`（ボディを chunk で送り、`0\r\n\r\n` で終える）
 
-応答は HTTP/1.1 として読みます。`101` 以外の `1xx` は読み飛ばします。本文は `content-length`、`chunked`（trailer は捨てる）、
-または接続が閉じるまで読みます。長さの無い `204` と `304` には本文がありません。先へ渡すヘッダーからは
-`transfer-encoding`・`connection`・`keep-alive` を除きます。エラーは、頭が揃う前に接続が閉じれば `socket hang up`、
-長さや chunk で区切った本文の途中で閉じれば `incomplete response` です。
+レスポンスは HTTP/1.1 として解析します。`101` 以外の `1xx` は読み飛ばします。ボディは `content-length`、`chunked`
+エンコーディング（trailer は捨てる）、または接続が閉じるまでのいずれかで読み、長さのない `204` と `304` にはボディが
+ありません。後段に渡すヘッダーからは `transfer-encoding`・`connection`・`keep-alive` を除きます。ヘッドを受け取り終える前に
+接続が閉じた場合は `socket hang up`、長さや chunk で区切られたボディの途中で閉じた場合は `incomplete response` の
+エラーになります。
 
 #### 旧ランタイム
 
-カーネルは待ち受けているスレッドに `http-req`、続いて `http-body`・`http-body-end` を送り、`http-res`・`http-res-data`・
-`http-res-end`・`http-res-error` を送り返します。もう扱っていないポートへの要求を受けたプロセスは、本文 `no server` の
-`503 Service Unavailable` で答えます。要求の途中でプロセスが終わると、要求は `server process exited` で失敗します。
+カーネルは待ち受けているスレッドに `http-req` を送り、続けて `http-body`・`http-body-end` を送ります。プロセスから返る
+`http-res`・`http-res-data`・`http-res-end`・`http-res-error` は中継して返します。プロセスがもう扱っていないポートへの
+リクエストを受けた場合は、ボディ `no server` の `503 Service Unavailable` で応答します。リクエストの途中でプロセスが
+終了すると、そのリクエストは `server process exited` で失敗します。
 
 ### 応答
 
-| 部分 | ページが受け取るもの |
-|---|---|
-| ステータス | 送られたまま。ただし `101` は `200` にする。ステータスの文もそのまま |
-| ヘッダー | 送られたまま。ただし `content-length`・`transfer-encoding`・`connection`・`keep-alive`・`content-encoding` を除く。パスの下で配信するときは `location` をスコープの下に書き換える。`cross-origin-embedder-policy: credentialless`・`cross-origin-resource-policy: cross-origin`・`cross-origin-opener-policy: same-origin` を、無ければ足す。ブラウザが受け付けない値のヘッダーは黙って落とす。`Set-Cookie` はページに届かない（Service Worker はこれを持つ応答を作れない） |
-| 本文 | ストリームする。サーバーからの塊を、届いたそばから渡す。`204`・`205`・`304`・`HEAD` には本文が無い |
-| HTML への移動 | 要求が移動で、`content-type` に `text/html` を含み、本文があるときは、本文全体を文字列として（UTF-8 で）読み、スクリプトを差し込み、ひとまとめで返す |
+ページは次のようにレスポンスを受け取ります。
 
-ページが本文を取り消すと（たとえば iframe がほかへ移動すると）、Service Worker は `abort` を送ります。カーネルは接続を
-閉じる（移植版ランタイム）か、`http-abort` を送ります（旧ランタイム）。
+- ステータス: 送られたとおり。ただし `101` は `200` にします。ステータステキストもそのまま渡します。
+- ヘッダー: 送られたとおり。ただし `content-length`・`transfer-encoding`・`connection`・`keep-alive`・`content-encoding` は
+  除きます。パスの下で配信するときは `location` をスコープの下に書き換えます。
+  `cross-origin-embedder-policy: credentialless`・`cross-origin-resource-policy: cross-origin`・
+  `cross-origin-opener-policy: same-origin` は、なければ追加します。ブラウザが受け付けないヘッダー値は何も通知せずに
+  捨てます。`Set-Cookie` はページに届きません（Service Worker はこのヘッダーを持つレスポンスを作れないため）。
+- ボディ: ストリーミングで、サーバーからのチャンクを届いた順にそのまま渡します。`204`・`205`・`304`・`HEAD` には
+  ボディがありません。
+- HTML へのナビゲーション: リクエストがナビゲーションで、`content-type` に `text/html` を含み、ボディがある場合は、
+  ボディ全体をテキストとして（UTF-8 でデコードして）読み込み、スクリプトを挿入してから、まとめて返します。
 
-ブラウザのメモリのほかに、要求と応答の大きさの上限はありません。HTML への移動と要求の本文を除き、応答は溜めません。
+ページがボディを取り消すと（たとえば iframe が別のページに遷移したとき）、Service Worker は `abort` を送ります。
+カーネルは接続を閉じる（移植版ランタイム）か、`http-abort` を送ります（旧ランタイム）。
+
+リクエストとレスポンスのサイズには、ブラウザのメモリ以外の上限はありません。HTML へのナビゲーションとリクエストの
+ボディを除き、レスポンスはバッファリングしません。
 
 ### リダイレクト
 
-サーバーの `3xx` は、そのままページに返します。Service Worker がリダイレクトをたどることはありません。ブラウザがいつも
-どおりたどります（`redirect: 'manual'` の `fetch()` には `opaqueredirect` が見えます）。ルートからの相対の `Location` は
-プレビューのオリジンに留まります。`http://localhost:4321/x` のような絶対の `Location` はループバックの URL なので、
-その仮想ポートへ行きます。そうした URL への要求の応答の `Location` は、そのまま渡します。
+サーバーが返した `3xx` はそのままページに返し、Service Worker がリダイレクトをたどることはありません。リダイレクトは
+ブラウザが通常どおりたどります（`redirect: 'manual'` の `fetch()` には `opaqueredirect` として見えます）。ルート相対の
+`Location` はプレビューのオリジンにとどまります。`http://localhost:4321/x` のような絶対 URL の `Location` はループバックの
+URL なので、その仮想ポートへ送られます。こうした URL へのリクエストに対するレスポンスの `Location` は、そのまま渡します。
 
 ### エラー
 
-| 場面 | 結果 |
+| 状況 | 結果 |
 |---|---|
-| ポートで誰も待ち受けていない、本文の無い要求 | 200 ms ごとに最大 15 回（約 3 秒）やり直してから、エラーのページ。Vite のような開発サーバーは、ポートを確かめるために一瞬だけ待ち受け、少しあとで本当に待ち受けるため |
-| 誰も待ち受けていない、本文のある要求 | すぐにエラーのページ |
-| 応答の頭より前のエラー（移植版ランタイムの `socket hang up`、旧ランタイムの `server process exited`） | すぐにエラーのページ |
-| 頭のあとのエラー | 応答の本文のストリームが失敗する |
-| Service Worker にカーネルへの通り道が無く、15 秒のうちに得られない | 要求はネットワークのエラーで失敗する（`preview is not connected to OpenVessel`） |
+| ポートで何も待ち受けておらず、ボディのないリクエスト | 200 ms ごとに最大 15 回（約 3 秒）再試行してから、エラーページを返す（Vite などの開発サーバーは、ポートを確認するために一瞬だけ待ち受け、少し後に改めて待ち受けるため） |
+| 何も待ち受けておらず、ボディのあるリクエスト | すぐにエラーページを返す |
+| レスポンスヘッドより前のエラー（移植版ランタイムの `socket hang up`、旧ランタイムの `server process exited`） | すぐにエラーページを返す |
+| ヘッドの後のエラー | レスポンスボディのストリームが失敗する |
+| Service Worker がカーネルとのチャネルを持っておらず、15 秒以内に得られない | リクエストはネットワークエラーで失敗する（`preview is not connected to OpenVessel`） |
 
-エラーのページは、`content-type: text/html; charset=utf-8` と分離のヘッダーを持つ `502` です。要求の種類によらず返します。
+エラーページは、`content-type: text/html; charset=utf-8` と分離用のヘッダーを持つ `502` です。リクエストの種類にかかわらず
+これを返します。
 
 ```text
 Nothing is listening on port 4999
@@ -201,136 +214,136 @@ Start a dev server (for example npm run dev) and reload.
 
 ## WebSocket
 
-Service Worker は WebSocket を横取りできません。そこで `inject.js` が、プレビューが配信するすべての HTML で
-`window.WebSocket` を置き換えます。URL（`ws:`・`wss:`。`http:`・`https:` はブラウザと同じく `ws:`・`wss:` に直す）の
-ホストがページ自身のホストか、ループバックの名前（`localhost`・`*.localhost`・`127.0.0.0/8`・`[::1]` など。ポートは問わない）
-ならトンネルします。それ以外の URL では、まずそのホストが通信の方針で許されるかを Service Worker に尋ね（`ws-check`。
-[下](#外への要求と通信の方針) を参照）、そのあとブラウザ自身の `WebSocket` を開いて、イベントとメンバーを中継します。
-ブラウザの `WebSocket` が受け付けない URL（ほかのスキームやフラグメント付き）は、そのまま渡すので、いつもの
-`SyntaxError` になります。
+Service Worker は WebSocket に介入できません。そこで `inject.js` が、プレビューが配信するすべての HTML ページで
+`window.WebSocket` を置き換えます。URL（`ws:`・`wss:`。`http:`・`https:` はブラウザと同様に `ws:`・`wss:` に変換）の
+ホストがページ自身のホストか、ループバックの名前（`localhost`、`*.localhost`、`127.0.0.0/8`、`[::1]` など。ポートは問わない）
+であれば、トンネルします。それ以外の URL では、まずそのホストがネットワークポリシーで許可されているかを Service Worker に
+確認し（`ws-check`。[後述](#外部へのリクエストとネットワークポリシー)）、その後ブラウザ自身の `WebSocket` を開いて、イベントと
+メンバーを中継します。ブラウザの `WebSocket` が受け付けない URL（他のスキームやフラグメント付きのもの）は、そのまま渡すので、
+通常どおり `SyntaxError` が投げられます。
 
-1. ページは、新しい `MessagePort` と一緒に `{ t: 'ws-connect', port, path, protocols, vport, origin }` を、自分を制御する
-   Service Worker に送る（`vport` は、ホストがページと違うときの URL のポート。同じなら 0）。
-2. Service Worker はポートを選び（`vport`、無ければページのポート、無ければ既定のポート）、カーネルに開くよう頼む
-   （`ws-open`）。ヘッダーは `sec-websocket-protocol`（求めたプロトコルを `, ` でつないだもの）・`host: localhost:<port>`・
-   `origin`（プレビューのオリジン）で、空のものは省く。
-3. 移植版ランタイム: カーネルは `Connection: Upgrade`・`Upgrade: websocket`・`Sec-WebSocket-Version: 13` と乱数の
-   `Sec-WebSocket-Key` を付けた HTTP/1.1 の upgrade の要求を送る。`101` の応答で、サーバーが選んだ
-   `Sec-WebSocket-Protocol` のソケットが開く。旧ランタイム: `upgrade: true` の `http-req` を送り、`ws-open` で答えが来る。
-4. フレームはメッセージで運ぶ。テキストは文字列、バイナリは `Uint8Array`。移植版ランタイムでは、カーネルは自分が送る
-   フレームをマスクし、ping には pong で答え、close のフレームから閉じるコードを読む（無ければ `1005`）。
+1. ページは、自分を制御する Service Worker に、新しい `MessagePort` とあわせて
+   `{ t: 'ws-connect', port, path, protocols, vport, origin }` を送ります（`vport` は、URL のホストがページと異なる場合の
+   URL のポートで、同じなら 0）。
+2. Service Worker はポートを選び（`vport`、なければページのポート、それもなければデフォルトのポート）、カーネルに接続を
+   依頼します（`ws-open`）。ヘッダーは `sec-websocket-protocol`（要求されたプロトコルを `, ` で連結したもの）、
+   `host: localhost:<port>`、`origin`（プレビューのオリジン）で、空のものは省きます。
+3. 移植版ランタイムでは、カーネルが `Connection: Upgrade`・`Upgrade: websocket`・`Sec-WebSocket-Version: 13` とランダムな
+   `Sec-WebSocket-Key` を付けた HTTP/1.1 の upgrade リクエストを送ります。`101` のレスポンスを受けると、サーバーが選んだ
+   `Sec-WebSocket-Protocol` でソケットが開きます。旧ランタイムでは、`upgrade: true` の `http-req` を送り、`ws-open` で
+   応答を受けます。
+4. フレームはメッセージとして運び、テキストは文字列、バイナリは `Uint8Array` にします。移植版ランタイムでは、カーネルは
+   送信するフレームをマスクし、ping には pong で応答し、close フレームからクローズコードを読み取ります（なければ `1005`）。
 
-なので、HMR のソケットを別のポートで待ち受ける開発サーバー（`ws://localhost:24678/`）にはそのポートで届き、
-`new WebSocket('/socket')` やページ自身のホストの URL はページのポートへ行きます。`vport` があるときはパスをそのまま送り、
-無いときは HTTP の要求と同じくスコープを取り除きます。
+したがって、HMR のソケットを別のポートで待ち受ける開発サーバー（`ws://localhost:24678/`）にはそのポートで接続し、
+`new WebSocket('/socket')` やページ自身のホストの URL はページのポートに接続します。`vport` がある場合はパスをそのまま送り、
+ない場合は HTTP のリクエストと同様にスコープを取り除きます。
 
 ### トンネルする `WebSocket` のオブジェクト
 
-| メンバー | ふるまい |
+| メンバー | 動作 |
 |---|---|
-| `url` | 絶対の URL |
-| `readyState` | 開くまで `0`、開いたら `1`、`close()` のあと `2`、閉じたら `3` |
+| `url` | 絶対 URL |
+| `readyState` | 開くまで `0`、開いたら `1`、`close()` の後は `2`、閉じたら `3` |
 | `protocol` | サーバーが選んだプロトコル。開く前は `''` |
-| `extensions` | いつも `''`（方針で確かめた外へのソケットでは、ブラウザのソケットのもの） |
-| `bufferedAmount` | いつも `0`（外へのソケットでは、ブラウザのソケットのもの） |
-| `binaryType` | `'blob'`（既定）か `'arraybuffer'`。バイナリのメッセージは `Blob` か `ArrayBuffer` で届く |
-| `send(data)` | 文字列はテキストのフレーム、`ArrayBuffer`・ビュー・`Blob` はバイナリ（`Blob` は読み終えてから送る）。開いていなければ `InvalidStateError`（`WebSocket is not open`）を投げる |
-| `close(code = 1000, reason = '')` | close を送り、サーバーを待たずにすぐ `close` を知らせる |
-| イベント | `open`・`message`（`origin` は URL のオリジン）・`error`・`close`。`on…` のプロパティと `addEventListener` の両方 |
-| `error` | 開かないまま閉じたとき、またはコードが `1006` のとき、`close` の前に出る |
-| `close` のイベント | `code`・`reason`・`wasClean`（`1000` のときだけ `true`） |
+| `extensions` | 常に `''`（外部へのソケットでは、ブラウザのソケットの値） |
+| `bufferedAmount` | 常に `0`（ポリシーで確認した外部へのソケットでは、ブラウザのソケットの値） |
+| `binaryType` | `'blob'`（デフォルト）か `'arraybuffer'`。バイナリのメッセージは `Blob` か `ArrayBuffer` で届く |
+| `send(data)` | 文字列はテキストフレーム、`ArrayBuffer`・ビュー・`Blob` はバイナリとして送る（`Blob` は読み込みが終わってから送る）。開いていなければ `InvalidStateError`（`WebSocket is not open`）を投げる |
+| `close(code = 1000, reason = '')` | close を送り、サーバーの応答を待たずにすぐ `close` を通知する |
+| イベント | `open`・`message`（`origin` は URL のオリジン）・`error`・`close`。`on…` プロパティと `addEventListener` のどちらでも使える |
+| `error` | 一度も開かずに閉じたとき、またはコードが `1006` のとき、`close` の前に発生する |
+| `close` イベント | `code`・`reason`・`wasClean`（`1000` のときだけ `true`） |
 | 静的な定数 | `CONNECTING`・`OPEN`・`CLOSING`・`CLOSED` |
 
-制御する Service Worker が無ければ、ソケットはコード `1006`、理由 `no service worker` で閉じます。カーネルがつなげない
-（待ち受けが無い）ときは、`1006` とエラーのメッセージを理由にして閉じます。サーバーとの接続が close のフレーム無しに
-終わったときも `1006` です。サーバーが upgrade に `101` ではなくふつうの HTTP の応答を返すと、ソケットは失敗します。
-`error` のあと、`1006`・理由 `Unexpected server response: <状態コード>` で `close` します。
+制御する Service Worker がなければ、ソケットはコード `1006`、理由 `no service worker` で閉じます。カーネルが接続できない
+（待ち受けがない）場合は、`1006` とエラーメッセージを理由として閉じます。サーバーとの接続が close フレームなしで終わった
+場合もコードは `1006` です。サーバーが upgrade に `101` ではなく通常の HTTP レスポンスを返した場合、ソケットは失敗し、
+`error` の後に `1006`、理由 `Unexpected server response: <ステータスコード>` で `close` が発生します。
 
-`window.WebSocket.prototype` はブラウザのままで、`instanceof WebSocket` はトンネルしたソケットでもブラウザ自身のものでも
-true です。
+`window.WebSocket.prototype` はブラウザのものをそのまま使うので、`instanceof WebSocket` はトンネルしたソケットでも
+ブラウザ自身のソケットでも true になります。
 
 ## 差し込むスクリプト
 
-Service Worker は、HTML への移動のすべての応答に次を差し込みます。
+Service Worker は、HTML へのナビゲーションのすべてのレスポンスに `<script src="<scope>__ov/inject.js"></script>` を
+挿入します。パスの下で配信する場合は、その前に import map も挿入します。挿入する位置は最初の `<head …>` タグの直後で、
+なければ `<!doctype …>` の直後、それもなければ先頭です。
 
-- `<script src="<scope>__ov/inject.js"></script>`。パスの下で配信するときは、その前に import map
-- 場所は最初の `<head …>` のすぐあと。無ければ `<!doctype …>` のすぐあと。それも無ければ先頭
+`inject.js` は、ページごとに 1 回だけ実行されるようにしてあります。常に行うのは、`window.WebSocket` を、ローカルの URL を
+トンネルし、それ以外の URL をネットワークポリシーで確認するコンストラクタに置き換えることです（前述）。パスの下で
+配信する場合に限り、`window.fetch` と `XMLHttpRequest.prototype.open` もラップし、`/` 1 つで始まり、まだスコープの下に
+ない文字列の URL の前にスコープを付けます。
 
-`inject.js`（ページごとに 1 回だけ動くよう守っています）がすること:
+それ以外のことはしません。エラーのオーバーレイを表示したり、ホストにメッセージを送ったり、ランタイムにアクセスしたりする
+ことはありません。
 
-| すること | いつ |
-|---|---|
-| `window.WebSocket` を、ローカルの URL をトンネルし、ほかの URL を通信の方針で確かめるコンストラクタに置き換える（上） | いつも |
-| `window.fetch` と `XMLHttpRequest.prototype.open` を包み、`/` 1 つで始まり、まだスコープの下にない文字列の URL の前にスコープを付ける | パスの下で配信するときだけ |
+## 外部へのリクエストとネットワークポリシー
 
-それ以外のことはしません。エラーの表示も、ホストへのメッセージも、ランタイムへの手出しもありません。
+プレビューのページから別のオリジンへのリクエスト（`http:` と `https:` のみ。その他のスキームはブラウザに任せる）は、
+Service Worker が送信する前に、ホストのネットワークポリシー（[ネットワークポリシー](network-policy.ja.md)）で判定します。
+ループバックの URL は外部へのリクエストとしては扱わず、仮想ポートへ送ります（[要求がどのポートへ行くか](#要求がどのポートへ行くか)）。
 
-## 外への要求と通信の方針
-
-プレビューのページからほかのオリジンへの要求（`http:` と `https:` だけ。ほかのスキームはブラウザに任せる）は、
-Service Worker が送る前に、ホストの通信の方針（[通信の方針](network-policy.ja.md)）と照らし合わせます。ループバックの
-URL は外への要求ではなく、仮想ポートへ行きます（[要求がどのポートへ行くか](#要求がどのポートへ行くか)）。
-
-1. そのオリジンを長く続く答え（方針、または「このセッション中は許可」）で許したことがあれば、すぐに送る。この控えは、
-   ホストが `network.setPolicy()` か `network.clearSession()` を呼んだとき（カーネルが `net-flush` を送る）と、Service Worker
-   がカーネルへの新しい通り道を受け取ったときに捨てる。拒否と「今回だけ許可」は覚えない。「今回だけ」はその 1 回の要求だけを
-   許す。
-2. そうでなければ、Service Worker がカーネルに尋ねる（`net`）。カーネルは方針で決め、`ask` のモードなら
-   `initiator: 'preview'`・`source: 'preview'` の `permission-request` を出す（組み込みのダイアログは「プレビューのページ
-   が次のサイトへ接続しようとしています。」と表示する）。同じホスト名への問い合わせはまとめる。答えの無い問い合わせは
-   5 分で拒否になる。
-3. 許されたら、Service Worker が元の要求を `fetch` する。`no-cors` の要求（`<img>`・ふつうの `<script>`・CSS の `url()`
-   など）は、リダイレクトのあとの最後の URL が見えるように、資格情報なしの `cors` の要求として出す。CORS を許さない
-   サーバーからのこうした読み込みは失敗する（`403`、ステータスの文
+1. そのオリジンが以前に継続的な応答（ポリシー、または「このセッション中は許可」）で許可されていれば、すぐに送信します。
+   このキャッシュは、ホストが `network.setPolicy()` か `network.clearSession()` を呼んだとき（カーネルが `net-flush` を
+   送ります）と、Service Worker がカーネルとの新しいチャネルを受け取ったときに空になります。拒否と「今回だけ許可」は
+   キャッシュしません。「今回だけ」はその 1 回のリクエストだけを許可するものだからです。
+2. それ以外の場合は、Service Worker がカーネルに問い合わせます（`net`）。カーネルはポリシーに従って判定し、`ask` モードで
+   あれば `initiator: 'preview'`・`source: 'preview'` の `permission-request` を発行します（組み込みのダイアログには
+   「プレビューのページが次のサイトへ接続しようとしています。」と表示されます）。同じホスト名への確認はまとめ、5 分以内に
+   応答がなければ拒否になります。
+3. 許可された場合は、Service Worker が元のリクエストを `fetch` します。`no-cors` のリクエスト（`<img>`、classic な
+   `<script>`、CSS の `url()` など）は、リダイレクト後の最終 URL が分かるように、資格情報なしの `cors` リクエストとして
+   送ります。CORS を許可していないサーバーからのこうした読み込みは失敗します（`403`、ステータステキスト
    `Blocked by OpenVessel: the server does not allow CORS, so its redirects cannot be checked`）。
-4. 応答がリダイレクトを経ていれば、最後の URL も同じように確かめる。断られたら応答を捨てる。
-5. 拒まれたら、ステータスの文 `Blocked by OpenVessel network policy`（時間切れなら後ろに ` (not answered in time)`）と
-   空の本文の `403`。
+4. レスポンスがリダイレクトを経ていれば、最終 URL も同じように判定します。拒否された場合はレスポンスを捨てます。
+5. 拒否された場合は、ステータステキスト `Blocked by OpenVessel network policy`（タイムアウトの場合は末尾に
+   ` (not answered in time)`）と空のボディを持つ `403` を返します。
 
-Service Worker がカーネルへの通り道を得られないとき（15 秒のうちに無いとき）は、要求を断ります。次の要求で、また中継に
-通り道を頼みます。
+Service Worker がカーネルとのチャネルを得られない場合（15 秒以内に得られない場合）は、リクエストを拒否します。次の
+リクエストで、改めて中継にチャネルを要求します。
 
-外のホストへの WebSocket も、つなぐ前に同じように確かめます。ページの `WebSocket` が `{ t: 'ws-check', url, port }` を
-Service Worker に送り、Service Worker はそのポートに `{ allow }` で答えます。断られたソケットは `error` と `close`
-（`1006`・`blocked by OpenVessel network policy`）で失敗します。
+外部ホストへの WebSocket も、接続の前に同じように判定します。ページの `WebSocket` が `{ t: 'ws-check', url, port }` を
+Service Worker に送り、Service Worker はそのポートに `{ allow }` で応答します。拒否されたソケットは `error` と `close`
+（`1006`、`blocked by OpenVessel network policy`）で失敗します。
 
-気をつける点:
+次の点に注意してください。
 
-- 最後の URL より前のリダイレクトの飛び先には、ブラウザが要求を送ります。断られたときに渡さないのは、最後のホストから
-  来たものだけです。
-- 確かめるのは Service Worker と差し替えた `WebSocket` です。ほかの方法でブラウザ自身の `WebSocket` を手に入れたコード
-  （たとえばページが起こした Worker）は確かめません。
+- 最終 URL より前のリダイレクト先には、ブラウザがリクエストを送ります。最終ホストが拒否された場合に渡さないのは、
+  そのホストから返ったデータだけです。
+- 判定を行うのは Service Worker と置き換えた `WebSocket` です。別の方法でブラウザ自身の `WebSocket` を取得したコード
+  （たとえばページが起動した Worker）は判定の対象になりません。
 
 ## クッキーとストレージ
 
-- ひとつの配置のプレビューは、ポートによらずプレビューのオリジンを共有します。あるサイトが書いたクッキー・
-  `localStorage`・IndexedDB・キャッシュは、ほかのプレビューからも見え、ふつうのサイトと同じようにブラウザに残ります。
-  利用者を分けるには、セッションごとのプレビューのオリジンを使ってください（[配信](deployment.ja.md#セッションごとのプレビューのオリジン)）。
-- 要求の `Cookie` のヘッダーはサーバーへ渡らず、サーバーの `Set-Cookie` もブラウザに届きません。`document.cookie` は
-  プレビューのオリジンで使えますが、そのクッキーはサーバーには見えません。
+- 同じデプロイのプレビューは、ポートにかかわらずプレビューのオリジンを共有します。あるサイトが保存したクッキー、
+  `localStorage`、IndexedDB、キャッシュは他のプレビューからも見え、通常のサイトと同じようにブラウザに残ります。
+  利用者ごとに分けるには、セッションごとのプレビューのオリジンを使ってください（[デプロイ](deployment.ja.md#セッションごとのプレビューのオリジン)）。
+- リクエストの `Cookie` ヘッダーはサーバーに渡さず、サーバーからの `Set-Cookie` もブラウザに届きません。
+  `document.cookie` はプレビューのオリジンで使えますが、そのクッキーはサーバーからは見えません。
 
 ## プレビューがランタイムに頼めること・頼めないこと
 
-カーネルのプレビュー用の通り道が受け付けるメッセージは、`req`・`body`・`body-end`・`abort`・`ws-open`・`ws-msg`・
-`ws-close`・`net` だけです（[通信の形式](protocol.ja.md#プレビューの通り道)）。これでプレビューにできるのは、仮想ポートへの
-HTTP の要求と WebSocket の接続、それに外の URL が許されるかを尋ねること（ホストに許可の確認が出ることがある）です。
-ファイルの読み書き、プロセスの起動やシグナル、通信の方針の変更、許可の確認への回答はできません。これらのメソッドは
-ホストの通り道にしかありません。中継の iframe もプレビューのオリジンで動くので、それを乗っ取っても同じ通り道しか
-得られません。
+カーネルのプレビュー用チャネルが受け付けるメッセージは、`req`・`body`・`body-end`・`abort`・`ws-open`・`ws-msg`・
+`ws-close`・`net` だけです（[通信プロトコル](protocol.ja.md#プレビューのチャネル)）。プレビューがこのチャネルでできるのは、
+仮想ポートへの HTTP リクエストと WebSocket 接続、そして外部の URL が許可されているかの確認（ホストに許可の確認ダイアログが
+出ることがあります）です。ファイルの読み書き、プロセスの起動やシグナルの送信、ネットワークポリシーの変更、許可リクエスト
+への応答はできません。これらのメソッドはホストのチャネルにしかないためです。中継用の iframe もプレビューのオリジンで
+動いているので、それを乗っ取っても同じチャネルしか得られません。
 
-プレビューの Service Worker が `kernel-port` と `default-port` を受け付けるのは、中継からだけです。つまり、URL のパスが
-ちょうど `<スコープ>__ov/relay.html` の、iframe の中のウィンドウです。`ws-connect` と `ws-check` は、制御しているどの
+プレビューの Service Worker が `kernel-port` と `default-port` を受け付けるのは中継からだけです。つまり、URL のパスが
+`<スコープ>__ov/relay.html` に完全に一致するフレーム内のウィンドウです。`ws-connect` と `ws-check` は、制御しているどの
 ページからでも受け付けます。
 
 ## 関係するソースファイル
 
-| ファイル | 中身 |
+| ファイル | 内容 |
 |---|---|
-| `src/preview/relay.ts`・`src/preview/relay.html` | 中継のフレーム |
+| `src/preview/relay.ts`・`src/preview/relay.html` | 中継用のフレーム |
 | `src/preview/sw.ts` | プレビューの Service Worker |
-| `src/preview/inject.ts` | 差し込むスクリプト |
+| `src/preview/inject.ts` | 挿入するスクリプト |
 | `src/kernel/index.ts` | `attachPreview`・`checkNetwork` |
-| `src/kernel/net.ts` | `NetRouter`: ポート → プロセス、旧ランタイムのメッセージの橋渡し |
+| `src/kernel/net.ts` | `NetRouter`: ポート → プロセス、旧ランタイムのメッセージの中継 |
 | `src/kernel/tcp.ts` | `TcpBridge`: HTTP のメッセージ ⇄ HTTP/1.1 のバイト列、WebSocket のフレーム |
 | `src/host/index.ts` | `previewUrl`・`createPreview`・中継の準備 |
-| `test/e2e/preview-port.mjs` | エンドツーエンドのテスト: 移植版ランタイムのサーバーにプレビューから届く |
+| `test/e2e/preview-port.mjs` | E2E テスト: 移植版ランタイムのサーバーにプレビューからアクセスする |

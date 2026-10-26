@@ -2,10 +2,10 @@
 
 [日本語](protocol.ja.md)
 
-The wire protocols between OpenVessel's pieces: the host ↔ runtime handshake and RPC, kernel events, the
-preview relay and preview channel, the runtime service worker's `/__ov/…` endpoints, the messages between
-the kernel and process workers, and the synchronous syscall channel. This page is for debugging and for
-people writing their own host instead of using `dist/host`.
+This page describes the message formats used between the parts of OpenVessel: the host ↔ runtime
+handshake and RPC, kernel events, the preview relay and preview channel, the runtime service worker's
+`/__ov/…` endpoints, the messages between the kernel and process workers, and the synchronous syscall
+channel. It is meant for debugging and for writing your own host instead of using `dist/host`.
 
 > **Stability.** Only the host API (`dist/host` and its declarations) and the three-origin embedding
 > requirements are covered by semver ([CHANGELOG](../../CHANGELOG.md), "Stability"). Everything on this
@@ -97,7 +97,7 @@ with that `kid` ([Runtime service worker](#runtime-service-worker)).
 | Message | Shape |
 |---|---|
 | Call (host → kernel) | `{ id: number, m: string, a: object }` |
-| Result (kernel → host) | `{ id, r: any }` — a `Uint8Array` result is transferred (its `buffer`) |
+| Result (kernel → host) | `{ id, r: any }`; a `Uint8Array` result is transferred (its `buffer`) |
 | Error (kernel → host) | `{ id, e: { message: string, code?: string } }` |
 | Unknown method | `{ id, e: { message: 'unknown method <m>', code: 'ENOSYS' } }` (only the kernel's own method names count: `toString` and other inherited names are unknown) |
 | Event (kernel → host) | `{ ev: string, … }` (no `id`) |
@@ -159,7 +159,7 @@ await call('ping'); // 'pong'
 | `watch` | `path`, `id` (chosen by the caller) | `null`; afterwards `fs-change` events with that `id` for `path` and everything below it |
 | `unwatch` | `id` | `null` |
 | `debug.trace` | `on` | the new value (turns kernel trace logging to the console on/off) |
-| `debug.esm` | `pathname`, `search?` | `{ status, body, type }` — what the runtime service worker would serve for that `/__ov/…` path |
+| `debug.esm` | `pathname`, `search?` | `{ status, body, type }`: what the runtime service worker would serve for that `/__ov/…` path |
 
 The default environment is `PATH=/usr/local/bin:/usr/bin:/bin`, `HOME=/home/user`, `USER=user`,
 `LOGNAME=user`, `SHELL=/bin/sh`, `TERM=xterm-256color`, `LANG=en_US.UTF-8`, `TMPDIR=/tmp`,
@@ -264,8 +264,8 @@ the host channel.
 `dist/runtime/sw.js` handles same-origin requests under its scope. Paths below are relative to the
 runtime directory (the scope is stripped before matching), or to a kernel's prefix `/__ov/k/<kid>/` under
 it: a request under a prefix goes to the kernel `<kid>`. A request to `/__ov/…` without a prefix (the
-legacy runtime's root URLs) goes to the kernel named by its referrer — a file under a kernel's prefix or
-a module that kernel served — else to the kernel that connected last.
+legacy runtime's root URLs) goes to the kernel named by its referrer (a file under a kernel's prefix or
+a module that kernel served), else to the kernel that connected last.
 
 ### Endpoints
 
@@ -434,10 +434,11 @@ the kernel and blocks in `Atomics.wait` until the kernel has written the answer 
 
 ### Layout
 
-| Bytes | Content |
-|---|---|
-| 0–63 | header: 16 `Int32` slots (`HEADER_BYTES = 64`), 5 used |
-| 64 – end | data region: 4 MiB − 64 bytes = 4194240 bytes per round (`DEFAULT_CHANNEL_BYTES = 4 * 1024 * 1024`) |
+- Bytes 0–63 are the header: 16 `Int32` slots (`HEADER_BYTES = 64`), 5 of them used.
+- Bytes 64 to the end are the data region: 4 MiB − 64 bytes = 4194240 bytes per round
+  (`DEFAULT_CHANNEL_BYTES = 4 * 1024 * 1024`).
+
+The header slots:
 
 | Slot | Name | Values |
 |---|---|---|
@@ -465,10 +466,10 @@ Atomics.store([0], 0)
 
 ### Messages larger than the data region
 
-- **Request:** the worker sends the message in rounds of at most 4194240 bytes with flag `1` on all but
+- Request: the worker sends the message in rounds of at most 4194240 bytes with flag `1` on all but
   the last. The kernel collects the chunks (`[1]` and `[2]` give the total size), acknowledges each
   intermediate chunk with state `2` and `[3] = 0`, and handles the request after the last.
-- **Response:** the kernel writes the first chunk with flag `1`. The worker copies it, sends an empty
+- Response: the kernel writes the first chunk with flag `1`. The worker copies it, sends an empty
   "continue" round (`[1..4] = 0`, state `1`, another `sys` message), and the kernel writes the next chunk,
   until a chunk without the flag.
 

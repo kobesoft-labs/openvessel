@@ -2,10 +2,10 @@
 
 [日本語](host-api.ja.md)
 
-The complete reference of the API an embedding page uses: `OpenVessel.boot()` and its options, files,
-processes, the network policy, events, permission requests and the built-in dialog, previews,
-teardown and errors. The source is `src/host/index.ts`; the declarations are
-`dist/types/host/index.d.ts`. For a walkthrough, see [Getting started](getting-started.md).
+This is the reference for the API an embedding page uses. It covers `OpenVessel.boot()` and its
+options, files, processes, the network policy, events, permission requests and the built-in dialog,
+previews, teardown and errors. The source is `src/host/index.ts` and the declarations are in
+`dist/types/host/index.d.ts`. For a step-by-step introduction, see [Getting started](getting-started.md).
 
 ## Exports
 
@@ -26,7 +26,7 @@ import type { BootOptions, SpawnOptions, PermissionRequest, PermissionDecision, 
 | `PermissionRequest` | type | What a permission handler receives. |
 | `PermissionDecision` | type | `'once' \| 'session' \| 'deny' \| 'deny-session'`. |
 | `NetworkPolicy` | type | `{ mode, presets, allow, deny }` ([Network policy](network-policy.md#the-policy-object)). |
-| `RuntimeErrorEvent` | type | Payload of the `error` event ([Events](#events--on)). **New in 1.2.0.** |
+| `RuntimeErrorEvent` | type | Payload of the `error` event ([Events](#events--on)). New in 1.2.0. |
 
 Members marked `@internal` in the source (`_call`, `Process._data`, `Process._exit`) are not part of
 the API.
@@ -73,8 +73,8 @@ listener it added are removed. Errors the runtime frame reports after `boot()` r
 
 ### One instance per runtime origin
 
-The runtime's service worker holds a single connection to a kernel — the one from the runtime frame
-that connected last. A second instance on the same runtime origin in the same browser profile (another
+The runtime's service worker holds a single connection to a kernel, from the runtime frame that
+connected last. A second instance on the same runtime origin in the same browser profile (another
 `boot()` in the page, or the same page in another tab) takes it over: ES module loading in the earlier
 instance's `node` processes then fails (`Error: module … is not registered`), and its network checks
 are decided by the newer kernel. Use one instance per runtime origin at a time.
@@ -94,7 +94,7 @@ the plain errno text (for example `no such file or directory`, not Node's
 | `readFile(path)` | `Uint8Array` | A copy of the file's bytes. |
 | `readFile(path, 'utf8')` | `string` | The bytes decoded as UTF-8 (invalid sequences become U+FFFD). Any truthy encoding argument decodes as UTF-8. |
 | `writeFile(path, data)` | `null` | Creates missing parent directories, then creates or replaces the file. |
-| `mkdir(path, { recursive })` | `string \| null` | `recursive` defaults to **true**. |
+| `mkdir(path, { recursive })` | `string \| null` | `recursive` defaults to `true`. |
 | `readdir(path)` | `string[]` | Entry names. |
 | `readdir(path, { withFileTypes: true })` | `{ name, type }[]` | `type` is `'dir'`, `'symlink'` or `'file'`. |
 | `rm(path, { recursive, force })` | `null` | `rm -rf` when `recursive`; else `rmdir` or `unlink`. |
@@ -137,19 +137,19 @@ the plain errno text (for example `no such file or directory`, not Node's
 
 - Names in creation order (not sorted), without `.` and `..`.
 - `withFileTypes: true`: `{ name: string, type: 'dir' | 'symlink' | 'file' }[]`. Symlinks are reported
-  as `'symlink'` (not followed); everything that is neither a directory nor a symlink — regular files,
-  character devices, FIFOs, sockets — is `'file'`.
+  as `'symlink'` (not followed). Everything that is neither a directory nor a symlink (regular files,
+  character devices, FIFOs, sockets) is `'file'`.
 - `path` itself is followed if it is a symlink. Errors: `ENOENT`, `ENOTDIR`.
 
 ### `fs.rm(path, { recursive, force })`
 
-| Options | Behaviour |
-|---|---|
-| `recursive: true` | Removes `path` and everything below it. Symlinks are removed, not followed. A missing `path` resolves when `force` is true or omitted, and rejects with `ENOENT` when `force: false`. |
-| `recursive` omitted or false | A directory is removed only if empty (`ENOTEMPTY` otherwise); anything else is unlinked. A missing `path` always rejects with `ENOENT` — `force` is ignored. |
+- `recursive: true`: removes `path` and everything below it. Symlinks are removed, not followed. A
+  missing `path` resolves when `force` is true or omitted, and rejects with `ENOENT` when `force: false`.
+- `recursive` omitted or false: a directory is removed only if it is empty (`ENOTEMPTY` otherwise), and
+  anything else is unlinked. A missing `path` always rejects with `ENOENT`; `force` is ignored.
 
-`/` itself can't be removed: `rm('/')` rejects with `EEXIST` — with `recursive: true`, only after
-everything under it has been removed.
+`/` itself can't be removed. `rm('/')` rejects with `EEXIST`; with `recursive: true` it does so only
+after everything under it has been removed.
 
 ### `fs.stat(path)`
 
@@ -223,7 +223,7 @@ Writes many entries at once and resolves with how many were processed.
   `<path>/<key>` with repeated slashes collapsed, so a leading `/` in a key does not make it absolute.
   `..` components are resolved, not rejected.
 - Files are written like `fs.writeFile()`: parents created, new files mode `0644`, existing files keep
-  their mode. A file whose name ends in `.sh` or `.bash`, or whose **string** value starts with `#!`,
+  their mode. A file whose name ends in `.sh` or `.bash`, or whose string value starts with `#!`,
   additionally gets the execute bits (`0755` for a new file).
 - Entries are processed in the object's key order. It is not atomic: an invalid value (for example a
   number) rejects with `data must be a string or Uint8Array` after the entries before it were written.
@@ -239,7 +239,7 @@ the file contents.
 
 - Only regular files are included. Symlinks, devices, FIFOs, sockets and empty directories are left out;
   symlinked directories below `path` are not followed (`path` itself is).
-- `exclude` lists entry **names** skipped at any depth (exact match, not globs or paths). The default is
+- `exclude` lists entry names skipped at any depth (exact match, not globs or paths). The default is
   `['node_modules', '.git']`; passing `exclude` replaces the default (`exclude: []` includes everything).
 - Errors: `ENOENT`, `ENOTDIR` for `path`.
 
@@ -280,7 +280,7 @@ The default environment:
 Each spawned process starts its own process group, so `kill()` also reaches the children that stay in
 that group. With `terminal`, the process is the terminal's foreground group.
 
-Errors: `ENOENT` (`<cmd>: command not found`), `EACCES` (`<cmd>: Permission denied` — the file isn't
+Errors: `ENOENT` (`<cmd>: command not found`), `EACCES` (`<cmd>: Permission denied`, the file isn't
 executable), `ELOOP` (more than 8 nested shebangs), and `ENOTDIR` if `cwd` can't be created.
 
 Output that arrives before `spawn()` resolves is kept and delivered to the `Process`, as is an exit that
@@ -292,10 +292,10 @@ happens that early.
 |---|---|---|
 | `pid` | `number` | Process id. |
 | `output` | `ReadableStream<string>` | Everything the process writes, decoded as UTF-8 (streaming, so multi-byte characters split across chunks are kept whole; an incomplete sequence left at the end becomes U+FFFD). stdout and stderr are merged in arrival order. Closes when the process ends. Chunks queue until read; if you never read the stream, they stay in memory. |
-| `exit` | `Promise<number>` | The exit code ([Exit codes](#exit-codes-and-signals)). Without a terminal it resolves when the process has exited **and** both output pipes have reached end of file (a background child still holding the pipe delays it); with a terminal, when the process has exited. If the kernel is gone first (`teardown()`, a fatal [`error`](#the-error-event)), it resolves with `137`. |
+| `exit` | `Promise<number>` | The exit code ([Exit codes](#exit-codes-and-signals)). Without a terminal it resolves when the process has exited and both output pipes have reached end of file (a background child still holding the pipe delays it); with a terminal, when the process has exited. If the kernel is gone first (`teardown()`, a fatal [`error`](#the-error-event)), it resolves with `137`. |
 | `collected` | `string` (getter) | All output so far. When it grows past 2 000 000 characters it is cut to the last 1 000 000. |
-| `write(data)` | `Promise<boolean>` | `string` (UTF-8) or `Uint8Array` to stdin — through the line discipline for a terminal. Resolves `false` when the process is gone, else `true` (also after `end()`, when the data is dropped). |
-| `end()` | `Promise<boolean>` | Ends the input. A pipe process: closes stdin (the reader sees end of file); later writes are dropped. A terminal process: sends the EOF character `^D` through the line discipline, as pressing Ctrl-D does — at the start of a line the reader sees end of file; after a partial line that line is delivered first, and a second `end()` gives end of file; in raw mode the program reads the byte `0x04`. The terminal stays usable. Resolves `false` when the process is gone. (Before 1.2.0 it rejected on terminal processes.) |
+| `write(data)` | `Promise<boolean>` | `string` (UTF-8) or `Uint8Array` to stdin, through the line discipline for a terminal. Resolves `false` when the process is gone, else `true` (also after `end()`, when the data is dropped). |
+| `end()` | `Promise<boolean>` | Ends the input. A pipe process: closes stdin (the reader sees end of file); later writes are dropped. A terminal process: sends the EOF character `^D` through the line discipline, as pressing Ctrl-D does. At the start of a line the reader sees end of file; after a partial line that line is delivered first, and a second `end()` gives end of file; in raw mode the program reads the byte `0x04`. The terminal stays usable. Resolves `false` when the process is gone. (Before 1.2.0 it rejected on terminal processes.) |
 | `resize(cols, rows)` | `Promise<null>` | Resizes the terminal and sends `SIGWINCH` to the processes on it. Does nothing for pipe processes. |
 | `kill(signal = 'SIGTERM')` | `Promise<null>` | Sends `signal` to the process's whole process group. Always resolves `null`, also when the process is gone. |
 
@@ -306,8 +306,8 @@ exec(commandLine: string, opts?: SpawnOptions): Promise<{ code: number; output: 
 ```
 
 `spawn('/bin/sh', ['-c', commandLine], opts)`, then waits for `exit` and resolves with the code and
-`collected` (stdout and stderr together, bounded as above). It never rejects because the command
-failed — check `code`. With `opts.terminal` the output contains the terminal's `\r\n`.
+`collected` (stdout and stderr together, bounded as above). It doesn't reject when the command
+fails, so check `code`. With `opts.terminal` the output contains the terminal's `\r\n`.
 
 ### Exit codes and signals
 
@@ -346,7 +346,7 @@ internal and are not reported).
 
 | Method | Resolves with | Description |
 |---|---|---|
-| `setPolicy(policy: Partial<NetworkPolicy>)` | `NetworkPolicy` | Replaces the whole policy. Missing fields take the **defaults**, not the current values (`setPolicy({ mode: 'allowlist' })` also resets `presets` to the four defaults and empties `allow`/`deny`). Unknown preset names are dropped. Resolves with the normalised policy. |
+| `setPolicy(policy: Partial<NetworkPolicy>)` | `NetworkPolicy` | Replaces the whole policy. Missing fields take the defaults, not the current values (`setPolicy({ mode: 'allowlist' })` also resets `presets` to the four defaults and empties `allow`/`deny`). Unknown preset names are dropped. Resolves with the normalised policy. |
 | `getPolicy()` | `NetworkPolicy` | The current policy. |
 | `clearSession()` | `null` | Forgets the "for this session" decisions (both allow and deny). |
 
@@ -370,19 +370,24 @@ added; an exception in one is logged with `console.error` and doesn't stop the o
 | `port-closed` | `{ port: number }` | The listener is gone (server closed, or its process exited). |
 | `process-exit` | `{ pid: number, code: number, signal: string \| null }` | A process started by `spawn()`/`exec()` ended. Not emitted for processes those start themselves. |
 | `permission-request` | `{ ev: 'permission-request', id: number, url: string, host: string, initiator: string, source: 'runtime' \| 'preview' }` | The kernel asks about a host. Listeners are informational; the answer comes from `onPermissionRequest` or the dialog. |
-| `permission-settled` | `{ ev: 'permission-settled', id: number, host: string, allowed: boolean, decision: 'once' \| 'session' \| 'deny' \| 'deny-session' \| 'timeout' }` | A request was decided. `decision` is the answer, or `'timeout'` when nobody answered within 5 minutes (then `allowed` is `false`). An answer that isn't one of the four decisions arrives as `'deny'`. `decision` is **new in 1.2.0**. |
-| `error` | `RuntimeErrorEvent`: `{ error: Error, message: string, fatal: boolean }` | **New in 1.2.0.** Something failed outside a call ([below](#the-error-event)). Without any `error` listener, the error is logged with `console.error`. |
+| `permission-settled` | `{ ev: 'permission-settled', id: number, host: string, allowed: boolean, decision: 'once' \| 'session' \| 'deny' \| 'deny-session' \| 'timeout' }` | A request was decided. `decision` is the answer, or `'timeout'` when nobody answered within 5 minutes (then `allowed` is `false`). An answer that isn't one of the four decisions arrives as `'deny'`. `decision` is new in 1.2.0. |
+| `error` | `RuntimeErrorEvent`: `{ error: Error, message: string, fatal: boolean }` | New in 1.2.0. Something failed outside a call ([below](#the-error-event)). Without any `error` listener, the error is logged with `console.error`. |
 
 ### The `error` event
 
-| Cause | `message` | `fatal` |
-|---|---|---|
-| The runtime frame reports an error after `boot()` (an uncaught error in the kernel worker) | `OpenVessel: kernel failed: <message>` | `false`. A worker keeps running after an uncaught error, so the host then checks that the kernel still answers: without an answer within 10 s, the same error is emitted again with `fatal: true`. |
-| The runtime frame loads again (it was reloaded, or moved in the document, which reloads an iframe) | `OpenVessel: the runtime frame was reloaded; the kernel is gone` | `true` |
-| The preview relay could not start for a `server-ready` event | `OpenVessel: preview relay did not start` | `false` |
+The event is emitted in three cases:
+
+- The runtime frame reports an error after `boot()` (an uncaught error in the kernel worker):
+  `message` is `OpenVessel: kernel failed: <message>` and `fatal` is `false`. A worker keeps running
+  after an uncaught error, so the host then checks that the kernel still answers. If there is no answer
+  within 10 s, the same error is emitted again with `fatal: true`.
+- The runtime frame loads again (it was reloaded, or moved in the document, which reloads an iframe):
+  `message` is `OpenVessel: the runtime frame was reloaded; the kernel is gone` and `fatal` is `true`.
+- The preview relay could not start for a `server-ready` event: `message` is
+  `OpenVessel: preview relay did not start` and `fatal` is `false`.
 
 When the error is fatal, the instance is shut down as by [`teardown()`](#teardown), except that event
-listeners are kept: calls still waiting and every later call reject with that error, running
+listeners are kept. Calls still waiting and every later call reject with that error, running
 processes end (`exit` resolves with `137`, `process-exit` is emitted with `signal: 'SIGKILL'`), and the
 runtime and relay iframes are removed. Boot a new instance to continue.
 
@@ -512,7 +517,7 @@ none; the original error class, such as `TypeError`, is not kept).
 | `ELOOP` | More than 40 symlinks while resolving a path; more than 8 nested shebangs in `spawn()`. |
 | `ENAMETOOLONG` | Path over 4096 bytes or a component over 255 bytes. |
 | `EACCES` | `spawn()` of a file without execute permission (`<cmd>: Permission denied`). |
-| `ENOSYS` | A method the kernel doesn't know (`unknown method <name>`) — happens when `dist/host` and the deployed `dist/runtime` come from different versions. |
+| `ENOSYS` | A method the kernel doesn't know (`unknown method <name>`). This happens when `dist/host` and the deployed `dist/runtime` come from different versions. |
 | (none) | `data must be a string or Uint8Array` from `writeFile`, `mount` and `write`. |
 
 Errors that are not from the kernel:
@@ -521,11 +526,11 @@ Errors that are not from the kernel:
 |---|---|
 | `OpenVessel: the host page must be cross-origin isolated (COOP: same-origin, COEP: require-corp or credentialless).` | `boot()` |
 | `OpenVessel: runtime did not start in time` | `boot()` after `timeout` |
-| `OpenVessel: OpenVessel needs a cross-origin isolated page (COOP: same-origin and COEP: require-corp/credentialless on the host page, and allow="cross-origin-isolated" on the iframe).` | `boot()` — the runtime frame isn't isolated |
-| `OpenVessel: origin <origin> is not allowed to use this runtime` | `boot()` — `openvessel-allowed-hosts` |
-| `OpenVessel: the runtime must be embedded directly by the host page` | `boot()` — the runtime frame has more than one ancestor |
+| `OpenVessel: OpenVessel needs a cross-origin isolated page (COOP: same-origin and COEP: require-corp/credentialless on the host page, and allow="cross-origin-isolated" on the iframe).` | `boot()`, when the runtime frame isn't isolated |
+| `OpenVessel: origin <origin> is not allowed to use this runtime` | `boot()`, from the `openvessel-allowed-hosts` check |
+| `OpenVessel: the runtime must be embedded directly by the host page` | `boot()`, when the runtime frame has more than one ancestor |
 | `OpenVessel: service worker registration failed: <message>` | `boot()` |
-| `OpenVessel: kernel failed: <message>` | `boot()` — the kernel worker failed to load; after boot, the `error` event, and every call once it is fatal |
+| `OpenVessel: kernel failed: <message>` | `boot()`, when the kernel worker failed to load; after boot, the `error` event, and every call once it is fatal |
 | `OpenVessel: previewUrl was not configured` | `previewUrl()`, `createPreview()` |
 | `OpenVessel: preview relay did not start` | `previewUrl()`, `createPreview()` after 20 s; the `error` event when a `server-ready` started the relay |
 | `OpenVessel: the runtime frame was reloaded; the kernel is gone` | the `error` event (fatal); every call afterwards |

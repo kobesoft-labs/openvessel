@@ -4,8 +4,8 @@
 
 The kernel is the "operating system" of OpenVessel: one Web Worker that owns the file system, the
 process table, pipes, terminals, sockets, virtual ports and the way out to the network. This page
-describes its parts, its threading model, the complete system call table, virtual networking, the
-outbound HTTP bridge, the ES module service, the builtin programs and what exists when it starts.
+covers its parts, the threading model, the complete system call table, virtual networking, the
+outbound HTTP bridge, the ES module service, the builtin programs and the initial file system.
 
 The file system and processes have their own pages: [File system](filesystem.md) and
 [Processes](processes.md). For a gentler overview see [How OpenVessel works](../how-it-works.md).
@@ -63,8 +63,8 @@ The build contains two Node.js runtimes:
 | The ported runtime | `dist/runtime/node-process.js` | `src/nodejs/` (Node's own `lib/` with `internalBinding()` in TypeScript) | by default |
 | The legacy runtime | `dist/runtime/process.js` | `src/node/` (a hand-written Node-compatible layer) | the VFS file `/etc/openvessel/node` contains `legacy` |
 
-The kernel reads `/etc/openvessel/node` (trimmed) every time a node program starts — a new process
-or an `execve` — and records the choice in the process; the process's worker threads always get the
+The kernel reads `/etc/openvessel/node` (trimmed) every time a node program starts (a new process
+or an `execve`) and records the choice in the process; the process's worker threads always get the
 same runtime as its main thread, even when the file changes while it runs. Any other content
 (including `port`, which selected the ported runtime before it became the default), or a missing file,
 selects the ported runtime. The published compatibility numbers ([compatibility](../compatibility.md))
@@ -338,13 +338,13 @@ no descriptor left (`EMFILE`) can't accept: the connection is refused.
 
 The connecting side gets an ephemeral port from Linux's default range 32768–60999: the next one after
 the last given (starting at a random place), skipping ports that are listened on or held by another
-open connection. It is free again once the connecting end is closed. Address details:
+open connection. It is free again once the connecting end is closed. The server sees these
+`remoteAddress` / `remotePort` values:
 
-| Connection from | `remoteAddress` / `remotePort` seen by the server |
-|---|---|
-| a process (`tcpConnect`) | `127.0.0.1` (`::1` when it connected to an IPv6 address) / its ephemeral port, which is its `localPort` |
-| the preview or a legacy-runtime HTTP request | `127.0.0.1` / an ephemeral port |
-| a Unix domain socket | `''` / `0` |
+- From a process (`tcpConnect`): `127.0.0.1` (`::1` when it connected to an IPv6 address) / its
+  ephemeral port, which is its `localPort`.
+- From the preview or a legacy-runtime HTTP request: `127.0.0.1` / an ephemeral port.
+- From a Unix domain socket: `''` / `0`.
 
 ### HTTP from the preview
 
@@ -415,7 +415,7 @@ bytes. Libraries with their own HTTP client (undici, axios, got) therefore work 
 
 | Rule | Behaviour |
 |---|---|
-| First bytes | Must look like a request line (`/^[A-Z]{3,10} /`). Anything else — another protocol, a real TLS handshake — closes the connection without a response |
+| First bytes | Must look like a request line (`/^[A-Z]{3,10} /`). Anything else, such as another protocol or a real TLS handshake, closes the connection without a response |
 | Request line | `METHOD target HTTP/1.0` or `HTTP/1.1`; otherwise `400 Bad Request` and the connection closes |
 | Head size | At most 1 MiB up to the blank line; beyond that the connection closes |
 | Body | `Transfer-Encoding: chunked` (extensions and trailers ignored) or `Content-Length`; otherwise empty |
@@ -433,18 +433,15 @@ bytes. Libraries with their own HTTP client (undici, axios, got) therefore work 
   characters).
 - The response is written as `HTTP/1.1 <status> <statusText>` (status text `OK` when empty).
   `content-encoding`, `content-length`, `transfer-encoding`, `connection` and `keep-alive` are
-  removed — `fetch` has already decoded the body — and the body is re-framed with
+  removed because `fetch` has already decoded the body, and the body is re-framed with
   `Transfer-Encoding: chunked`. `204`, `304`, `1xx` and `HEAD` responses have no body.
 - Redirects are followed by the browser.
 
 ### Errors
 
-Errors are HTTP responses, not errno values: the connection itself was "established".
-
-| Situation | Response |
-|---|---|
-| The network policy denied the host | `403 Forbidden` |
-| `fetch` failed (network error, CORS) or the proxy failed | `502 Bad Gateway` |
+Errors are HTTP responses, not errno values, because the connection itself was "established". When the
+network policy denied the host, the response is `403 Forbidden`. When `fetch` failed (network error,
+CORS) or the proxy failed, it is `502 Bad Gateway`.
 
 Both carry `Content-Type: text/plain`, `Content-Length`, `Connection: close` and
 `X-OpenVessel-Error: 1`, the body is the message (for example

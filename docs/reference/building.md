@@ -2,16 +2,16 @@
 
 [日本語](building.ja.md)
 
-This page covers how OpenVessel is built from source and kept up to date: prerequisites, the npm scripts,
-every build script and what it reads and writes, how to follow a new Node.js release, and how releases
-are cut. Running the tests is in [Testing](testing.md).
+How to build OpenVessel from source and keep it up to date: prerequisites, npm scripts, the build
+scripts and the files they read and write, following a new Node.js release, and making a release. For
+running the tests, see [Testing](testing.md).
 
 ## Prerequisites
 
 | Tool | Needed for |
 |---|---|
 | Node.js and npm | everything. The unit-test bundle targets `node22`; `npx -y node@<pinned version>` is fetched by the fixture and baseline scripts, so they need network access to the npm registry |
-| Docker (able to run `linux/amd64` images) | `scripts/gen-node-data.mjs`, `scripts/gen-builtins.mjs` and `scripts/node-upgrade-check.mjs` — once per Node version, to create `vendor/node/`, `src/node/data/` and `src/shared/builtin-exports.json` |
+| Docker (able to run `linux/amd64` images) | `scripts/gen-node-data.mjs`, `scripts/gen-builtins.mjs` and `scripts/node-upgrade-check.mjs`, once per Node version, to create `vendor/node/`, `src/node/data/` and `src/shared/builtin-exports.json` |
 | `curl` | `gen-node-data.mjs` (downloads Node's `LICENSE`), the zlib WebAssembly build |
 | Rust (`cargo`) with `rustup target add wasm32-wasip1` | rebuilding the Pagefind compat package when `vendor/compat/pagefind/` is missing |
 | LLVM `clang` with the wasm32 target and `wasm-ld` | only to rebuild the brotli/zstd WebAssembly (`src/nodejs/bindings/zlib/wasm/build.mjs`) |
@@ -46,7 +46,7 @@ Bundles everything with esbuild. Flags:
 | Flag | Effect |
 |---|---|
 | (none) | deletes `dist/`, copies the static files, runs all esbuild builds once, then generates `nodelib.js`, copies amaro and builds the compat packages |
-| `--watch` | does **not** delete `dist/`; copies the static files and starts an esbuild watch context per entry. `nodelib.js`, `amaro.js` and the compat packages are not (re)generated in this mode, so a previous full build must have produced them |
+| `--watch` | does not delete `dist/`; copies the static files and starts an esbuild watch context per entry. `nodelib.js`, `amaro.js` and the compat packages are not (re)generated in this mode, so a previous full build must have produced them |
 | `--minify` | minifies every bundle |
 
 Common esbuild options: `bundle`, `sourcemap: 'linked'`, `target: 'es2022'`, `platform: 'browser'`,
@@ -72,13 +72,15 @@ Static files copied: `src/runtime/runtime.html` → `dist/runtime/runtime.html`,
 `src/preview/relay.html` → `dist/preview/__ov/relay.html`, `playground/index.html` and `playground/app.css`
 → `dist/playground/`, `node_modules/@xterm/xterm/css/xterm.css` → `dist/playground/xterm.css`.
 
-After the esbuild builds (full build only):
+A full build then runs three more steps after esbuild:
 
-| Step | Output |
-|---|---|
-| `genNodeLib()`, if `vendor/node/natives.json` exists | `dist/runtime/nodelib.js` and `dist/runtime/NODE-LICENSE.txt` (Node's `LICENSE`, with the notices of its bundled dependencies). If `vendor/node` is missing the build prints `vendor/node missing: run node scripts/gen-node-data.mjs to build the ported Node runtime` and the ported runtime can't start |
-| copy amaro | `node_modules/amaro/dist/index.js` → `dist/runtime/amaro.js`; `dist/runtime/AMARO-LICENSE.txt` (amaro's and swc's licenses) |
-| `buildCompat()` | `dist/runtime/compat/*.tgz` and `dist/runtime/compat/index.json` |
+- `genNodeLib()`, if `vendor/node/natives.json` exists, writes `dist/runtime/nodelib.js` and
+  `dist/runtime/NODE-LICENSE.txt` (Node's `LICENSE`, with the notices of its bundled dependencies). If
+  `vendor/node` is missing, the build prints `vendor/node missing: run node scripts/gen-node-data.mjs to build the ported Node runtime`
+  and the ported runtime can't start.
+- amaro is copied: `node_modules/amaro/dist/index.js` → `dist/runtime/amaro.js`, plus
+  `dist/runtime/AMARO-LICENSE.txt` (amaro's and swc's licenses).
+- `buildCompat()` writes `dist/runtime/compat/*.tgz` and `dist/runtime/compat/index.json`.
 
 The build ends with `built dist/`.
 
@@ -172,7 +174,7 @@ name to `{ range, file, integrity, pkg }`, where `integrity` is the tarball's `s
 
 `node scripts/build-types.mjs` deletes `dist/types/`, runs `npx tsc -p tsconfig.types.json`
 (declarations only, for `src/host/index.ts` and what it imports) and rewrites `.ts` import specifiers in
-the emitted `.d.ts` files to `.js`. Run it **after** `npm run build`, because a full build deletes `dist/`.
+the emitted `.d.ts` files to `.js`. Run it after `npm run build`, because a full build deletes `dist/`.
 `package.json` points `types` at `dist/types/host/index.d.ts`.
 
 ## Local server: serve.mjs
@@ -182,7 +184,7 @@ the emitted `.d.ts` files to `.js`. Run it **after** `npm run build`, because a 
 | Site | Port | Directory | Headers |
 |---|---|---|---|
 | host | `OV_HOST_PORT`, else `OV_PORT_BASE` (default 5170) | `dist/playground` | COOP `same-origin`, COEP `require-corp`, CORP `same-origin` |
-| runtime | `OV_RUNTIME_PORT`, else base + 1 | `dist/runtime` | COOP, COEP, CORP `cross-origin`, and a CSP: `default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob: data:; connect-src 'self' data: blob:; worker-src 'self' blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors http://localhost:<host port>` — except on `/sw.js`, which makes the network policy checks and must not inherit `connect-src 'self'` |
+| runtime | `OV_RUNTIME_PORT`, else base + 1 | `dist/runtime` | COOP, COEP, CORP `cross-origin`, and a CSP: `default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob: data:; connect-src 'self' data: blob:; worker-src 'self' blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors http://localhost:<host port>`, except on `/sw.js`, which makes the network policy checks and must not inherit `connect-src 'self'` |
 | preview | `OV_PREVIEW_PORT`, else base + 2 | `dist/preview` | COOP, COEP, CORP `cross-origin`; `/__ov-sw.js` gets COEP `credentialless` instead of `require-corp` |
 
 Every response has `cache-control: no-cache`; a path ending in `/` serves `index.html`; content types
@@ -197,7 +199,7 @@ The Node version OpenVessel ports is pinned in one place, `NODE_VERSION` in `src
 `package.json` repeats it as `openvessel.node`. [NODE-VERSION.md](../NODE-VERSION.md) (Japanese) keeps
 the current version and the history.
 
-1. **See what changes.** `node scripts/node-upgrade-check.mjs <new version>` dumps the target version with
+1. Check what changes: `node scripts/node-upgrade-check.mjs <new version>` dumps the target version with
    the same Docker dumper and compares it with the pinned data (`vendor/node`, `src/node/data`). It writes
    `docs/node-upgrades/<current>-to-<new>.md` with these sections:
    - *Builtins (lib/)*: added, removed and changed builtins, with lines removed/added; a changed file
@@ -249,15 +251,15 @@ The full procedure is [RELEASING.md](../RELEASING.md). In short:
   `gh release create v<version> openvessel-<version>.tgz --title "OpenVessel <version> — Node.js <node>"`
   (`--prerelease` for a release candidate); optionally `npm publish --provenance --access public` of the
   same tarball.
-- The published package contains `dist/` only (`files` in `package.json`). Covered by semver: the host
-  API in `dist/host` with its declarations and the three-origin embedding requirements; not covered:
-  `src/`, the files inside `dist/runtime` and `dist/preview`, the compat packages' contents.
+- The published package contains `dist/` only (`files` in `package.json`). Semver covers the host API
+  in `dist/host` with its declarations and the three-origin embedding requirements. It does not cover
+  `src/`, the files inside `dist/runtime` and `dist/preview`, or the contents of the compat packages.
 
 ## Repository layout
 
 | Path | Contents | In git |
 |---|---|---|
-| `src/host/` | the host API (`OpenVessel.boot`, …) — [Host API](host-api.md) | yes |
+| `src/host/` | the host API (`OpenVessel.boot`, …); see [Host API](host-api.md) | yes |
 | `src/kernel/` | the kernel: VFS, processes, pipes, TTY, sockets, `sh`, coreutils, npm, ESM service, virtual ports, outbound HTTP | yes |
 | `src/nodejs/` | the ported Node.js runtime: `boot.ts`, `loop.ts`, `options.ts`, `env.ts`, `fetch.ts`, `typescript.ts`, `bindings/`, `overrides/` | yes |
 | `src/node/` | the legacy runtime; also `version.ts` (the pinned Node version), `data/` (dumped Node data), and modules the ported runtime reuses (`sys.ts`, `native.ts`, `wasi.ts`) | yes |

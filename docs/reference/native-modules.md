@@ -3,7 +3,7 @@
 [日本語](native-modules.ja.md)
 
 A browser tab can't load machine code, so OpenVessel never runs a native addon (`.node` file). This page
-specifies what happens instead: the rules by which `npm install` swaps native packages for WebAssembly
+describes what happens instead: the rules by which `npm install` swaps native packages for WebAssembly
 builds, how `.node` files fail at run time, the `node:wasi` implementation, how napi-rs `wasm32-wasi`
 bindings and emnapi load, and the compat packages OpenVessel builds itself.
 
@@ -262,7 +262,7 @@ they see the same in-memory file system as `fs`.
   `path_remove_directory`, `path_unlink_file`, `path_rename`, `path_link`, `path_symlink`'s new path,
   `path_readlink`):
   - an absolute path, `..` above the directory, or a symlink whose target leads out of it is
-    `ENOTCAPABLE` (76) — except that, as in uvwasi, `..` above a directory the module sees as `/` (a
+    `ENOTCAPABLE` (76). The exception, as in uvwasi, is that `..` above a directory the module sees as `/` (a
     preopen named `/`) stays at it, so `../x` there is `x`;
   - symlinks on the way are followed inside the directory (an absolute target is read in the module's
     view, relative to the preopen's guest path); the last component is followed only with
@@ -330,10 +330,8 @@ version. The contents of compat packages are not covered by semver (see `CHANGEL
 `scripts/build-compat.mjs` (run by `scripts/build.mjs`, or alone with `node scripts/build-compat.mjs`)
 writes into `dist/runtime/compat/`:
 
-| File | Contents |
-|---|---|
-| `<id>-<version>.tgz` | the package as an npm tarball (ustar, every path under `package/`) |
-| `index.json` | one entry per replaced package name |
+- `<id>-<version>.tgz`: the package as an npm tarball (ustar, every path under `package/`)
+- `index.json`: one entry per replaced package name
 
 ```json
 {
@@ -385,12 +383,10 @@ the platform filter).
 
 ### pagefind
 
-| | |
-|---|---|
-| Replaces | `@pagefind/linux-x64` `^1.0.0` (the binary package Pagefind's npm wrapper picks for linux/x64) |
-| Package | `@openvessel/pagefind-wasi` 1.5.2 |
-| Source | `compat/pagefind/` |
-| Contents | `pagefind.wasm`, `bin/pagefind`, `bin/pagefind_extended` |
+- Replaces: `@pagefind/linux-x64` `^1.0.0` (the binary package Pagefind's npm wrapper picks for linux/x64)
+- Package: `@openvessel/pagefind-wasi` 1.5.2
+- Source: `compat/pagefind/`
+- Contents: `pagefind.wasm`, `bin/pagefind`, `bin/pagefind_extended`
 
 `compat/pagefind/build.mjs` downloads the `pagefind` 1.5.2 crate from crates.io, applies
 `compat/pagefind/wasi.patch` and runs
@@ -416,12 +412,11 @@ with the native binary.
 
 ### cn-font-split
 
-| | |
-|---|---|
-| Replaces | `cn-font-split` `^7.0.0` |
-| Package | `@openvessel/cn-font-split-wasi` 7.4.3 |
-| Source | `compat/cn-font-split/` |
-| Contents | the published `cn-font-split` 7.4.3 package, with `dist/node/index.js` and `dist/node/index.mjs` replaced and `dist/libffi-wasm32-wasip1.wasm` added |
+- Replaces: `cn-font-split` `^7.0.0`
+- Package: `@openvessel/cn-font-split-wasi` 7.4.3
+- Source: `compat/cn-font-split/`
+- Contents: the published `cn-font-split` 7.4.3 package, with `dist/node/index.js` and
+  `dist/node/index.mjs` replaced and `dist/libffi-wasm32-wasip1.wasm` added
 
 `compat/cn-font-split/build.mjs` downloads `cn-font-split-7.4.3.tgz` from the npm registry and
 `libffi-wasm32-wasip1.wasm` from the project's GitHub release 7.6.8. The manifest is the published one
@@ -449,11 +444,9 @@ single-threaded.
 
 ### resvg-js
 
-| | |
-|---|---|
-| Replaces | `@resvg/resvg-js` `^2.0.0` (a napi-rs package without a `wasm32-wasi` build) |
-| Package | `@openvessel/resvg-js-wasm` 2.6.2, depending on `@resvg/resvg-wasm` `2.6.2` |
-| Source | `compat/resvg-js/package/` (`index.js`, `index.d.ts`) |
+- Replaces: `@resvg/resvg-js` `^2.0.0` (a napi-rs package without a `wasm32-wasi` build)
+- Package: `@openvessel/resvg-js-wasm` 2.6.2, depending on `@resvg/resvg-wasm` `2.6.2`
+- Source: `compat/resvg-js/package/` (`index.js`, `index.d.ts`)
 
 resvg-js is synchronous and reads font files itself; resvg-wasm initializes asynchronously and takes font
 buffers. `index.js`:

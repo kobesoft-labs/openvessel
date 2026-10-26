@@ -4,8 +4,8 @@
 
 OpenVessel has four layers of tests: unit tests run by Node.js (including differential tests of the
 bindings against real Node), end-to-end scripts that drive the playground in headless Chrome, Node.js's own
-test suite run inside OpenVessel, and a corpus of real Astro sites. This page describes each runner, its
-arguments, environment variables, timeouts and result files, and how to add tests.
+test suite run inside OpenVessel, and a corpus of real Astro sites. Below are the runners with their
+arguments, environment variables, timeouts and result files, followed by how to add tests.
 
 | Suite | Runner | Needs | Typical command |
 |---|---|---|---|
@@ -25,7 +25,7 @@ files.
 | `OV_HOST_PORT`, `OV_RUNTIME_PORT`, `OV_PREVIEW_PORT` | `scripts/serve.mjs` | set one port individually. The harness only knows `OV_PORT_BASE`, so don't use these with the test scripts |
 | `HEADED` | `harness.mjs` (direct use), `project.mjs`, `dev.mjs`, `preview-port.mjs` | non-empty: show the browser window |
 | `OV_CONSOLE` | `harness.mjs` | non-empty: print the page's console messages as `[console.<type>] <text>` (page errors are always printed as `[pageerror] …`) |
-| `OV_TRACE` | `harness.mjs` | non-empty: turn on the kernel's trace (`debug.trace`), which logs `[trace]` lines to the console for spawns, pipe closes, EOF on reads and synchronous reads of fd 0 — visible with `OV_CONSOLE=1` |
+| `OV_TRACE` | `harness.mjs` | non-empty: turn on the kernel's trace (`debug.trace`), which logs `[trace]` lines to the console for spawns, pipe closes, EOF on reads and synchronous reads of fd 0 (visible with `OV_CONSOLE=1`) |
 | `SETUP` | `run-file.mjs` | a command line run before the file is written |
 | `PRINT` | `port-fs.mjs` | non-empty: print every scenario's actual output |
 | `OV_TIMING` | the ported runtime | inside OpenVessel, not on the host: print boot timings ([Node.js runtime](nodejs-runtime.md#ov_timing)) |
@@ -42,7 +42,7 @@ files.
 
 | File | What it tests |
 |---|---|
-| `bindings-*.test.ts` | the bindings against fixtures recorded from real Node — see [Bindings](bindings.md#testing-bindings-against-real-node) |
+| `bindings-*.test.ts` | the bindings against fixtures recorded from real Node; see [Bindings](bindings.md#testing-bindings-against-real-node) |
 | `bindings-v8.test.ts` | `internalBinding('v8')` fills the buffers `lib/v8.js` reads; `heap_utils` reports snapshots as unavailable |
 | `npm-wasm-runtime.test.ts` | `pickWasmRuntime` (choosing a `@napi-rs/wasm-runtime` whose emnapi peer matches the binding) |
 | `policy.test.ts` | the network policy's `decide`/`normalizePolicy` (presets, ask, allowlist, deny wins, only http(s) leaves) |
@@ -154,7 +154,7 @@ A selected test is skipped when its source matches any of: `expose-internals`/`e
   from the baseline is not run until `--baseline` is run again; the run starts with
   `warning: <n> selected tests are not in results/baseline.json and are skipped (run --baseline to add them): <files>`.
 - The harness mounts at `/node` in the VFS: `package.json`, every file under `test/common` and
-  `test/fixtures` up to 8 MiB, and the selected tests — in batches of about 4 MB per page evaluation.
+  `test/fixtures` up to 8 MiB, and the selected tests, sent in batches of about 4 MB per page evaluation.
 - The policy is set to `allow-all`, and `window.ovNoAutoPreview` is set so the playground doesn't open a
   preview of ports the tests listen on.
 - Four tests run at a time in one page, each as `node test/parallel/<file>` with cwd `/node` and
@@ -245,8 +245,8 @@ A directory without an `astro.config.*` is not a site (`examples/toolbar-app` is
 so it is never added. `sites.json` is rewritten after every addition. Ids already in `sites.json` are
 skipped, so this form only adds sites.
 
-`node corpus/collect.mjs --restore` downloads every listed site that `corpus/sites/` lacks — after a
-fresh clone, all of them: official examples from one tarball per release tag, community sites at `sha`
+`node corpus/collect.mjs --restore` downloads every listed site that `corpus/sites/` lacks (after a
+fresh clone, that is all of them). Official examples come from one tarball per release tag and community sites from `sha`
 (or the current head of `ref` when `sha` is `null`, which may differ from the files the results were
 measured on). It prints `<restored> of <missing> missing sites restored (<listed> listed)` and exits 1 if
 any failed. Directories in `corpus/sites/` that `sites.json` doesn't list are left alone and not run.
@@ -259,18 +259,19 @@ sites without filters):
 1. reload the playground (a fresh kernel), mount `corpus/sites/<id>` at `/home/user/app`;
 2. pick the package manager: the `packageManager` field of `package.json` (`npm`, `pnpm`, `yarn`, `bun`),
    else `pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `bun.lock`/`bun.lockb` → bun, else npm;
-3. `<pm> install`, then, if it succeeded, `<pm> run build` — each with `export CI=1 ASTRO_TELEMETRY_DISABLED=1`
+3. `<pm> install`, then, if it succeeded, `<pm> run build`, each with `export CI=1 ASTRO_TELEMETRY_DISABLED=1`
    (and, with `--legacy`, the line that selects the legacy runtime) and a 15-minute timeout.
 
 If the harness itself fails, the browser is relaunched and the run continues with the next site.
 
 Results go to `corpus/results/port/` (the ported runtime, the default) or, with `--legacy`, to
-`corpus/results/`; `[/port]` in the table below stands for that choice.
+`corpus/results/`. In the paths below, `[/port]` stands for that choice.
 
-| Output | Contents |
-|---|---|
-| `corpus/results[/port]/results.json` | `{ "<id>": { id, astro, install, build, ms, error } }`; `install`/`build` are booleans (`build` stays `null` when install failed); `error` holds the last 12 non-empty lines of the build output, or the last 8 of the install output |
-| `corpus/results[/port]/logs/<id>.log` | `$ <pm> install`, its output and `[exit <code> <ms>ms]`, then the same for the build |
+- `corpus/results[/port]/results.json`: `{ "<id>": { id, astro, install, build, ms, error } }`.
+  `install`/`build` are booleans (`build` stays `null` when install failed), and `error` holds the last 12
+  non-empty lines of the build output, or the last 8 of the install output.
+- `corpus/results[/port]/logs/<id>.log`: `$ <pm> install`, its output and `[exit <code> <ms>ms]`, then the
+  same for the build.
 
 Existing entries of `results.json` are kept and overwritten per site. Each site prints
 `[<i>/<n>] OK|FAIL|INST <id> (<s>s)` (FAIL: build failed, INST: install failed) with the last error lines,
@@ -279,25 +280,24 @@ and the run ends with `build ok: <x>/<total>, install ok: <y>`. `corpus/results/
 
 ## Adding tests
 
-- **A unit test**: add `test/unit/<name>.test.ts` using `node:test` and `node:assert/strict`; it is
+- Unit test: add `test/unit/<name>.test.ts` using `node:test` and `node:assert/strict`; it is
   picked up by its suffix. Import source files directly (`../../src/…`); npm packages stay external.
-- **A differential binding test**: write `test/fixtures-gen/<name>.cases.mjs` exporting
+- Differential binding test: write `test/fixtures-gen/<name>.cases.mjs` exporting
   `run(binding)` that returns `{ section: [{ args, r }] }`, a generator `test/fixtures-gen/<name>.mjs`
   that calls `generate('<binding name>', run)`, add the job to `scripts/regen-fixtures.mjs`, run it, and
   write `test/unit/bindings-<name>.test.ts` that calls
   `compareFixtures(run(createX()), fixture.results, known)`. List accepted differences in `known`, with
   the reason as the key.
-- **An end-to-end check**: write a script in `test/e2e/` using `startServer`, `openBrowser` and `exec` from
+- End-to-end check: write a script in `test/e2e/` using `startServer`, `openBrowser` and `exec` from
   `harness.mjs`; it runs on the ported runtime by default (use `useLegacyRuntime(page)` for the legacy
-  one); print a clear result and exit non-zero
-  on failure, as `port-fs.mjs` and `preview-port.mjs` do.
-- **A Node test that can't pass in a browser**: add it to `test/node-compat/limits/<module>.json` with the
+  one). Print a clear result and exit non-zero on failure, as `port-fs.mjs` and `preview-port.mjs` do.
+- Node test that can't pass in a browser: add it to `test/node-compat/limits/<module>.json` with the
   reason; it then no longer counts toward the target. Remove it when the report lists it as passing.
-- **A corpus site**: run `corpus/collect.mjs`, or add an entry to `corpus/sites.json` and put the files in
+- Corpus site: run `corpus/collect.mjs`, or add an entry to `corpus/sites.json` and put the files in
   `corpus/sites/<id>/`.
 
 ## Related pages
 
-- [Building](building.md) — prerequisites, `regen-fixtures.mjs` in the Node upgrade procedure
-- [Bindings](bindings.md) — what the differential tests compare
-- [Compatibility](../compatibility.md) — current results
+- [Building](building.md): prerequisites, `regen-fixtures.mjs` in the Node upgrade procedure
+- [Bindings](bindings.md): what the differential tests compare
+- [Compatibility](../compatibility.md): current results

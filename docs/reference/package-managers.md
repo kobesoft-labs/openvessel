@@ -3,9 +3,9 @@
 [日本語](package-managers.ja.md)
 
 OpenVessel has its own package manager client, written for the kernel, with `npm`, `pnpm`, `yarn` and
-`bun` as front ends. This page specifies every command and flag, how scripts run, how `install`
-resolves and lays out `node_modules`, which lockfiles are read, and how the registry is reached
-(`src/kernel/npm/`).
+`bun` as front ends (`src/kernel/npm/`). This page lists every command and flag, and describes how
+scripts run, how `install` resolves and lays out `node_modules`, which lockfiles are read and how the
+registry is reached.
 
 ## Overview
 
@@ -225,12 +225,9 @@ npm error command sh -c exit 3
 Each script runs as `/bin/sh -c '<script> <args>'` with the project directory as working directory and
 the [script environment](#script-environment). Arguments are appended to the script text; an argument
 that contains anything other than letters, digits and `_ . / : = @ % + -` is single-quoted. Before each
-script a banner is written to stdout, unless `-s` is given:
-
-| Front end | Banner |
-|---|---|
-| `npm`, `pnpm`, `bun` | an empty line, `> <name>@<version> <event>`, `> <command>`, an empty line |
-| `yarn` | `$ <command>` |
+script a banner is written to stdout, unless `-s` is given. For `npm`, `pnpm` and `bun` the banner is an
+empty line, `> <name>@<version> <event>`, `> <command>` and an empty line; for `yarn` it is
+`$ <command>`.
 
 `pre`/`post` scripts always run; `--ignore-scripts` does not affect `run`.
 
@@ -332,11 +329,8 @@ where in /home/user/app
 5. It runs in the caller's working directory with the script environment
    (`npm_lifecycle_event=npx`) and the cache's `node_modules/.bin` first on `PATH`.
 
-| Entry | Forced reinstall | Notes |
-|---|---|---|
-| `npx`, `npm exec`, `npm x`, `bunx`, `bun x` | no | |
-| `pnpm dlx`, `yarn dlx`, `pnpx` | yes | |
-| `create`, `init <name>` | yes | |
+`npx`, `npm exec`, `npm x`, `bunx` and `bun x` don't force a reinstall. `pnpm dlx`, `yarn dlx`, `pnpx`,
+`create` and `init <name>` do.
 
 There is no terminal prompt. When `npm exec`/`npx` installs a package that is not in the cache, it goes
 ahead and prints `npm warn exec The following package was not found and will be installed: <name>@<version>`
@@ -614,11 +608,12 @@ When stderr is a terminal and `-s` is not given, a progress line is rewritten in
 
 The summary goes to stdout (not with `-s`). `<time>` is `<n>ms` below one second, else `<n.n>s`.
 
-| Front end | Summary |
-|---|---|
-| `npm`, `bun` | an empty line, then `added <n> package(s)[, and audited <total+1> packages] in <time>`, or `up to date in <time>` when nothing was added. The `audited` part appears when some packages were already in place. |
-| `pnpm` | `Packages: +<n>` and `Done in <time>` |
-| `yarn` | `success Saved lockfile.` when `yarn.lock` was written (it changed), `success Already up-to-date.` when nothing changed, then `Done in <time>.` |
+- `npm`, `bun`: an empty line, then `added <n> package(s)[, and audited <total+1> packages] in <time>`,
+  or `up to date in <time>` when nothing was added. The `audited` part appears when some packages were
+  already in place.
+- `pnpm`: `Packages: +<n>` and `Done in <time>`.
+- `yarn`: `success Saved lockfile.` when `yarn.lock` was written (it changed), `success Already up-to-date.`
+  when nothing changed, then `Done in <time>.`
 
 ## Lockfiles
 
@@ -679,11 +674,10 @@ and `${VAR}` is replaced from the environment (empty if unset).
 
 Keys that have an effect:
 
-| Key | Effect |
-|---|---|
-| `registry` | Registry URL for unscoped packages (default `https://registry.npmjs.org/`; a trailing `/` is added). |
-| `@scope:registry` | Registry URL for `@scope/*` packages. |
-| `legacy-peer-deps` | `true`: same as `--legacy-peer-deps`. |
+- `registry`: the registry URL for unscoped packages (default `https://registry.npmjs.org/`; a trailing
+  `/` is added).
+- `@scope:registry`: the registry URL for `@scope/*` packages.
+- `legacy-peer-deps`: `true` is the same as `--legacy-peer-deps`.
 
 Every other key is only visible to `npm config get/list`. Authentication settings (`_authToken`,
 `_auth`, `//host/:…`) are not sent; requests carry no credentials.
@@ -697,11 +691,13 @@ of the network policy allows `registry.npmjs.org`, `registry.npmjs.com`, `regist
 `registry.npmmirror.com`; GitHub dependencies need the `github` preset or an allow rule for
 `codeload.github.com` ([Network policy](network-policy.md)). The host must answer with CORS headers.
 
-| Request | Details |
-|---|---|
-| Package metadata | `GET <registry><name>` with `/` in scoped names encoded as `%2f`, header `accept: application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*` (abbreviated metadata) |
-| Tarball | `GET` of the `dist.tarball` URL; gzip is detected by its magic bytes and decompressed with `DecompressionStream` |
-| Compat tarball | fetched directly from `<runtime base>/compat/`, without the network policy check ([Native modules](native-modules.md)) |
+- Package metadata: `GET <registry><name>` with `/` in scoped names encoded as `%2f`, and the header
+  `accept: application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*` (abbreviated
+  metadata).
+- Tarball: a `GET` of the `dist.tarball` URL. gzip is detected by its magic bytes and decompressed with
+  `DecompressionStream`.
+- Compat tarball: fetched directly from `<runtime base>/compat/`, without the network policy check
+  ([Native modules](native-modules.md)).
 
 Limits and retries:
 

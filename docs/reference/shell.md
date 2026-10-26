@@ -18,7 +18,7 @@ up in `ps`.
 | Item | Value |
 |---|---|
 | Source | `src/kernel/sh/parse.ts` (parser), `interp.ts` (interpreter, built-ins, line editor), `arith.ts`, `pattern.ts`, `printf.ts`, `test.ts`; programs in `src/kernel/coreutils.ts` and `src/kernel/curl.ts` |
-| Shell names | `/bin/sh`, `/bin/bash`, `/bin/dash` — all the same program. `bash` is not GNU bash: it accepts the same subset described here. |
+| Shell names | `/bin/sh`, `/bin/bash` and `/bin/dash` are all the same program. `bash` is not GNU bash: it accepts the same subset described here. |
 | How programs are installed | Each program is an executable file (mode `0755`) whose content is `#!/ov/builtin <name>`. The kernel recognises that interpreter line and runs the built-in function. |
 | Locations | Shells and coreutils in `/bin`; `curl`, `wget`, `env` (a second copy, for `#!/usr/bin/env` lines), `node`, `nodejs` (a symlink to `node`), `npm`, `npx`, `pnpm`, `pnpx`, `yarn`, `bun`, `bunx`, `corepack` in `/usr/bin` |
 | Default `PATH` | `/usr/local/bin:/usr/bin:/bin` |
@@ -265,7 +265,7 @@ Assignments:
 | `${p/#pattern/string}` / `${p/%pattern/string}` | Replaces a match anchored at the start / end. |
 | `${p^}` / `${p^^}` | Uppercases the first character / all characters. A pattern argument is ignored. |
 | `${p,}` / `${p,,}` | Lowercases the first character / all characters. |
-| `${p:offset}` / `${p:offset:length}` | Substring. A negative offset counts from the end (write `${p: -3}`; `${p:-3}` is the default-value form). A negative length ends that many characters before the end. Offset and length are converted with `Number()` after expansion — they are not arithmetic expressions; a non-number counts as 0. For `@`/`*` this takes a substring of the joined string, not a slice of the parameters. |
+| `${p:offset}` / `${p:offset:length}` | Substring. A negative offset counts from the end (write `${p: -3}`; `${p:-3}` is the default-value form). A negative length ends that many characters before the end. Offset and length are converted with `Number()` after expansion. They are not arithmetic expressions, and a non-number counts as 0. For `@`/`*` this takes a substring of the joined string, not a slice of the parameters. |
 | `${name[index]}` | The index is ignored: same as `${name}`. |
 
 Patterns in `#`, `%` and `/` forms are shell patterns; quoted parts match literally. In `word` the usual
@@ -466,7 +466,7 @@ cat <<-EOF
 | `-v name` | variable `name` is set |
 | `s` | `s` is non-empty |
 | `a = b`, `a == b`, `a != b` | string equality (no patterns) |
-| `a < b`, `a > b` | string order (UTF-16) — quote them in `[ ]` |
+| `a < b`, `a > b` | string order (UTF-16); quote them in `[ ]` |
 | `a -eq/-ne/-lt/-le/-gt/-ge b` | integer comparison |
 | `a -nt b` / `a -ot b` | modification time newer / older (a missing file counts as oldest) |
 | `a -ef b` | same inode |
@@ -549,13 +549,13 @@ substitution: each runs as a copy of the shell state inside the same shell proce
 applicable. A background job is a process of its own. Programs started from any of them are separate
 processes.
 
-- **Subshell `( )`** — `exit` inside it only ends the subshell.
-- **Pipeline** — every element runs concurrently with its own copy; the status is that of the last
+- Subshell `( )`: `exit` inside it only ends the subshell.
+- Pipeline: every element runs concurrently with its own copy; the status is that of the last
   element, or with `set -o pipefail` that of the rightmost element that failed. In an interactive shell
   a pipeline is one job: its programs share one process group, which is the terminal's foreground group
   while the pipeline runs. In a non-interactive shell programs stay in the shell's process group, so a
   ^C sent to the group reaches them. `exit` in a pipeline element only ends that element.
-- **Background `&`** — the command runs in a new process, a copy of the shell (a simple command naming
+- Background `&`: the command runs in a new process, a copy of the shell (a simple command naming
   a program is executed directly in that process); the shell continues immediately with status 0.
   Stdin is not redirected. `$!` is that process's pid, so `kill $!` works. `wait` (no arguments) waits
   for all background jobs and returns 0. `wait PID` waits for that job and returns its status, also
@@ -737,7 +737,7 @@ printf [-v var] format [argument...]
 - Escapes in the format: `\a \b \e \f \n \r \t \v \\ \" \'`, `\NNN` and `\0NNN` (octal), `\xHH`, `\c`
   (stop output).
 - Numeric arguments: `'c` or `"c` gives the character code; text that is not a number is read with
-  `parseFloat`, else 0 — there is no error.
+  `parseFloat`, else 0. There is no error.
 - The format is reused while arguments remain; missing arguments are empty / 0.
 - `-v var` stores the result in `var` instead of printing. No format: status 2 with
   `usage: printf format [arguments]`.
@@ -973,7 +973,7 @@ egrep ...    fgrep ...
   are not adjacent are separated by `--`.
 - A file containing a NUL byte prints `Binary file NAME matches` (unless `-a`).
 - Exit status: 0 if any line was selected, 1 if none, 2 if a file could not be read (also when other
-  lines were selected) — except that `-q` returns 0 as soon as there is a match.
+  lines were selected). The exception is `-q`, which returns 0 as soon as there is a match.
 
 ### sed
 
@@ -1118,7 +1118,7 @@ xargs [-0] [-d DELIM] [-a FILE] [-n N | -L N | -I STR] [-r] [-t] [-P N] [command
   double quotes and backslashes protect blanks (`'a b'` is one item; an unmatched quote is an error). With
   `-0` items are separated by NUL, with `-d` by the given character (`\n`, `\t` … are understood), both
   without quote processing.
-- Runs `command` (default `echo`) with the items appended — all at once, or `N` at a time with `-n` / `-L`
+- Runs `command` (default `echo`) with the items appended, either all at once or `N` at a time with `-n` / `-L`
   (`-L` counts items, not lines).
 - `-I STR` (`-i` means `-I {}`): one run per input line (leading blanks removed), replacing every `STR` in
   the arguments.
@@ -1205,8 +1205,8 @@ is always 0.
 date [-u] [-d STRING | -r FILE] [-I[FMT] | -R | +FORMAT]
 ```
 
-The time zone is `TZ` — an IANA name (`Asia/Tokyo`), a POSIX string (`JST-9`, `EST5`), `''` for UTC —
-or, when `TZ` is unset, the browser's zone; `-u` uses UTC. Zone abbreviations are those `Intl` gives
+The time zone is `TZ` (an IANA name such as `Asia/Tokyo`, a POSIX string such as `JST-9` or `EST5`, or `''`
+for UTC), or the browser's zone when `TZ` is unset; `-u` uses UTC. Zone abbreviations are those `Intl` gives
 (`EST`, `GMT`, `UTC`), a built-in table for common zones that `Intl` names only by offset (`JST`, `KST`,
 `CET`/`CEST`, `AEST`…), else the offset in tzdata's style (`+0530`).
 
@@ -1321,8 +1321,8 @@ whitespace (used by `#!/usr/bin/env -S`). A command that cannot be started print
 
 ### time and timeout
 
-`time command [arg...]` runs a program (not a shell function or a compound command — it is a program,
-not a keyword), then writes `real\tMmS.SSSs` preceded by an empty line to stderr. There are no `user` and
+`time command [arg...]` runs a program (not a shell function or a compound command, because `time` is a
+program, not a keyword), then writes `real\tMmS.SSSs` preceded by an empty line to stderr. There are no `user` and
 `sys` lines. Status: the command's.
 
 ```text

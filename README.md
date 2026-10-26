@@ -1,13 +1,13 @@
 # OpenVessel
 
-[日本語](README.ja.md) · **[Live demo](https://kobesoft-labs.github.io/openvessel-demo/)** — edit an Astro site with Node.js running in the tab
+[日本語](README.ja.md) · [Live demo](https://kobesoft-labs.github.io/openvessel-demo/) (edit an Astro site with Node.js running in the tab)
 · [Reference](docs/reference/README.md) · [Product page](https://kobesoft.co.jp/oss/openvessel/) (Japanese, by KOBESOFT)
 
 ## What is OpenVessel?
 
 OpenVessel is a Node.js environment that runs entirely inside a web browser tab.
-It gives a web page a real `node`, a POSIX-style shell, `npm`/`pnpm`/`yarn`/`bun`, a file system and processes —
-enough to install a real JavaScript project from the npm registry, build it and serve it with live reload,
+It gives a web page a real `node`, a POSIX-style shell, `npm`/`pnpm`/`yarn`/`bun`, a file system and processes.
+That is enough to install a real JavaScript project from the npm registry, build it and serve it with live reload,
 without a server doing the work and without opening a single real network port.
 
 It was built for [Astro](https://astro.build) sites (Astro 7, 6 and 5): `npm install`, `astro build`,
@@ -16,7 +16,7 @@ Because it runs Node.js's own code, most other Node tools work too.
 
 ![OpenVessel: a Node.js virtual machine inside a browser tab](docs/images/overview.svg)
 
-Think of it as a small virtual machine for Node.js that lives in the tab: its own operating system
+You can think of it as a small virtual machine for Node.js that lives in the tab. It has its own operating system
 (a kernel with a file system, processes and a shell), its own programs (Node.js, npm, Astro), and
 controlled ways in and out. [How it works](docs/how-it-works.md) explains each piece.
 
@@ -31,30 +31,33 @@ in-browser runtimes. It is open source under the [Apache License 2.0](LICENSE).
 
 ## How it is different
 
-- **Node.js itself, not a look-alike.** Node.js v22's own `lib/` (the JavaScript half of Node) runs
-  unmodified. What OpenVessel re-implements is the part Node writes in C++ — `internalBinding()` —
-  in TypeScript, on top of a small kernel. Error messages, stack traces, argument validation and
+- It runs Node.js itself. Node.js v22's own `lib/` (the JavaScript half of Node) runs
+  unmodified. OpenVessel re-implements the part Node writes in C++, `internalBinding()`,
+  in TypeScript on top of a small kernel. Error messages, stack traces, argument validation and
   event-loop ordering come out the way Node produces them, and following a new Node release is a
   matter of re-reading its source (see [docs/NODE-VERSION.md](docs/NODE-VERSION.md)).
-- **Native modules become WebAssembly.** Packages that ship native binaries are installed as their
+- Native modules are replaced with WebAssembly. Packages that ship native binaries are installed as their
   WebAssembly builds (esbuild, rollup, rolldown, lightningcss, sharp, napi-rs `wasm32-wasi`
-  bindings…). Where a package has no WebAssembly build, OpenVessel provides a compat package —
+  bindings…). Where a package has no WebAssembly build, OpenVessel provides a compat package,
   usually the same project compiled to `wasm32-wasi` (Pagefind, for example).
-- **Nothing is reachable from outside.** Servers listen on virtual ports inside the kernel; the
-  preview iframe talks to them through a service worker. Outgoing traffic is checked against one
+- Nothing is reachable from outside. Servers listen on virtual ports inside the kernel, and the
+  preview iframe talks to them through a service worker. Outgoing traffic is checked against a single
   network policy that the embedding page controls.
-- **Isolated by origin.** The page, the runtime and the preview are three different origins, so code
+- The parts are isolated by origin. The page, the runtime and the preview are three different origins, so code
   in a previewed site can't reach the runtime or the host page ([docs/SECURITY.md](docs/SECURITY.md)).
 
 ## Status
 
-| | |
-|---|---|
-| Version | 1.1.1 — [Changelog](CHANGELOG.md), [releasing](docs/RELEASING.md) (OpenVessel's own semver; the ported Node.js version is in every release title) |
-| Node.js | v22.23.4 (`src/node/version.ts`) |
-| Node's own test suite | 1237 of 1237 (100%) of the tests a browser can pass, across 1271 tests of the targeted modules; the other 34 are listed with the reason — see [docs/compatibility.md](docs/compatibility.md) |
-| Astro sites | 131 of a corpus of 147 real sites build (Astro 5, 6 and 7); see [docs/compatibility.md](docs/compatibility.md) |
-| Browsers | Chromium-based browsers. Firefox (current release) runs the ported runtime: the shell, npm, Astro build and dev server with the preview, and 1200 of the 1237 Node tests ([notes](docs/compatibility.md#firefox)). Cross-origin isolation (`SharedArrayBuffer`) is required |
+- Version: 1.1.1. See the [Changelog](CHANGELOG.md) and [releasing](docs/RELEASING.md). OpenVessel uses its
+  own semver; the ported Node.js version is in every release title.
+- Node.js: v22.23.4 (`src/node/version.ts`).
+- Node's own test suite: 1237 of 1237 (100%) of the tests a browser can pass, across 1271 tests of the
+  targeted modules. The other 34 are listed with the reason in [docs/compatibility.md](docs/compatibility.md).
+- Astro sites: 131 of a corpus of 147 real sites build (Astro 5, 6 and 7); see
+  [docs/compatibility.md](docs/compatibility.md).
+- Browsers: Chromium-based browsers. Firefox (current release) runs the ported runtime: the shell, npm,
+  Astro build and dev server with the preview, and 1200 of the 1237 Node tests
+  ([notes](docs/compatibility.md#firefox)). Cross-origin isolation (`SharedArrayBuffer`) is required.
 
 What can't work in a browser, and why, is listed in [docs/compatibility.md](docs/compatibility.md).
 
@@ -135,9 +138,9 @@ node corpus/run.mjs [filter]                               # build the Astro sit
 
 The end-to-end tests drive the system Chrome through `playwright-core` (`OV_BROWSER=firefox` uses
 Playwright's Firefox, installed once with `npx playwright-core install firefox`). Set `HEADED=1` to watch,
-`OV_CONSOLE=1` for browser console output, `OV_PORT_BASE=<port>` to run several suites side by side.
+`OV_CONSOLE=1` for browser console output, and `OV_PORT_BASE=<port>` to run several suites side by side.
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE). Third-party components and their licenses are listed in
+Apache License 2.0. See [LICENSE](LICENSE). Third-party components and their licenses are listed in
 [NOTICE](NOTICE).

@@ -1,76 +1,77 @@
 # OpenVessel
 
-[English](README.md) · **[デモ](https://kobesoft-labs.github.io/openvessel-demo/)** — Node.js がタブの中で動き、Astro のサイトをその場で編集できます
+[English](README.md) · [デモ](https://kobesoft-labs.github.io/openvessel-demo/)（タブの中で動く Node.js で、Astro のサイトをその場で編集できます）
 · [リファレンス](docs/reference/README.ja.md) · [製品ページ](https://kobesoft.co.jp/oss/openvessel/)（神戸ソフト）
 
 ## OpenVessel とは
 
-OpenVessel は、ブラウザのタブの中だけで動く Node.js の環境です。
-Web ページの中に、本物の `node`、POSIX 風のシェル、`npm`/`pnpm`/`yarn`/`bun`、ファイルシステムとプロセスを用意します。
-npm から実際の JavaScript のプロジェクトを入れ、ビルドし、ライブリロード付きで表示するところまでを、
-サーバーに処理させず、実際のネットワークのポートを 1 つも開かずに行えます。
+OpenVessel は、ブラウザのタブの中だけで動く Node.js の実行環境です。
+Web ページの中に、本物の `node`、POSIX 互換のシェル、`npm`/`pnpm`/`yarn`/`bun`、ファイルシステムとプロセスを用意します。
+npm レジストリから実際の JavaScript プロジェクトをインストールし、ビルドして、ライブリロード付きで表示するところまでを、
+サーバー側の処理なしで、実際のネットワークポートを 1 つも開かずに行えます。
 
-[Astro](https://astro.build) のサイト（Astro 7・6・5）のために作りました。`npm install`、`astro build`、
-HMR 付きの `astro dev`、動いている開発サーバーの iframe でのプレビューができます。
-Node.js 自身のコードを動かしているので、Astro 以外の Node のツールの多くもそのまま動きます。
+[Astro](https://astro.build) のサイト（Astro 7・6・5）向けに開発しました。`npm install`、`astro build`、
+HMR 付きの `astro dev`、起動中の開発サーバーの iframe でのプレビューに対応しています。
+Node.js 自身のコードを実行しているので、Astro 以外の Node のツールの多くもそのまま動きます。
 
 ![OpenVessel: ブラウザのタブの中の Node.js の仮想マシン](docs/images/overview.svg)
 
-タブの中に住む、Node.js のための小さな仮想マシンだと考えてください。自分の OS（ファイルシステム・プロセス・シェルを持つ
-カーネル）と、自分のプログラム（Node.js・npm・Astro）と、決まった出入り口を持っています。部品ごとの説明は
-[しくみ](docs/how-it-works.ja.md) にあります。
+タブの中で動く、Node.js 用の小さな仮想マシンと考えてください。独自の OS（ファイルシステム・プロセス・シェルを持つ
+カーネル）と、独自のプログラム（Node.js・npm・Astro）、そして制御された出入り口を持っています。各部分の説明は
+[仕組み](docs/how-it-works.ja.md) にあります。
 
-使いみちの例:
+主な用途:
 
-- サイトを訪問者のブラウザの中でビルドして見せる、オンラインのエディタや CMS
-- 読者ひとりずつに隔離された Node.js を用意する、チュートリアルや試し書きの場
-- サーバーを用意せずに見せる、プルリクエストやテンプレートのプレビュー
+- 訪問者のブラウザの中でサイトをビルドしてプレビューする、オンラインエディタや CMS
+- 読者 1 人ずつに隔離された Node.js 環境を用意する、チュートリアルや playground
+- サーバーを用意せずに行う、プルリクエストやテンプレートのプレビュー
 
-OpenVessel はクリーンルームで作っています（ほかのブラウザ内ランタイムのソースは見ていません）。
-[Apache License 2.0](LICENSE) のオープンソースです。
+OpenVessel はクリーンルーム方式で開発しています（ほかのブラウザ内ランタイムのソースコードは参照していません）。
+[Apache License 2.0](LICENSE) のオープンソースソフトウェアです。
 
 ## ほかと違うところ
 
-- **Node.js の似せ物ではなく Node.js そのもの。** Node.js v22 の `lib/`（Node の JavaScript の部分）を
-  書き換えずに動かします。OpenVessel が作り直しているのは、Node が C++ で書いている部分
-  （`internalBinding()`）で、小さなカーネルの上に TypeScript で書いています。エラーの文言・スタックトレース・
-  引数の検査・イベントループの順番が Node と同じになり、Node の新しい版への追従はそのソースを読み直す
-  作業になります（[docs/NODE-VERSION.md](docs/NODE-VERSION.md)）。
-- **ネイティブのモジュールは WebAssembly に。** ネイティブのバイナリを配るパッケージは、その WebAssembly 版を
-  入れます（esbuild・rollup・rolldown・lightningcss・sharp・napi-rs の `wasm32-wasi` 版など）。WebAssembly 版が
-  無いものには互換パッケージを用意します。多くは同じプロジェクトを `wasm32-wasi` にコンパイルしたものです
-  （たとえば Pagefind）。
-- **外からは何にも届かない。** サーバーはカーネルの中の仮想のポートで待ち受け、プレビューの iframe は
-  Service Worker を通してつながります。外への通信は、埋め込む側のページが決めるネットワークポリシーで制御されます。
-- **オリジンで隔離。** ページ・ランタイム・プレビューは別々のオリジンなので、プレビューしているサイトの
-  コードからランタイムやページには触れません（[docs/SECURITY.md](docs/SECURITY.md)）。
+- Node.js を模倣したものではなく、Node.js そのものを動かします。Node.js v22 の `lib/`（Node の JavaScript で書かれた部分）を
+  変更せずに実行し、Node が C++ で実装している部分（`internalBinding()`）を、小さなカーネルの上に TypeScript で
+  実装し直しています。そのため、エラーメッセージ・スタックトレース・引数のチェック・イベントループの順序が Node と同じになります。
+  Node の新しいバージョンへの追従は、そのソースを読み直す作業になります（[docs/NODE-VERSION.md](docs/NODE-VERSION.md)）。
+- ネイティブモジュールは WebAssembly に置き換えます。ネイティブバイナリを配布しているパッケージは、その WebAssembly 版を
+  インストールします（esbuild・rollup・rolldown・lightningcss・sharp・napi-rs の `wasm32-wasi` 版など）。WebAssembly 版が
+  無いパッケージには互換パッケージを用意しています。多くは同じプロジェクトを `wasm32-wasi` 向けにコンパイルしたものです
+  （Pagefind など）。
+- 外部からは一切アクセスできません。サーバーはカーネル内の仮想ポートで待ち受け、プレビューの iframe は
+  Service Worker を経由して接続します。外部への通信は、埋め込む側のページが設定するネットワークポリシーで制御します。
+- オリジンで隔離しています。ページ・ランタイム・プレビューはそれぞれ別のオリジンなので、プレビュー中のサイトの
+  コードからランタイムやページにはアクセスできません（[docs/SECURITY.md](docs/SECURITY.md)）。
 
 ## いまの状態
 
-| | |
-|---|---|
-| 版 | 1.1.1 — [変更履歴](CHANGELOG.md)・[リリース手順](docs/RELEASING.md)（OpenVessel 独自の semver。移植している Node.js の版は、各リリースのタイトルに入れます） |
-| Node.js | v22.23.4（`src/node/version.ts`） |
-| Node 自身の試験 | 対象モジュールの 1271 本のうち、ブラウザで通せる 1237 本すべて（100%）が通る。残り 34 本は理由つきで対象外。[docs/compatibility.ja.md](docs/compatibility.ja.md) |
-| Astro のサイト | 実際のサイト 147 本の中で 131 本がビルドできる（Astro 5・6・7）。[docs/compatibility.ja.md](docs/compatibility.ja.md) |
-| ブラウザ | Chromium 系。Firefox（現行版）でも移植版ランタイムが動き、シェル・npm・Astro のビルドと開発サーバー・プレビューが使え、Node のテストは 1237 本中 1200 本が通る（[注意点](docs/compatibility.ja.md#firefox)）。クロスオリジン分離（`SharedArrayBuffer`）が必要 |
+- バージョン: 1.1.1。[変更履歴](CHANGELOG.md)・[リリース手順](docs/RELEASING.md) を参照してください。バージョン番号は
+  OpenVessel 独自の semver で、移植している Node.js のバージョンは各リリースのタイトルに記載します。
+- Node.js: v22.23.4（`src/node/version.ts`）
+- Node 自身のテストスイート: 対象モジュールの 1271 本のうち、ブラウザで通せる 1237 本すべて（100%）が通ります。
+  残りの 34 本は理由とともに対象外として [docs/compatibility.ja.md](docs/compatibility.ja.md) に記載しています。
+- Astro のサイト: 実際のサイト 147 本のうち 131 本がビルドできます（Astro 5・6・7）。[docs/compatibility.ja.md](docs/compatibility.ja.md) を参照してください。
+- ブラウザ: Chromium 系のブラウザ。Firefox（現行版）でも移植版ランタイムが動き、シェル・npm・Astro のビルドと開発サーバー・
+  プレビューが使えます。Node のテストは 1237 本中 1200 本が通ります（[注意点](docs/compatibility.ja.md#firefox)）。
+  クロスオリジン分離（`SharedArrayBuffer`）が必要です。
 
-ブラウザでは動かせないものと、その理由は [docs/compatibility.ja.md](docs/compatibility.ja.md) にまとめています。
+ブラウザでは動作しないものとその理由は、[docs/compatibility.ja.md](docs/compatibility.ja.md) にまとめています。
 
 ## 始め方
 
 ```bash
 npm install
-npm run build        # → dist/（ランタイム・Node の lib の束・互換パッケージ）
-npm run serve        # ホスト :5170（試し書き）・ランタイム :5171・プレビュー :5172
+npm run build        # → dist/（ランタイム・Node の lib のバンドル・互換パッケージ）
+npm run serve        # ホスト :5170（playground）・ランタイム :5171・プレビュー :5172
 ```
 
-http://localhost:5170 を開き、ターミナルの作業ディレクトリに Astro のプロジェクトを置いて
+http://localhost:5170 を開き、ターミナルの作業ディレクトリに Astro のプロジェクトを配置して
 `npm install && npm run dev` を実行します。
 
-Node の lib の束を作るには `vendor/node/` が要ります（`node scripts/gen-node-data.mjs` で 1 度だけ作る。
-公式の Linux 版 Node.js を読むために Docker を使う）。Pagefind の互換パッケージを作り直すには、
-Rust と `wasm32-wasip1` ターゲットが要ります（結果は `vendor/compat/` に取っておく）。
+Node の lib のバンドルをビルドするには `vendor/node/` が必要です（`node scripts/gen-node-data.mjs` で 1 度だけ作成します。
+公式の Linux 版 Node.js を読み込むために Docker を使います）。Pagefind の互換パッケージを再ビルドするには、
+Rust と `wasm32-wasip1` ターゲットが必要です（ビルド結果は `vendor/compat/` にキャッシュされます）。
 
 ## 埋め込み
 
@@ -94,33 +95,48 @@ await vessel.spawn('npm', ['run', 'dev'], { cwd: '/home/user/app' });
 ```
 
 ホストのページは `Cross-Origin-Opener-Policy: same-origin` と
-`Cross-Origin-Embedder-Policy: require-corp`（または `credentialless`）付きで配信してください。
-3 つのオリジンそれぞれに要るヘッダーは `scripts/serve.mjs` にあります。
+`Cross-Origin-Embedder-Policy: require-corp`（または `credentialless`）のヘッダーを付けて配信してください。
+3 つのオリジンそれぞれに必要なヘッダーは `scripts/serve.mjs` で確認できます。
 
-## しくみ
+## 仕組み
+
+```
+ host page (your origin)          runtime origin (hidden iframe)                 preview origin
+ ───────────────────────          ──────────────────────────────────            ──────────────
+ OpenVessel API  ──postMessage──▶ kernel (Web Worker)                            iframe + service worker
+                                   VFS · processes · pipes · TTY · sh · npm      ▲  HTTP / WebSocket
+                                   virtual ports · network policy                │
+                                     │ sync syscalls (SharedArrayBuffer+Atomics) │
+                                   node processes (one Web Worker each) ─────────┘
+                                   Node.js lib/ + TypeScript internalBinding()
+```
 
 | 部分 | 場所 |
 |---|---|
-| カーネル: メモリ上のファイルシステム・プロセス・パイプ・TTY・ソケット・`sh`・coreutils・npm・仮想ポート・外への HTTP | `src/kernel/` |
-| Node.js: 起動・イベントループ・`internalBinding()` の各モジュール | `src/nodejs/` |
-| ランタイムのオリジン: Service Worker（ES モジュールの配信・外部通信の制御） | `src/runtime/` |
-| プレビューのオリジン: HTTP/WebSocket を仮想ポートにつなぐ Service Worker | `src/preview/` |
-| ホストの API | `src/host/` |
-| ネイティブだけのパッケージの互換パッケージ | `compat/`・`scripts/build-compat.mjs` |
+| カーネル: メモリ上のファイルシステム・プロセス・パイプ・TTY・ソケット・`sh`・coreutils・npm クライアント・仮想ポート・外部への HTTP | `src/kernel/` |
+| Node.js: 起動処理・イベントループ・`internalBinding()` の各モジュール | `src/nodejs/` |
+| ランタイムのオリジン: Service Worker（ES モジュールの配信・ネットワークポリシーの確認） | `src/runtime/` |
+| プレビューのオリジン: HTTP/WebSocket を仮想ポートに中継する Service Worker | `src/preview/` |
+| ホスト API | `src/host/` |
+| ネイティブ専用パッケージの代わりになる互換パッケージ | `compat/`・`scripts/build-compat.mjs` |
 
-もっと詳しく: [しくみ](docs/how-it-works.ja.md)・[互換性](docs/compatibility.ja.md)・[リファレンス](docs/reference/README.ja.md)（ホスト API・配信・カーネル・シェル・npm・Node.js ランタイムなど）・設計のメモ [docs/DESIGN.md](docs/DESIGN.md)・[docs/NODE-PORT.md](docs/NODE-PORT.md)。
+詳しくは [仕組み](docs/how-it-works.ja.md)・[互換性](docs/compatibility.ja.md)・[リファレンス](docs/reference/README.ja.md)（ホスト API・デプロイ・カーネル・シェル・npm・Node.js ランタイムなど）と、設計メモの [docs/DESIGN.md](docs/DESIGN.md)・[docs/NODE-PORT.md](docs/NODE-PORT.md) を参照してください。
 
 ## 開発
 
 ```bash
-npm test                                                   # 単体の試験（バインディングは本物の Node と突き合わせ）
-node test/e2e/harness.mjs 'echo hi; node -v'               # ヘッドレスの Chrome で 1 行実行（OV_BROWSER=firefox で Firefox）
+npm test                                                   # 単体テスト（バインディングは本物の Node の結果と比較）
+node test/e2e/harness.mjs 'echo hi; node -v'               # ヘッドレスの Chrome で 1 行実行
 node test/e2e/project.mjs <dir> 'npm install && npm run build'
-node test/node-compat/run.mjs --port [モジュール…]           # Node 自身の試験を OpenVessel で
-node test/node-compat/run.mjs --port --report              # モジュールごとの 通過 / 目標
+node test/node-compat/run.mjs --port [モジュール…]           # Node 自身のテストを OpenVessel で実行
+node test/node-compat/run.mjs --port --report              # モジュールごとの 通過数 / 目標
 node corpus/run.mjs [絞り込み]                              # Astro のサイト集をビルド
 ```
 
+E2E テストは `playwright-core` でシステムの Chrome を操作します（`OV_BROWSER=firefox` を指定すると Playwright の Firefox を使います。
+Firefox は `npx playwright-core install firefox` で 1 度だけインストールしておきます）。`HEADED=1` でブラウザの画面を表示し、
+`OV_CONSOLE=1` でブラウザのコンソール出力を表示します。`OV_PORT_BASE=<port>` を使うと複数のテストスイートを並行して実行できます。
+
 ## ライセンス
 
-Apache License 2.0（[LICENSE](LICENSE)）。同梱しているほかのソフトウェアとそのライセンスは [NOTICE](NOTICE) にあります。
+Apache License 2.0（[LICENSE](LICENSE)）。同梱しているサードパーティのソフトウェアとそのライセンスは [NOTICE](NOTICE) に記載しています。

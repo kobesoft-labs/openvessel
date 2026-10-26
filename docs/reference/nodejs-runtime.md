@@ -2,9 +2,9 @@
 
 [日本語](nodejs-runtime.ja.md)
 
-This page specifies how Node.js runs inside a process worker: the two runtimes in the build and how one
-is chosen, the start-up sequence of the ported runtime, its command line, environment, event loop,
-module loading, TypeScript, `fetch`, and the places where it deliberately differs from Node.js.
+This page specifies how Node.js runs inside a process worker. It covers the two runtimes in the build and
+how one is chosen, the start-up sequence of the ported runtime, its command line, environment, event loop,
+module loading, TypeScript and `fetch`, and the places where it deliberately differs from Node.js.
 What can't work in a browser at all, and the measured test results, are in
 [Compatibility](../compatibility.md).
 
@@ -17,13 +17,13 @@ contains two different scripts for that Worker:
 |---|---|---|
 | Worker script | `dist/runtime/node-process.js` | `dist/runtime/process.js` |
 | Source | `src/nodejs/` (entry `src/nodejs/boot.ts`) | `src/node/` (entry `src/node/worker.ts`) |
-| What runs | Node.js v22.23.4's own `lib/` (bundled in `dist/runtime/nodelib.js`); the C++ half (`internalBinding()`) is re-implemented in TypeScript — see [Bindings](bindings.md) | hand-written Node-compatible modules (`fs.ts`, `http.ts`, `module.ts`, …) |
+| What runs | Node.js v22.23.4's own `lib/` (bundled in `dist/runtime/nodelib.js`); the C++ half (`internalBinding()`) is re-implemented in TypeScript (see [Bindings](bindings.md)) | hand-written Node-compatible modules (`fs.ts`, `http.ts`, `module.ts`, …) |
 | Command line | Node's option table and parser (`src/nodejs/options.ts`); unknown options are errors | a small hand-written parser; unknown options are ignored |
 | TypeScript | Node's own type stripping (amaro) | sucrase's `typescript` transform (enums etc. are accepted) |
 | ES modules | `module_wrap` binding, served at `/__ov/mw/<pid>/<id>.mjs` | the kernel's ESM service at `/__ov/esm/…` and `/__ov/builtin/…` |
 | `--loader` | Node's hooks machinery | ignored with a warning |
 | `node:http2` | loads; servers listen, but a session fails with `ERR_NOT_IMPLEMENTED` (`Http2Session`, see [Not implemented](#not-implemented)) | `createServer()`, `createSecureServer()` and `connect()` throw `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` (`HTTP/2 is not supported in OpenVessel`) |
-| Default | **yes** | no (selected with `legacy`) |
+| Default | yes | no (selected with `legacy`) |
 
 All numbers on the [Compatibility](../compatibility.md) page (Node's test suite and the Astro corpus) were
 measured with the ported runtime. The rest of this page describes the ported runtime unless it says
@@ -284,7 +284,7 @@ Accepted but without effect:
 
 - options of type `kV8Option` in Node's table (`--expose-gc`, `--jitless`, `--max-old-space-size`,
   `--max-semi-space-size`, `--abort-on-uncaught-exception`, `--prof`, `--perf-*`,
-  `--disallow-code-generation-from-strings`, …) — so `node --expose-gc -e 'typeof gc'` gives `undefined`;
+  `--disallow-code-generation-from-strings`, …), so `node --expose-gc -e 'typeof gc'` gives `undefined`;
 - options of type `kNoOp` (`--experimental-modules`, `--experimental-wasm-modules`, …);
 - every other V8 flag (`--use-strict`, `--stack-size=…`, `--harmony-*`, `--allow-natives-syntax`, …):
   the browser's V8 is already running and takes no flags.
@@ -326,7 +326,7 @@ A worker thread parses its own `execArgv` (or the parent's when none is given) t
 (`--title`, `--openssl-config`, `--secure-heap`, `--report-*`, `--use-openssl-ca`, `--v8-options`, `-h`,
 `-v`, …), an option that goes to V8 (`--expose-gc`, `--stack-trace-limit`, `--use-strict`, …) or an
 invalid option fails with `ERR_WORKER_INVALID_EXEC_ARGV`; a bad `env.NODE_OPTIONS` fails with
-`ERR_WORKER_INVALID_EXEC_ARGV` as well (reported through `invalidNodeOptions`).
+`ERR_WORKER_INVALID_EXEC_ARGV` as well, with `invalid NODE_OPTIONS env variable` (reported through `invalidNodeOptions`).
 
 ## Environment and globals
 
@@ -425,18 +425,18 @@ Internal tasks are posted through a `MessageChannel` (faster than `setTimeout(0)
 
 ### Phases and ordering
 
-- **Timers.** All of lib's timers share one native `setTimeout` (Node's single `uv_timer`); lib schedules
+- Timers: all of lib's timers share one native `setTimeout` (Node's single `uv_timer`); lib schedules
   it through `scheduleTimer(ms)` (minimum 1 ms) and runs due timers in `processTimers(now)`. The expiry
   that `processTimers` returns wins over timers scheduled from inside it, as in `RunTimers`. After an
   uncaught exception that a handler swallows, `processTimers` is called again so the remaining due timers
   still run. `uv_now()` (`getLibuvNow`) is milliseconds since the loop started, plus one.
-- **Immediates (check phase).** When immediates are queued, the runtime waits two internal tasks before
-  running `processImmediate` — so the browser's `unhandledrejection` events for the current task are
-  reported first, as Node reports rejections before the next check phase. If the timer is already due, the
+- Immediates (check phase): when immediates are queued, the runtime waits two internal tasks before
+  running `processImmediate`, so that the browser's `unhandledrejection` events for the current task are
+  reported first (Node reports rejections before the next check phase). If the timer is already due, the
   timers run first (a loop iteration runs expired timers before the check phase). After an uncaught
   exception, the rest of the immediate queue still runs in the same phase. A `setImmediate()` made outside
   a callback scope (e.g. after a top-level `await`) takes a turn by itself.
-- **I/O.** Kernel messages (`fd-data`, `tcp-accept`, `child-exit`, …) are handled as they arrive, each in
+- I/O: kernel messages (`fd-data`, `tcp-accept`, `child-exit`, …) are handled as they arrive, each in
   its own scope.
 
 ### Liveness, ref and unref
@@ -590,8 +590,8 @@ source is rejected with `ERR_VM_MODULE_CACHED_DATA_REJECTED`.
 Type stripping is Node's own: `--experimental-strip-types` is on by default in Node 22.23.4, and lib
 decides which files are stripped (`.ts`, `.mts`, `.cts`, and `--input-type=module-typescript` /
 `commonjs-typescript` for eval input) and which errors to raise. lib calls `internal/deps/amaro`, which the
-override replaces with `globalThis.__ovAmaro` (`src/nodejs/typescript.ts`). The real amaro — the same
-version Node bundles (`process.versions.amaro` 1.1.8), swc compiled to WebAssembly, about 3 MB — is
+override replaces with `globalThis.__ovAmaro` (`src/nodejs/typescript.ts`). The real amaro (the same
+version Node bundles, `process.versions.amaro` 1.1.8; swc compiled to WebAssembly, about 3 MB) is
 shipped as `dist/runtime/amaro.js` and fetched with a synchronous `XMLHttpRequest` from the runtime origin
 the first time something is stripped, then evaluated once per worker.
 
@@ -616,7 +616,7 @@ come from `internal/deps/undici`, which the override replaces with `globalThis._
 | URL | How it is fetched |
 |---|---|
 | `data:`, `blob:` | the browser's `fetch` directly |
-| `http:`/`https:` to `localhost`, `*.localhost`, `127.0.0.1`, `::1`, `[::1]`, `0.0.0.0` | Node's own `http.request()` (`https.request()` for `https:`) to `127.0.0.1` on the URL's port, or the scheme's default (80, 443) — a real TCP connection to a virtual port, so it reaches servers inside OpenVessel. `https:` goes through `tls` like any `https` client (server name and certificate check use the URL's host name) |
+| `http:`/`https:` to `localhost`, `*.localhost`, `127.0.0.1`, `::1`, `[::1]`, `0.0.0.0` | Node's own `http.request()` (`https.request()` for `https:`) to `127.0.0.1` on the URL's port, or the scheme's default (80, 443). This is a real TCP connection to a virtual port, so it reaches servers inside OpenVessel. `https:` goes through `tls` like any `https` client (server name and certificate check use the URL's host name) |
 | other `http:`/`https:` | the runtime service worker's `/__ov/net?url=…` endpoint, which applies the [network policy](network-policy.md) and makes the request with the browser's `fetch` |
 | any other scheme | `TypeError: fetch failed`, `cause.code` `ERR_INVALID_URL` (`unsupported URL scheme <scheme>`) |
 
@@ -667,12 +667,14 @@ reads their HTTP/1.1 requests and makes them with the same policy-checked proxy.
 ## Overrides
 
 `src/nodejs/overrides/` holds the only replacements of files of Node's `lib/`. `scripts/gen-nodelib.mjs`
-puts each file there in place of the builtin with the same id.
+puts each file there in place of the builtin with the same id. There are two:
 
-| Builtin id | Replaced by | Why |
-|---|---|---|
-| `internal/deps/undici/undici` | `module.exports = globalThis.__ovUndici;` (from `src/nodejs/fetch.ts`) | undici needs outgoing TCP sockets; fetch goes to virtual ports through `node:http` and everywhere else through the policy-checked proxy |
-| `internal/deps/amaro/dist/index` | `module.exports = globalThis.__ovAmaro(require);` (from `src/nodejs/typescript.ts`) | amaro bundles swc as a 3 MB WebAssembly module; it is kept out of `nodelib.js` and fetched on first use |
+- `internal/deps/undici/undici` is replaced by `module.exports = globalThis.__ovUndici;` (from
+  `src/nodejs/fetch.ts`). undici needs outgoing TCP sockets; fetch goes to virtual ports through
+  `node:http` and everywhere else through the policy-checked proxy.
+- `internal/deps/amaro/dist/index` is replaced by `module.exports = globalThis.__ovAmaro(require);` (from
+  `src/nodejs/typescript.ts`). amaro bundles swc as a 3 MB WebAssembly module; it is kept out of
+  `nodelib.js` and fetched on first use.
 
 ## worker_threads
 
@@ -724,7 +726,7 @@ which does what the C++ does:
 - `vm.compileFunction` code is mapped back to its file name, line and column offsets.
 - `CallSite.prototype.getFileName` and `getScriptNameOrSourceURL` are patched so that ES modules report
   their `file://` URL (not the `/__ov/mw/…` URL they were served from) and eval-compiled code reports its
-  `sourceURL` — also for libraries that install their own `Error.prepareStackTrace` (callsites, depd, …).
+  `sourceURL`. This also applies to libraries that install their own `Error.prepareStackTrace` (callsites, depd, …).
 - Node's own `prepareStackTrace` callback (set through `setPrepareStackTraceCallback`) then formats the
   trace, so error messages, `code` properties and stack frames read like Node's:
 
@@ -790,9 +792,9 @@ handles (`TCPWRAP`, `TCPSERVERWRAP`, `PIPEWRAP`, `PIPESERVERWRAP`, `TTYWRAP`, `T
 (`FSREQCALLBACK`, `FSREQPROMISE`, `FILEHANDLECLOSEREQ`, `TCPCONNECTWRAP`, `PIPECONNECTWRAP`,
 `SHUTDOWNWRAP`, `WRITEWRAP` for a write that couldn't finish at once, `GETADDRINFOREQWRAP`,
 `GETNAMEINFOREQWRAP`, `QUERYWRAP`) and others (`FILEHANDLE`, `DIRHANDLE`, `DNSCHANNEL`, `ZLIB`,
-`HTTPINCOMINGMESSAGE`, `HTTPCLIENTREQUEST`, the crypto jobs). Each gets an async id when it is made — a
-request object lib creates (`WriteWrap`, `TCPConnectWrap`, …) when the binding starts the request with
-it — and `init` runs then (the trigger is the default trigger id or the current execution id; a request
+`HTTPINCOMINGMESSAGE`, `HTTPCLIENTREQUEST`, the crypto jobs). Each gets an async id when it is made (for a
+request object lib creates, such as `WriteWrap` or `TCPConnectWrap`, when the binding starts the request
+with it), and `init` runs then (the trigger is the default trigger id or the current execution id; a request
 started on a handle and a connection accepted by a server are triggered by that handle), its callbacks run in its async context with `before`/`after` around them
 (`executionAsyncId()` and `executionAsyncResource()` are the resource), and `destroy` follows when a
 handle has closed or a request has completed. Resources Node destroys only on garbage collection
@@ -835,8 +837,8 @@ The binding-level status of every module is in [Bindings](bindings.md).
 
 ## Related pages
 
-- [Bindings](bindings.md) — every `internalBinding()` module and its status
-- [Processes](processes.md), [Kernel](kernel.md), [Protocol](protocol.md) — the kernel side
-- [Network policy](network-policy.md) — what outgoing requests may do
-- [Compatibility](../compatibility.md) — measured results and platform limits
+- [Bindings](bindings.md): every `internalBinding()` module and its status
+- [Processes](processes.md), [Kernel](kernel.md), [Protocol](protocol.md): the kernel side
+- [Network policy](network-policy.md): what outgoing requests may do
+- [Compatibility](../compatibility.md): measured results and platform limits
 - [How it works](../how-it-works.md)
