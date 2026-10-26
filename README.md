@@ -1,7 +1,7 @@
 # OpenVessel
 
 [日本語](README.ja.md) · **[Live demo](https://kobesoft-labs.github.io/openvessel-demo/)** — edit an Astro site with Node.js running in the tab
-· [Product page](https://kobesoft.co.jp/technology/openvessel/) (Japanese, by KOBESOFT)
+· [Reference](docs/reference/README.md) · [Product page](https://kobesoft.co.jp/oss/openvessel/) (Japanese, by KOBESOFT)
 
 ## What is OpenVessel?
 
@@ -120,7 +120,7 @@ headers each of the three origins needs.
 | Host API | `src/host/` |
 | Compat packages for native-only npm packages | `compat/`, `scripts/build-compat.mjs` |
 
-More: [How it works](docs/how-it-works.md) · [Compatibility](docs/compatibility.md) · design notes [docs/DESIGN.md](docs/DESIGN.md), [docs/NODE-PORT.md](docs/NODE-PORT.md) (Japanese).
+More: [How it works](docs/how-it-works.md) · [Compatibility](docs/compatibility.md) · [Reference](docs/reference/README.md) (host API, deployment, kernel, shell, npm, Node.js runtime…) · design notes [docs/DESIGN.md](docs/DESIGN.md), [docs/NODE-PORT.md](docs/NODE-PORT.md) (Japanese).
 
 ## Development
 

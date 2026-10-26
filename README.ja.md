@@ -1,7 +1,7 @@
 # OpenVessel
 
 [English](README.md) · **[デモ](https://kobesoft-labs.github.io/openvessel-demo/)** — Node.js がタブの中で動き、Astro のサイトをその場で編集できます
-· [製品ページ](https://kobesoft.co.jp/technology/openvessel/)（神戸ソフト）
+· [リファレンス](docs/reference/README.ja.md) · [製品ページ](https://kobesoft.co.jp/oss/openvessel/)（神戸ソフト）
 
 ## OpenVessel とは
 
@@ -108,7 +108,7 @@ await vessel.spawn('npm', ['run', 'dev'], { cwd: '/home/user/app' });
 | ホストの API | `src/host/` |
 | ネイティブだけのパッケージの互換パッケージ | `compat/`・`scripts/build-compat.mjs` |
 
-もっと詳しく: [しくみ](docs/how-it-works.ja.md)・[互換性](docs/compatibility.ja.md)・設計のメモ [docs/DESIGN.md](docs/DESIGN.md)・[docs/NODE-PORT.md](docs/NODE-PORT.md)。
+もっと詳しく: [しくみ](docs/how-it-works.ja.md)・[互換性](docs/compatibility.ja.md)・[リファレンス](docs/reference/README.ja.md)（ホスト API・配信・カーネル・シェル・npm・Node.js の層など）・設計のメモ [docs/DESIGN.md](docs/DESIGN.md)・[docs/NODE-PORT.md](docs/NODE-PORT.md)。
 
 ## 開発
 
