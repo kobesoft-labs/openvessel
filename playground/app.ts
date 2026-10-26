@@ -35,6 +35,7 @@ term.writeln('OpenVessel を起動しています…');
 const ready = (async () => {
   const vessel = await OpenVessel.boot({ runtimeUrl: RUNTIME, previewUrl: PREVIEW, network: { mode: 'ask' } });
   (window as any).ov = vessel;
+  vessel.on('error', ({ message, fatal }) => term.writeln(`\r\n\x1b[31m${message}${fatal ? '（停止しました）' : ''}\x1b[0m`));
   await vessel.mount(SAMPLE, { path: APP });
   const shell = await vessel.spawn('/bin/sh', ['-i'], { cwd: APP, terminal: { cols: term.cols, rows: term.rows } });
   (async () => {
