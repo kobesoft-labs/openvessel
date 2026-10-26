@@ -100,7 +100,7 @@ import { OpenVessel } from 'openvessel';
 
 const vessel = await OpenVessel.boot({
   runtimeUrl: 'https://rt.example.com/',   // runtime.html のあるディレクトリ（か runtime.html そのもの）
-  previewUrl: 'https://pv.example.com/',   // __ov-sw.js のあるディレクトリ。最後は "/"
+  previewUrl: 'https://pv.example.com/',   // __ov-sw.js のあるディレクトリ
   network: { mode: 'ask', presets: ['npm', 'fonts', 'icons', 'cdn'] },
 });
 ```
@@ -110,6 +110,13 @@ const vessel = await OpenVessel.boot({
 オプションとエラーはすべて [ホスト API](host-api.ja.md#openvesselboot) にあります。通信の方針は
 [通信の方針](network-policy.ja.md) で説明しています。`mode: 'ask'` で `onPermissionRequest` を渡さないと、
 用意したセットに無いホストについて、組み込みのダイアログが利用者に尋ねます。
+
+`boot()` が解決したあと、呼び出しの外で起きたエラーは `error` イベントで届きます（1.2.0 で追加）。
+`fatal: true` は、カーネルが無くなってインスタンスが止まったことを表します。
+
+```ts
+vessel.on('error', ({ message, fatal }) => console.error(message, fatal ? '(stopped)' : ''));
+```
 
 1 つのブラウザのプロファイルで同時に使えるのは、ランタイムのオリジンごとに 1 つです。ランタイムの Service Worker は
 いちばん新しいカーネルへの接続しか持たないので、同じランタイムのオリジンで 2 つ目のタブや 2 回目の `boot()` を
@@ -204,7 +211,8 @@ const dev = await vessel.spawn('npm', ['run', 'dev'], { cwd: APP });
 リスナーは、サーバーを起動する前に登録します。`server-ready` は、プロセスが仮想ポートで待ち受けたときに届きます
 （Astro の開発サーバーは 4321）。止まると `port-closed` が届きます。`createPreview()` は、初めて使うときにプレビューの
 中継を起動し、iframe を作って `container` に足します。iframe を自分で置くなら `await vessel.previewUrl(port, '/about/')`
-を使います。HMR はプレビューの Service Worker を通して動きます（[プレビュー](preview.ja.md)）。
+か、イベントの `url` を使います。`previewUrl` があると `server-ready` は中継が動いてから届くので、`url` はすぐに
+読み込めます。HMR はプレビューの Service Worker を通して動きます（[プレビュー](preview.ja.md)）。
 
 ## xterm.js で対話のターミナル
 
@@ -246,7 +254,8 @@ new ResizeObserver(() => fit.fit()).observe(document.getElementById('term')!);
 ```
 
 利用者の代わりにコマンドを打つときは、復帰（CR）を付けて書きます: `shell.write('npm run dev\r')`。
-`shell.end()` はパイプ用です。端末のプロセスでは失敗します。入力の終わりは、行の先頭で `\x04`（Ctrl-D）を送ります。
+端末のプロセスの `shell.end()` は、行の規律に Ctrl-D（`^D`）を送ります。行の先頭なら、プログラムはファイルの終わりを
+読みます（対話の `sh` は終わります）。パイプのプロセスでは標準入力を閉じます。
 
 ## 動かしながらファイルを書き換える
 
@@ -271,8 +280,8 @@ vessel.teardown();
 ```
 
 `teardown()` はランタイムと中継の iframe を外し、カーネルへの通り道を閉じます。カーネルの Worker とすべての
-プロセスは、ランタイムの iframe と一緒に終わります。メモリ上のファイルシステムも消えます。自分のページに置いた
-プレビューの iframe は外しません。答えを待っている呼び出しは、解決も失敗もしないままです。ランタイムとプレビューの
+プロセスは、ランタイムの iframe と一緒に終わります。メモリ上のファイルシステムも消えます。答えを待っている呼び出しは
+失敗し、動いているプロセスの `exit` は `137` で解決します。自分のページに置いたプレビューの iframe は外しません。ランタイムとプレビューの
 オリジンの Service Worker の登録と、npm の tarball のキャッシュ（ランタイムのオリジンの Cache Storage
 `openvessel-npm-v1`）はブラウザに残ります。
 
@@ -282,7 +291,7 @@ vessel.teardown();
 |---|---|
 | `OpenVessel: the host page must be cross-origin isolated (…)` | ホストのページに `Cross-Origin-Opener-Policy: same-origin` か `Cross-Origin-Embedder-Policy` がありません。 |
 | `OpenVessel: OpenVessel needs a cross-origin isolated page (…)` | ランタイムのページが cross-origin isolated になっていません。ランタイム自身の COOP/COEP のヘッダーが無い（ランタイムの Service Worker が足すのは、それが入ったあとだけ）か、ホストのページの COEP に止められています（ランタイムは `Cross-Origin-Resource-Policy: cross-origin` を返す必要があります）。 |
-| `OpenVessel: runtime did not start in time` | `runtime.html` が読み込めないか、`timeout` までに答えませんでした。`runtimeUrl`（最後が `/` か、`runtime.html` を指す）と `frame-ancestors` を確かめてください。 |
+| `OpenVessel: runtime did not start in time` | `runtime.html` が読み込めないか、`timeout` までに答えませんでした。`runtimeUrl`（`runtime.html` のあるディレクトリか、`runtime.html` そのもの）と `frame-ancestors` を確かめてください。 |
 | `OpenVessel: origin … is not allowed to use this runtime` | ホストのオリジンが、`runtime.html` の `openvessel-allowed-hosts` にありません。 |
 | `OpenVessel: the runtime must be embedded directly by the host page` | `boot()` を呼んだページ自身が、フレームの中にあります。 |
 | `OpenVessel: previewUrl was not configured` | `boot()` に `previewUrl` を渡さずに `createPreview()`・`previewUrl()` を呼びました。 |

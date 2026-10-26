@@ -12,7 +12,7 @@ teardown and errors. The source is `src/host/index.ts`; the declarations are
 ```ts
 import OpenVessel from 'openvessel';               // default export: the OpenVessel class
 import { OpenVessel, Process, PRESETS } from 'openvessel';
-import type { BootOptions, SpawnOptions, PermissionRequest, PermissionDecision, NetworkPolicy } from 'openvessel';
+import type { BootOptions, SpawnOptions, PermissionRequest, PermissionDecision, NetworkPolicy, RuntimeErrorEvent } from 'openvessel';
 ```
 
 | Export | Kind | Description |
@@ -26,6 +26,7 @@ import type { BootOptions, SpawnOptions, PermissionRequest, PermissionDecision, 
 | `PermissionRequest` | type | What a permission handler receives. |
 | `PermissionDecision` | type | `'once' \| 'session' \| 'deny' \| 'deny-session'`. |
 | `NetworkPolicy` | type | `{ mode, presets, allow, deny }` ([Network policy](network-policy.md#the-policy-object)). |
+| `RuntimeErrorEvent` | type | Payload of the `error` event ([Events](#events--on)). **New in 1.2.0.** |
 
 Members marked `@internal` in the source (`_call`, `Process._data`, `Process._exit`) are not part of
 the API.
@@ -42,8 +43,8 @@ Embeds the runtime and resolves with a connected instance.
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `runtimeUrl` | `string` | required | Where `dist/runtime/` is served. Resolved against `location.href`; the frame loads `new URL('runtime.html', runtimeUrl)`, so give the directory with a trailing `/` (`https://rt.example.com/`) or the `runtime.html` URL itself. If its origin equals the page's origin, `boot()` logs the warning `OpenVessel: the runtime should be served from its own origin` and continues. |
-| `previewUrl` | `string` | none | Where `dist/preview/` is served. Its directory (`new URL('./', previewUrl)`) is the preview base, so it must end with `/`. Without it, `previewUrl()` and `createPreview()` reject and `server-ready` events carry `url: null`. |
+| `runtimeUrl` | `string` | required | Where `dist/runtime/` is served: the directory (`https://rt.example.com/`) or the `runtime.html` URL itself. Resolved against `location.href`; query and fragment are dropped. A last path segment without an extension names a directory (`https://rt.example.com/ov` is `https://rt.example.com/ov/`); one with an extension is a file in its directory. The frame loads `runtime.html` from that directory. If its origin equals the page's origin, `boot()` logs the warning `OpenVessel: the runtime should be served from its own origin` and continues. |
+| `previewUrl` | `string` | none | Where `dist/preview/` is served. Its directory, found like `runtimeUrl`'s (`https://pv.example.com/app` is `https://pv.example.com/app/`), is the preview base. Without it, `previewUrl()` and `createPreview()` reject and `server-ready` events carry `url: null`. |
 | `network` | `Partial<NetworkPolicy>` | `{ mode: 'ask', presets: ['npm', 'fonts', 'icons', 'cdn'], allow: [], deny: [] }` | The initial network policy. Missing fields take the defaults. |
 | `onPermissionRequest` | `(req: PermissionRequest) => PermissionDecision \| Promise<PermissionDecision>` | the built-in dialog | Answers requests to hosts the policy doesn't decide ([Permission requests](#permission-requests)). |
 | `locale` | `'ja' \| 'en'` | `'ja'` when `navigator.language` starts with `ja`, else `'en'` | Language of the built-in dialog. |
@@ -66,8 +67,9 @@ Embeds the runtime and resolves with a connected instance.
 
 Errors reported by the runtime frame during boot reject `boot()` with `OpenVessel: <message>`
 ([Errors](#errors)). If nothing arrives within `timeout`, it rejects with
-`OpenVessel: runtime did not start in time`. Errors the runtime frame reports after `boot()` resolved
-are ignored.
+`OpenVessel: runtime did not start in time`. When `boot()` rejects, the runtime iframe and the message
+listener it added are removed. Errors the runtime frame reports after `boot()` resolved go to the
+`error` event ([Events](#events--on)).
 
 ### One instance per runtime origin
 
@@ -289,11 +291,11 @@ happens that early.
 | Member | Type | Description |
 |---|---|---|
 | `pid` | `number` | Process id. |
-| `output` | `ReadableStream<string>` | Everything the process writes, decoded as UTF-8 (streaming, so multi-byte characters split across chunks are kept whole). stdout and stderr are merged in arrival order. Closes when the process ends. Chunks queue until read; if you never read the stream, they stay in memory. |
-| `exit` | `Promise<number>` | The exit code ([Exit codes](#exit-codes-and-signals)). Without a terminal it resolves when the process has exited **and** both output pipes have reached end of file (a background child still holding the pipe delays it); with a terminal, when the process has exited. |
+| `output` | `ReadableStream<string>` | Everything the process writes, decoded as UTF-8 (streaming, so multi-byte characters split across chunks are kept whole; an incomplete sequence left at the end becomes U+FFFD). stdout and stderr are merged in arrival order. Closes when the process ends. Chunks queue until read; if you never read the stream, they stay in memory. |
+| `exit` | `Promise<number>` | The exit code ([Exit codes](#exit-codes-and-signals)). Without a terminal it resolves when the process has exited **and** both output pipes have reached end of file (a background child still holding the pipe delays it); with a terminal, when the process has exited. If the kernel is gone first (`teardown()`, a fatal [`error`](#the-error-event)), it resolves with `137`. |
 | `collected` | `string` (getter) | All output so far. When it grows past 2 000 000 characters it is cut to the last 1 000 000. |
 | `write(data)` | `Promise<boolean>` | `string` (UTF-8) or `Uint8Array` to stdin — through the line discipline for a terminal. Resolves `false` when the process is gone, else `true` (also after `end()`, when the data is dropped). |
-| `end()` | `Promise<boolean>` | Closes stdin of a pipe process (the reader sees end of file). On a terminal process it rejects with `data must be a string or Uint8Array`; write `'\x04'` at the start of a line instead. |
+| `end()` | `Promise<boolean>` | Ends the input. A pipe process: closes stdin (the reader sees end of file); later writes are dropped. A terminal process: sends the EOF character `^D` through the line discipline, as pressing Ctrl-D does — at the start of a line the reader sees end of file; after a partial line that line is delivered first, and a second `end()` gives end of file; in raw mode the program reads the byte `0x04`. The terminal stays usable. Resolves `false` when the process is gone. (Before 1.2.0 it rejected on terminal processes.) |
 | `resize(cols, rows)` | `Promise<null>` | Resizes the terminal and sends `SIGWINCH` to the processes on it. Does nothing for pipe processes. |
 | `kill(signal = 'SIGTERM')` | `Promise<null>` | Sends `signal` to the process's whole process group. Always resolves `null`, also when the process is gone. |
 
@@ -354,7 +356,8 @@ Session decisions survive `setPolicy()`. The model, the presets and the decision
 ## Events — `on()`
 
 ```ts
-on(event: 'server-ready' | 'port-closed' | 'permission-request' | 'permission-settled' | 'process-exit',
+on(event: 'error', fn: (ev: RuntimeErrorEvent) => void): () => void
+on(event: 'server-ready' | 'port-closed' | 'permission-request' | 'permission-settled' | 'process-exit' | 'error',
    fn: (ev: any) => void): () => void
 ```
 
@@ -363,11 +366,25 @@ added; an exception in one is logged with `console.error` and doesn't stop the o
 
 | Event | Payload | When |
 |---|---|---|
-| `server-ready` | `{ port: number, pid: number, url: string \| null }` | A process starts listening on a virtual port. In the ported runtime any TCP listener; in the legacy runtime HTTP servers only. `url` is the preview URL for `/` (`previewUrl` configured), else `null`; it is computed without waiting for the preview relay — use `previewUrl()` or `createPreview()` to be sure the relay is up. Port `0` is reported as the port the kernel picked (49152–65151). |
+| `server-ready` | `{ port: number, pid: number, url: string \| null }` | A process starts listening on a virtual port. In the ported runtime any TCP listener; in the legacy runtime HTTP servers only. `url` is the preview URL for `/` (`previewUrl` configured), else `null`. With `previewUrl`, the event starts the preview relay if it isn't running and is emitted once the relay is up, so `url` can be loaded at once; if the relay fails to start (at most 20 s), the event is emitted anyway, a non-fatal `error` reports the failure, and the next `previewUrl()` / `createPreview()` tries again. `server-ready` and `port-closed` keep their order. Port `0` is reported as the port the kernel picked (49152–65151). |
 | `port-closed` | `{ port: number }` | The listener is gone (server closed, or its process exited). |
 | `process-exit` | `{ pid: number, code: number, signal: string \| null }` | A process started by `spawn()`/`exec()` ended. Not emitted for processes those start themselves. |
 | `permission-request` | `{ ev: 'permission-request', id: number, url: string, host: string, initiator: string, source: 'runtime' \| 'preview' }` | The kernel asks about a host. Listeners are informational; the answer comes from `onPermissionRequest` or the dialog. |
 | `permission-settled` | `{ ev: 'permission-settled', id: number, host: string, allowed: boolean }` | A request was decided (answered, or timed out after 5 minutes). |
+| `error` | `RuntimeErrorEvent`: `{ error: Error, message: string, fatal: boolean }` | **New in 1.2.0.** Something failed outside a call ([below](#the-error-event)). Without any `error` listener, the error is logged with `console.error`. |
+
+### The `error` event
+
+| Cause | `message` | `fatal` |
+|---|---|---|
+| The runtime frame reports an error after `boot()` (an uncaught error in the kernel worker) | `OpenVessel: kernel failed: <message>` | `false`. A worker keeps running after an uncaught error, so the host then checks that the kernel still answers: without an answer within 10 s, the same error is emitted again with `fatal: true`. |
+| The runtime frame loads again (it was reloaded, or moved in the document, which reloads an iframe) | `OpenVessel: the runtime frame was reloaded; the kernel is gone` | `true` |
+| The preview relay could not start for a `server-ready` event | `OpenVessel: preview relay did not start` | `false` |
+
+When the error is fatal, the instance is shut down as by [`teardown()`](#teardown), except that event
+listeners are kept: calls still waiting and every later call reject with that error, running
+processes end (`exit` resolves with `137`, `process-exit` is emitted with `signal: 'SIGKILL'`), and the
+runtime and relay iframes are removed. Boot a new instance to continue.
 
 ## Permission requests
 
@@ -422,8 +439,9 @@ Buttons, left to right:
 | `Allow for this session` (primary) | `このセッション中は許可` | `'session'` |
 
 Escape (the dialog's `cancel` event) answers `'deny'`. Only one dialog is shown at a time; further
-requests wait in a queue shared by all instances in the page. If the kernel's 5-minute timeout denies a
-request first, its dialog stays open, and the answer given later is ignored.
+requests wait in a queue shared by all instances in the page. When a request is settled without the
+dialog (the kernel's 5-minute timeout denies it), `permission-settled` closes its dialog, or takes it
+out of the queue, and the next one is shown. `teardown()` does the same for the instance's dialogs.
 
 ## Preview
 
@@ -439,9 +457,10 @@ Starts the preview relay if needed and resolves with
 `previewUrl` in `boot()`.
 
 The relay is a hidden iframe for `<preview base>__ov/relay.html` (styled like the runtime frame). The
-first call starts it and waits up to 20 s for it to register the preview service worker
-(`OpenVessel: preview relay did not start` otherwise); a failed start is not retried. Later calls make
-`port` the relay's default port and return at once. How requests reach the server is described in
+first call (or the first `server-ready` event) starts it and waits up to 20 s for it to register the
+preview service worker (`OpenVessel: preview relay did not start` otherwise). A failed start removes
+the iframe, and the next call starts it again. Later calls make `port` the relay's default port and
+return at once; one made while the relay is starting waits for it. How requests reach the server is described in
 [Preview](preview.md).
 
 ### `createPreview()`
@@ -469,10 +488,12 @@ iframe; reload one by setting its `src` again.
 teardown(): void
 ```
 
-Removes the runtime iframe (the kernel and every process end with it) and the relay iframe, and closes
-the channel. It doesn't remove preview iframes, close an open permission dialog, settle calls that are
-still waiting, or unregister the service workers. The instance can't be used afterwards; boot a new
-one instead.
+Removes the runtime iframe (the kernel and every process end with it) and the relay iframe, closes
+the channel, and removes the instance's message listeners and event listeners. Calls still waiting and
+every later call reject with `OpenVessel: the instance was torn down`; running processes end (`exit`
+resolves with `137`, and `process-exit` is emitted with `signal: 'SIGKILL'` before the listeners are
+removed); the instance's built-in permission dialogs close. It doesn't remove preview iframes or
+unregister the service workers. The instance can't be used afterwards; boot a new one instead.
 
 ## Errors
 
@@ -492,7 +513,7 @@ none; the original error class, such as `TypeError`, is not kept).
 | `ENAMETOOLONG` | Path over 4096 bytes or a component over 255 bytes. |
 | `EACCES` | `spawn()` of a file without execute permission (`<cmd>: Permission denied`). |
 | `ENOSYS` | A method the kernel doesn't know (`unknown method <name>`) — happens when `dist/host` and the deployed `dist/runtime` come from different versions. |
-| (none) | `data must be a string or Uint8Array` from `writeFile`, `mount`, `write`, and `end` on a terminal process. |
+| (none) | `data must be a string or Uint8Array` from `writeFile`, `mount` and `write`. |
 
 Errors that are not from the kernel:
 
@@ -504,9 +525,11 @@ Errors that are not from the kernel:
 | `OpenVessel: origin <origin> is not allowed to use this runtime` | `boot()` — `openvessel-allowed-hosts` |
 | `OpenVessel: the runtime must be embedded directly by the host page` | `boot()` — the runtime frame has more than one ancestor |
 | `OpenVessel: service worker registration failed: <message>` | `boot()` |
-| `OpenVessel: kernel failed: <message>` | `boot()` — the kernel worker failed to load |
+| `OpenVessel: kernel failed: <message>` | `boot()` — the kernel worker failed to load; after boot, the `error` event, and every call once it is fatal |
 | `OpenVessel: previewUrl was not configured` | `previewUrl()`, `createPreview()` |
-| `OpenVessel: preview relay did not start` | `previewUrl()`, `createPreview()` after 20 s |
+| `OpenVessel: preview relay did not start` | `previewUrl()`, `createPreview()` after 20 s; the `error` event when a `server-ready` started the relay |
+| `OpenVessel: the runtime frame was reloaded; the kernel is gone` | the `error` event (fatal); every call afterwards |
+| `OpenVessel: the instance was torn down` | every call waiting at, or made after, `teardown()` |
 
 ## Limits and timeouts
 
@@ -514,6 +537,7 @@ Errors that are not from the kernel:
 |---|---|
 | 30 000 ms | default `timeout` of `boot()` |
 | 20 000 ms | preview relay start (fixed) |
+| 10 000 ms | after a non-fatal kernel error, the kernel must answer within this time or the error becomes fatal |
 | 5 minutes | a permission request without an answer is denied |
 | 2 000 000 / 1 000 000 characters | `Process.collected` is cut to the last 1 000 000 characters past 2 000 000 |
 | 15 000 ms | the runtime and preview service workers wait this long for a kernel connection before failing a request |

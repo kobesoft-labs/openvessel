@@ -12,7 +12,7 @@
 ```ts
 import OpenVessel from 'openvessel';               // 既定のエクスポート: OpenVessel のクラス
 import { OpenVessel, Process, PRESETS } from 'openvessel';
-import type { BootOptions, SpawnOptions, PermissionRequest, PermissionDecision, NetworkPolicy } from 'openvessel';
+import type { BootOptions, SpawnOptions, PermissionRequest, PermissionDecision, NetworkPolicy, RuntimeErrorEvent } from 'openvessel';
 ```
 
 | エクスポート | 種類 | 説明 |
@@ -26,6 +26,7 @@ import type { BootOptions, SpawnOptions, PermissionRequest, PermissionDecision, 
 | `PermissionRequest` | 型 | 許可の問い合わせの処理に渡るもの。 |
 | `PermissionDecision` | 型 | `'once' \| 'session' \| 'deny' \| 'deny-session'`。 |
 | `NetworkPolicy` | 型 | `{ mode, presets, allow, deny }`（[通信の方針](network-policy.ja.md#ポリシーの形)）。 |
+| `RuntimeErrorEvent` | 型 | `error` イベントの中身（[イベント](#イベント--on)）。**1.2.0 で追加。** |
 
 ソースで `@internal` と書いたメンバー（`_call`・`Process._data`・`Process._exit`）は API に含みません。
 
@@ -41,8 +42,8 @@ static boot(opts: BootOptions): Promise<OpenVessel>
 
 | オプション | 型 | 既定 | 意味 |
 |---|---|---|---|
-| `runtimeUrl` | `string` | 必須 | `dist/runtime/` を配っている場所。`location.href` を基準に解決し、フレームは `new URL('runtime.html', runtimeUrl)` を読みます。ディレクトリを最後の `/` 付きで（`https://rt.example.com/`）、または `runtime.html` の URL そのものを渡します。ページと同じオリジンだと、`boot()` は警告 `OpenVessel: the runtime should be served from its own origin` を出して続けます。 |
-| `previewUrl` | `string` | なし | `dist/preview/` を配っている場所。そのディレクトリ（`new URL('./', previewUrl)`）がプレビューの基準になるので、最後は `/` にします。無いと `previewUrl()` と `createPreview()` は失敗し、`server-ready` の `url` は `null` です。 |
+| `runtimeUrl` | `string` | 必須 | `dist/runtime/` を配っている場所。ディレクトリ（`https://rt.example.com/`）か、`runtime.html` の URL そのものを渡します。`location.href` を基準に解決し、クエリとフラグメントは捨てます。パスの最後の部分に拡張子が無ければディレクトリとみなし（`https://rt.example.com/ov` は `https://rt.example.com/ov/`）、拡張子があればそのディレクトリの中のファイルとみなします。フレームはそのディレクトリの `runtime.html` を読みます。ページと同じオリジンだと、`boot()` は警告 `OpenVessel: the runtime should be served from its own origin` を出して続けます。 |
+| `previewUrl` | `string` | なし | `dist/preview/` を配っている場所。`runtimeUrl` と同じ決まりで求めたディレクトリ（`https://pv.example.com/app` は `https://pv.example.com/app/`）がプレビューの基準になります。無いと `previewUrl()` と `createPreview()` は失敗し、`server-ready` の `url` は `null` です。 |
 | `network` | `Partial<NetworkPolicy>` | `{ mode: 'ask', presets: ['npm', 'fonts', 'icons', 'cdn'], allow: [], deny: [] }` | 最初の通信の方針。無い項目は既定の値になります。 |
 | `onPermissionRequest` | `(req: PermissionRequest) => PermissionDecision \| Promise<PermissionDecision>` | 組み込みのダイアログ | 方針で決まらないホストへの要求に答えます（[許可の問い合わせ](#許可の問い合わせ)）。 |
 | `locale` | `'ja' \| 'en'` | `navigator.language` が `ja` で始まれば `'ja'`、ほかは `'en'` | 組み込みのダイアログの言語。 |
@@ -64,7 +65,8 @@ static boot(opts: BootOptions): Promise<OpenVessel>
 
 起動の途中でランタイムのフレームが知らせたエラーは、`OpenVessel: <メッセージ>` で `boot()` を失敗させます
 （[エラー](#エラー)）。`timeout` までに何も届かなければ `OpenVessel: runtime did not start in time` で失敗します。
-`boot()` が解決したあとにランタイムのフレームが知らせたエラーは無視されます。
+`boot()` が失敗したときは、ランタイムの iframe と、`boot()` が足したメッセージのリスナーを外します。
+`boot()` が解決したあとにランタイムのフレームが知らせたエラーは、`error` イベントで届きます（[イベント](#イベント--on)）。
 
 ### ランタイムのオリジンごとに 1 つ
 
@@ -278,11 +280,11 @@ spawn(command: string, args?: string[], opts?: SpawnOptions): Promise<Process>
 | メンバー | 型 | 説明 |
 |---|---|---|
 | `pid` | `number` | プロセスの番号。 |
-| `output` | `ReadableStream<string>` | プロセスが書いたものすべてを UTF-8 で読んだもの（続けて読むので、チャンクをまたぐ多バイト文字も崩れません）。標準出力と標準エラーは届いた順に混ざります。プロセスが終わると閉じます。チャンクは読まれるまで溜まるので、読まなければメモリに残ります。 |
-| `exit` | `Promise<number>` | 終了コード（[終了コードとシグナル](#終了コードとシグナル)）。端末なしでは、プロセスが終わり、**しかも**両方の出力のパイプが終わりに達したときに解決します（パイプを握ったままの裏の子がいると遅れます）。端末ありでは、プロセスが終わったときです。 |
+| `output` | `ReadableStream<string>` | プロセスが書いたものすべてを UTF-8 で読んだもの（続けて読むので、チャンクをまたぐ多バイト文字も崩れません。最後に途中で切れたバイト列が残れば U+FFFD になります）。標準出力と標準エラーは届いた順に混ざります。プロセスが終わると閉じます。チャンクは読まれるまで溜まるので、読まなければメモリに残ります。 |
+| `exit` | `Promise<number>` | 終了コード（[終了コードとシグナル](#終了コードとシグナル)）。端末なしでは、プロセスが終わり、**しかも**両方の出力のパイプが終わりに達したときに解決します（パイプを握ったままの裏の子がいると遅れます）。端末ありでは、プロセスが終わったときです。先にカーネルが無くなったとき（`teardown()`、致命的な [`error`](#error-イベント)）は `137` で解決します。 |
 | `collected` | `string`（getter） | これまでの出力のすべて。2 000 000 文字を超えると、最後の 1 000 000 文字に切り詰めます。 |
 | `write(data)` | `Promise<boolean>` | `string`（UTF-8）か `Uint8Array` を標準入力へ。端末なら行の規律を通ります。プロセスがもう無ければ `false`、ほかは `true` で解決します（`end()` のあとも `true` で、データは捨てます）。 |
-| `end()` | `Promise<boolean>` | パイプのプロセスの標準入力を閉じます（読む側はファイルの終わりを受け取ります）。端末のプロセスでは `data must be a string or Uint8Array` で失敗します。代わりに行の先頭で `'\x04'` を書きます。 |
+| `end()` | `Promise<boolean>` | 入力を終えます。パイプのプロセスでは標準入力を閉じます（読む側はファイルの終わりを受け取り、そのあとの書き込みは捨てられます）。端末のプロセスでは、Ctrl-D を押したときと同じく、EOF の文字 `^D` を行の規律に送ります。行の先頭なら読む側はファイルの終わりを受け取ります。書きかけの行があるとまずその行が渡り、もう 1 度 `end()` を呼ぶとファイルの終わりになります。raw モードではプログラムがバイト `0x04` を読みます。端末はそのまま使えます。プロセスが無ければ `false` で解決します。（1.2.0 より前は、端末のプロセスでは失敗していました。） |
 | `resize(cols, rows)` | `Promise<null>` | 端末の大きさを変え、その端末のプロセスに `SIGWINCH` を送ります。パイプのプロセスでは何もしません。 |
 | `kill(signal = 'SIGTERM')` | `Promise<null>` | `signal` をプロセスのプロセスグループ全体に送ります。プロセスがもう無くても、いつも `null` で解決します。 |
 
@@ -341,7 +343,8 @@ HTTP のサーバーだけです（ただの `net` のサーバーは中で使�
 ## イベント — `on()`
 
 ```ts
-on(event: 'server-ready' | 'port-closed' | 'permission-request' | 'permission-settled' | 'process-exit',
+on(event: 'error', fn: (ev: RuntimeErrorEvent) => void): () => void
+on(event: 'server-ready' | 'port-closed' | 'permission-request' | 'permission-settled' | 'process-exit' | 'error',
    fn: (ev: any) => void): () => void
 ```
 
@@ -350,11 +353,25 @@ on(event: 'server-ready' | 'port-closed' | 'permission-request' | 'permission-se
 
 | イベント | 中身 | いつ |
 |---|---|---|
-| `server-ready` | `{ port: number, pid: number, url: string \| null }` | プロセスが仮想ポートで待ち受けを始めたとき。移植した層ではすべての TCP の待ち受け、旧来の層では HTTP のサーバーだけです。`url` は `/` を出すプレビューの URL（`previewUrl` があるとき）で、無ければ `null`。プレビューの中継を待たずに作るので、中継が動いていることを確かめるには `previewUrl()` か `createPreview()` を使います。ポート `0` は、カーネルが選んだポート（49152〜65151）で届きます。 |
+| `server-ready` | `{ port: number, pid: number, url: string \| null }` | プロセスが仮想ポートで待ち受けを始めたとき。移植した層ではすべての TCP の待ち受け、旧来の層では HTTP のサーバーだけです。`url` は `/` を出すプレビューの URL（`previewUrl` があるとき）で、無ければ `null`。`previewUrl` があると、プレビューの中継が動いていなければ起動し、中継が動いてからイベントを出すので、`url` はすぐに読み込めます。中継の起動に失敗したとき（最長 20 秒）もイベントは出し、失敗は致命的でない `error` で知らせ、次の `previewUrl()`・`createPreview()` が起動をやり直します。`server-ready` と `port-closed` の順番は保たれます。ポート `0` は、カーネルが選んだポート（49152〜65151）で届きます。 |
 | `port-closed` | `{ port: number }` | 待ち受けが無くなったとき（サーバーが閉じた、またはそのプロセスが終わった）。 |
 | `process-exit` | `{ pid: number, code: number, signal: string \| null }` | `spawn()`・`exec()` で起動したプロセスが終わったとき。それらがさらに起動したプロセスでは届きません。 |
 | `permission-request` | `{ ev: 'permission-request', id: number, url: string, host: string, initiator: string, source: 'runtime' \| 'preview' }` | カーネルがホストについて尋ねたとき。リスナーは知らせを受けるだけで、答えるのは `onPermissionRequest` かダイアログです。 |
 | `permission-settled` | `{ ev: 'permission-settled', id: number, host: string, allowed: boolean }` | 問い合わせが決まったとき（答えたとき、または 5 分たって打ち切られたとき）。 |
+| `error` | `RuntimeErrorEvent`: `{ error: Error, message: string, fatal: boolean }` | **1.2.0 で追加。** 呼び出しの外で何かが失敗したとき（[下](#error-イベント)）。`error` のリスナーが 1 つも無ければ `console.error` に出します。 |
+
+### `error` イベント
+
+| 原因 | `message` | `fatal` |
+|---|---|---|
+| `boot()` のあとにランタイムのフレームがエラーを知らせた（カーネルの Worker の捕まえられなかったエラー） | `OpenVessel: kernel failed: <message>` | `false`。Worker は捕まえられなかったエラーのあとも動き続けるので、ホストはカーネルがまだ答えるかを確かめます。10 秒以内に答えが無ければ、同じエラーを `fatal: true` でもう 1 度出します。 |
+| ランタイムのフレームがもう 1 度読み込まれた（再読み込み、または文書の中での移動。iframe は移すと読み込み直されます） | `OpenVessel: the runtime frame was reloaded; the kernel is gone` | `true` |
+| `server-ready` のために起動したプレビューの中継が起動できなかった | `OpenVessel: preview relay did not start` | `false` |
+
+致命的なエラーのときは、イベントのリスナーを残すほかは [`teardown()`](#teardown) と同じようにインスタンスを
+止めます。待っている呼び出しとそのあとの呼び出しはすべてそのエラーで失敗し、動いているプロセスは終わり（`exit` は
+`137` で解決し、`process-exit` が `signal: 'SIGKILL'` で届きます）、ランタイムと中継の iframe は外されます。
+続けるには新しいインスタンスを起動します。
 
 ## 許可の問い合わせ
 
@@ -409,8 +426,9 @@ on(event: 'server-ready' | 'port-closed' | 'permission-request' | 'permission-se
 | `Allow for this session`（主ボタン） | `このセッション中は許可` | `'session'` |
 
 Escape（ダイアログの `cancel` イベント）は `'deny'` です。一度に出すダイアログは 1 つで、ほかの問い合わせは
-順番待ちになります。この順番待ちは、ページの中のすべてのインスタンスで共通です。カーネルの 5 分の打ち切りが先に
-拒否すると、ダイアログは開いたまま残り、あとで押した答えは無視されます。
+順番待ちになります。この順番待ちは、ページの中のすべてのインスタンスで共通です。ダイアログを通さずに問い合わせが
+決まったとき（カーネルの 5 分の打ち切りで拒否になったとき）は、`permission-settled` でそのダイアログを閉じるか
+順番待ちから外し、次のダイアログを出します。`teardown()` も、そのインスタンスのダイアログを同じように片付けます。
 
 ## プレビュー
 
@@ -425,9 +443,9 @@ previewUrl(port: number, path = '/'): Promise<string>
 `OpenVessel: previewUrl was not configured` で失敗します。
 
 中継は `<プレビューの基準>__ov/relay.html` の見えない iframe です（ランタイムのフレームと同じスタイル）。最初の
-呼び出しで起動し、プレビューの Service Worker が登録されるのを 20 秒まで待ちます（過ぎると
-`OpenVessel: preview relay did not start`）。起動に失敗すると、やり直しはしません。2 回目からは、`port` を中継の
-既定のポートにして、すぐに返ります。要求がサーバーに届くしくみは [プレビュー](preview.ja.md) にあります。
+呼び出し（か最初の `server-ready` イベント）で起動し、プレビューの Service Worker が登録されるのを 20 秒まで待ちます
+（過ぎると `OpenVessel: preview relay did not start`）。起動に失敗すると iframe を外し、次の呼び出しでもう 1 度
+起動します。2 回目からは、`port` を中継の既定のポートにして、すぐに返ります。中継の起動中の呼び出しは、起動を待ちます。要求がサーバーに届くしくみは [プレビュー](preview.ja.md) にあります。
 
 ### `createPreview()`
 
@@ -454,9 +472,11 @@ createPreview(port: number, opts?: { path?: string; container?: HTMLElement }): 
 teardown(): void
 ```
 
-ランタイムの iframe（カーネルとすべてのプロセスも一緒に終わる）と中継の iframe を外し、通り道を閉じます。プレビューの
-iframe は外さず、開いている許可のダイアログも閉じません。待っている呼び出しは解決も失敗もしないままで、Service
-Worker の登録も外しません。このあとインスタンスは使えません。新しく起動してください。
+ランタイムの iframe（カーネルとすべてのプロセスも一緒に終わる）と中継の iframe を外し、通り道を閉じ、
+インスタンスのメッセージのリスナーとイベントのリスナーを外します。待っている呼び出しとそのあとの呼び出しはすべて
+`OpenVessel: the instance was torn down` で失敗します。動いているプロセスは終わり（`exit` は `137` で解決し、
+リスナーを外す前に `process-exit` が `signal: 'SIGKILL'` で届きます）、そのインスタンスの組み込みの許可のダイアログは
+閉じます。プレビューの iframe と Service Worker の登録は外しません。このあとインスタンスは使えません。新しく起動してください。
 
 ## エラー
 
@@ -476,7 +496,7 @@ Worker の登録も外しません。このあとインスタンスは使えま�
 | `ENAMETOOLONG` | パスが 4096 バイトを、要素が 255 バイトを超えた。 |
 | `EACCES` | 実行の権限が無いファイルを `spawn()`（`<cmd>: Permission denied`）。 |
 | `ENOSYS` | カーネルの知らないメソッド（`unknown method <name>`）。`dist/host` と配っている `dist/runtime` の版が違うときに起きます。 |
-| （なし） | `writeFile`・`mount`・`write`、端末のプロセスの `end` の `data must be a string or Uint8Array`。 |
+| （なし） | `writeFile`・`mount`・`write` の `data must be a string or Uint8Array`。 |
 
 カーネルから来ないエラー:
 
@@ -488,9 +508,11 @@ Worker の登録も外しません。このあとインスタンスは使えま�
 | `OpenVessel: origin <origin> is not allowed to use this runtime` | `boot()`。`openvessel-allowed-hosts` |
 | `OpenVessel: the runtime must be embedded directly by the host page` | `boot()`。ランタイムのフレームの祖先が 2 つ以上 |
 | `OpenVessel: service worker registration failed: <message>` | `boot()` |
-| `OpenVessel: kernel failed: <message>` | `boot()`。カーネルの Worker が読み込めなかった |
+| `OpenVessel: kernel failed: <message>` | `boot()`。カーネルの Worker が読み込めなかった。起動のあとは `error` イベントで、致命的になるとすべての呼び出し |
 | `OpenVessel: previewUrl was not configured` | `previewUrl()`・`createPreview()` |
-| `OpenVessel: preview relay did not start` | 20 秒を過ぎた `previewUrl()`・`createPreview()` |
+| `OpenVessel: preview relay did not start` | 20 秒を過ぎた `previewUrl()`・`createPreview()`。`server-ready` が中継を起動したときは `error` イベント |
+| `OpenVessel: the runtime frame was reloaded; the kernel is gone` | `error` イベント（致命的）と、そのあとのすべての呼び出し |
+| `OpenVessel: the instance was torn down` | `teardown()` のときに待っていた呼び出しと、そのあとのすべての呼び出し |
 
 ## 上限と待ち時間
 
@@ -498,6 +520,7 @@ Worker の登録も外しません。このあとインスタンスは使えま�
 |---|---|
 | 30 000 ms | `boot()` の `timeout` の既定 |
 | 20 000 ms | プレビューの中継の起動（固定） |
+| 10 000 ms | 致命的でないカーネルのエラーのあと、この時間内にカーネルが答えなければ致命的なエラーになる |
 | 5 分 | 答えの無い許可の問い合わせを拒否にするまで |
 | 2 000 000 / 1 000 000 文字 | `Process.collected` は 2 000 000 文字を超えると最後の 1 000 000 文字に切り詰める |
 | 15 000 ms | ランタイムとプレビューの Service Worker が、カーネルへの接続を待ってから要求を失敗させるまで |

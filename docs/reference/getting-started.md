@@ -103,7 +103,7 @@ import { OpenVessel } from 'openvessel';
 
 const vessel = await OpenVessel.boot({
   runtimeUrl: 'https://rt.example.com/',   // the directory holding runtime.html (or runtime.html itself)
-  previewUrl: 'https://pv.example.com/',   // the directory holding __ov-sw.js; must end with "/"
+  previewUrl: 'https://pv.example.com/',   // the directory holding __ov-sw.js
   network: { mode: 'ask', presets: ['npm', 'fonts', 'icons', 'cdn'] },
 });
 ```
@@ -113,6 +113,13 @@ starts the kernel worker; it resolves when the kernel says it is ready, or rejec
 (30 000 ms by default). Every option and error is listed in [Host API](host-api.md#openvesselboot).
 The network policy is explained in [Network policy](network-policy.md); with `mode: 'ask'` and no
 `onPermissionRequest`, a built-in dialog asks the user about hosts outside the presets.
+
+Errors that happen after `boot()` resolved, outside any call, arrive as an `error` event (new in
+1.2.0); `fatal: true` means the kernel is gone and the instance has stopped:
+
+```ts
+vessel.on('error', ({ message, fatal }) => console.error(message, fatal ? '(stopped)' : ''));
+```
 
 One OpenVessel instance per runtime origin is supported in a browser profile at a time: the runtime's
 service worker keeps only the most recent kernel connection, so a second tab or a second `boot()` on
@@ -209,7 +216,8 @@ const dev = await vessel.spawn('npm', ['run', 'dev'], { cwd: APP });
 Register the listener before starting the server. `server-ready` fires when a process listens on a
 virtual port (Astro's dev server uses 4321); `port-closed` fires when it stops. `createPreview()` starts
 the preview relay on first use, creates the iframe and appends it to `container`. To place the iframe
-yourself, use `await vessel.previewUrl(port, '/about/')`. Hot module replacement works through the
+yourself, use `await vessel.previewUrl(port, '/about/')`, or the event's `url`: with `previewUrl`
+configured, `server-ready` is emitted once the relay is up, so `url` can be loaded at once. Hot module replacement works through the
 preview's service worker ([Preview](preview.md)).
 
 ## An interactive terminal with xterm.js
@@ -252,7 +260,8 @@ new ResizeObserver(() => fit.fit()).observe(document.getElementById('term')!);
 ```
 
 To type a command for the user, write it with a carriage return: `shell.write('npm run dev\r')`.
-`shell.end()` is for pipes; on a terminal process it rejects — send `\x04` (Ctrl-D) at the start of a line for end of input.
+`shell.end()` on a terminal process sends Ctrl-D (`^D`) through the line discipline: at the start of a
+line the program reads end of file (an interactive `sh` exits). On a pipe process it closes stdin.
 
 ## Edit files while it runs
 
@@ -277,8 +286,9 @@ vessel.teardown();
 ```
 
 `teardown()` removes the runtime and relay iframes and closes the channel to the kernel. The kernel
-worker and every process go with the runtime iframe; the in-memory file system is gone. It does not
-remove preview iframes you placed in your page, and calls still waiting for an answer never settle.
+worker and every process go with the runtime iframe; the in-memory file system is gone. Calls still
+waiting for an answer reject, and running processes' `exit` resolves with `137`. It does not remove
+preview iframes you placed in your page.
 The service worker registrations on the runtime and preview origins and the npm tarball cache
 (Cache Storage `openvessel-npm-v1` on the runtime origin) stay in the browser.
 
@@ -288,7 +298,7 @@ The service worker registrations on the runtime and preview origins and the npm 
 |---|---|
 | `OpenVessel: the host page must be cross-origin isolated (…)` | The host page lacks `Cross-Origin-Opener-Policy: same-origin` or `Cross-Origin-Embedder-Policy`. |
 | `OpenVessel: OpenVessel needs a cross-origin isolated page (…)` | The runtime page isn't cross-origin isolated: its own COOP/COEP headers are missing (the runtime service worker adds them only once it is installed), or the host page's COEP blocks it (the runtime must send `Cross-Origin-Resource-Policy: cross-origin`). |
-| `OpenVessel: runtime did not start in time` | `runtime.html` didn't load or never answered within `timeout`; check `runtimeUrl` (it must end with `/` or name `runtime.html`) and `frame-ancestors`. |
+| `OpenVessel: runtime did not start in time` | `runtime.html` didn't load or never answered within `timeout`; check `runtimeUrl` (the directory holding `runtime.html`, or `runtime.html` itself) and `frame-ancestors`. |
 | `OpenVessel: origin … is not allowed to use this runtime` | The host origin isn't in `openvessel-allowed-hosts` in `runtime.html`. |
 | `OpenVessel: the runtime must be embedded directly by the host page` | The page calling `boot()` is itself inside a frame. |
 | `OpenVessel: previewUrl was not configured` | `createPreview()`/`previewUrl()` without `previewUrl` in `boot()`. |
