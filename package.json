@@ -1,6 +1,6 @@
 {
   "name": "openvessel",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A browser-only Node.js-like environment for building and previewing Astro sites. Clean-room, no real ports.",
   "homepage": "https://github.com/kobesoft-labs/openvessel#readme",
   "repository": {

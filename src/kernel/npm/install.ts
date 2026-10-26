@@ -169,6 +169,23 @@ function withEmnapi(name: string, deps: Record<string, string> | undefined): Rec
 }
 
 /**
+ * A wasm32-wasi binding pins the emnapi it was built with, but depends on @napi-rs/wasm-runtime as a
+ * range, and each wasm-runtime release names the emnapi it works with as a peer (1.2.6 wants
+ * 2.0.0-beta.2; the bindings still pin 2.0.0-alpha.5, and then nothing loads). Take the newest
+ * wasm-runtime in the range whose peer accepts the emnapi the binding pins.
+ */
+export function pickWasmRuntime(versions: Record<string, { peerDependencies?: Record<string, string> }>, range: string, emnapi: string | undefined): string | null {
+  const pinned = emnapi && semver.valid(emnapi);
+  if (!pinned || !isRange(range)) return null;
+  const candidates = Object.keys(versions).filter((v) => semver.satisfies(v, range)).sort((a, b) => semver.compare(b, a));
+  const ok = (v: string) => {
+    const peer = versions[v].peerDependencies?.['@emnapi/core'];
+    return !peer || semver.satisfies(pinned, peer, { includePrerelease: true });
+  };
+  return candidates.find(ok) ?? null;
+}
+
+/**
  * sharp 0.35+ ships its wasm build only under @img/sharp-webcontainers-wasm32, but on linux-x64
  * it falls back to require('@img/sharp-wasm32'), which then finds whatever version is hoisted.
  * Its own version, as its own dependency, lands next to it.
@@ -253,7 +270,13 @@ export class Installer {
       if (processed % 50 === 0) this.o.progress?.(`resolving… ${this.nodes.length} packages`);
       // optional deps already filtered/failed
       const placeFrom = item.peer ? (item.from.parent ?? item.from) : item.from;
-      const spec = this.overrides[item.name] ?? pinnedSpec(item.from, item.name, item.spec);
+      let itemSpec = item.spec;
+      if (item.name === '@napi-rs/wasm-runtime' && item.from.name.endsWith('-wasm32-wasi') && !this.overrides[item.name]) {
+        const p = await this.o.registry.packument(item.name).catch(() => null);
+        const v = p && pickWasmRuntime(p.versions, itemSpec, (item.from.pkg as any).dependencies?.['@emnapi/core']);
+        if (v) itemSpec = v;
+      }
+      const spec = this.overrides[item.name] ?? pinnedSpec(item.from, item.name, itemSpec);
       const visible = this.findVisible(placeFrom, item.name);
       if (visible && (visible.isWorkspace || (this.satisfiesNode(visible, spec) && this.peerSetOk(visible, item.from)))) {
         this.addEdge(item.from, item.name, spec, visible);

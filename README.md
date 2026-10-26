@@ -50,7 +50,7 @@ in-browser runtimes. It is open source under the [Apache License 2.0](LICENSE).
 
 | | |
 |---|---|
-| Version | 1.1.0 — [Changelog](CHANGELOG.md), [releasing](docs/RELEASING.md) (OpenVessel's own semver; the ported Node.js version is in every release title) |
+| Version | 1.1.1 — [Changelog](CHANGELOG.md), [releasing](docs/RELEASING.md) (OpenVessel's own semver; the ported Node.js version is in every release title) |
 | Node.js | v22.23.4 (`src/node/version.ts`) |
 | Node's own test suite | 1237 of 1237 (100%) of the tests a browser can pass, across 1271 tests of the targeted modules; the other 34 are listed with the reason — see [docs/compatibility.md](docs/compatibility.md) |
 | Astro sites | 131 of a corpus of 147 real sites build (Astro 5, 6 and 7); see [docs/compatibility.md](docs/compatibility.md) |

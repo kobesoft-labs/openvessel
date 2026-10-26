@@ -3,6 +3,12 @@
 OpenVessel follows [Semantic Versioning](https://semver.org). Each release states the Node.js
 version it ports; see [docs/NODE-VERSION.md](docs/NODE-VERSION.md) for how that version is tracked.
 
+## 1.1.1 — 2026-10-26 · Node.js v22.23.4
+
+- Fix: `npm install` could pick a `@napi-rs/wasm-runtime` whose emnapi peer doesn't match the emnapi a
+  WebAssembly binding pins (wasm-runtime 1.2.6 with rolldown's binding: rolldown, and so Astro 7, failed to
+  load). The installer now takes the newest release in the binding's range whose peer accepts that emnapi.
+
 ## 1.1.0 — 2026-10-25 · Node.js v22.23.4
 
 - The class returned by `spawn()` is now `Process` (was `VesselProcess`). Only the entry point keeps the
