@@ -18,7 +18,7 @@
 | TypeScript | Node の型の除去（amaro） | sucrase の `typescript` 変換（enum なども通る） |
 | ES モジュール | `module_wrap` バインディング。`/__ov/mw/<pid>/<id>.mjs` で配る | カーネルの ESM の配信（`/__ov/esm/…`・`/__ov/builtin/…`） |
 | `--loader` | Node のフックの仕組み | 警告を出して無視 |
-| `node:http2` | 読み込める。セッションで `ERR_NOT_IMPLEMENTED` | `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` を投げる |
+| `node:http2` | 読み込める。セッションで `ERR_NOT_IMPLEMENTED` | 読み込める。`createServer`・`createSecureServer`・`connect` が `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`（「HTTP/2 is not supported in OpenVessel」）を投げる |
 | 既定 | いいえ | **はい** |
 
 [互換性](../compatibility.ja.md) のページの数字（Node の試験とAstro のコーパス）は、どれも移植版ランタイムで計ったものです。このページは、断りのない限り移植版ランタイムについて書いています。

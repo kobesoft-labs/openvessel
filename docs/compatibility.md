@@ -82,7 +82,7 @@ These are limits of the platform, not missing work. Each has a reason a browser 
 | WebSocket client connections to outside hosts over `net`/`tls` | The HTTP bridge handles request/response only. | Answered with `501 Not Implemented`. (The browser's `WebSocket` global is available.) |
 | Custom CAs, client certificates, TLS details | TLS is done — and verified — by the browser's `fetch`; the process sees plaintext. | `tls.connect` succeeds with `authorized: true` when the browser accepted the certificate. `getPeerCertificate()` returns a summary, not the real certificate. |
 | Listening on a real port | Nothing outside the tab can connect to it. | Servers listen on virtual ports; the preview iframe reaches them through a service worker. |
-| HTTP/2 (`node:http2`) | Not a browser limit: the binding (`node_http2.cc` over nghttp2) is not implemented yet; it is a large port of its own. | `require('node:http2')` loads; creating a server or a session throws "HTTP/2 is not supported in OpenVessel". HTTP/1.1 servers and clients work. |
+| HTTP/2 (`node:http2`) | Not a browser limit: the binding (`node_http2.cc` over nghttp2) is not implemented yet; it is a large port of its own. | `require('node:http2')` loads. On the ported runtime `http2.createServer()` returns a server, and creating a session (an incoming connection, `http2.connect()`) throws `ERR_NOT_IMPLEMENTED`; on the legacy runtime `createServer`, `createSecureServer` and `connect` throw "HTTP/2 is not supported in OpenVessel" (`ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`). HTTP/1.1 servers and clients work. |
 
 ### Native code
 

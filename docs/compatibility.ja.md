@@ -82,7 +82,7 @@ OpenVessel は Node.js 自身の JavaScript（`lib/`）を動かし、ネイテ�
 | `net`/`tls` 経由の外への WebSocket | HTTP の橋渡しは要求と応答だけ | `501 Not Implemented` を返す（グローバルの `WebSocket` は使える） |
 | 独自の CA・クライアント証明書・TLS の細部 | TLS とその確認はブラウザの `fetch` が行い、プロセスには平文が届く | ブラウザが証明書を受け入れれば `tls.connect` は `authorized: true` でつながる。`getPeerCertificate()` は本物の証明書ではなく要約を返す |
 | 実際のポートでの待ち受け | タブの外からはつなげない | サーバーは仮想ポートで待ち受け、プレビューの iframe は Service Worker 経由でつながる |
-| HTTP/2（`node:http2`） | ブラウザの制約ではなく未実装（nghttp2 の上の `node_http2.cc` の移植は、それだけで大きな仕事） | `require('node:http2')` は読み込める。サーバーやセッションを作ると「HTTP/2 is not supported in OpenVessel」を投げる。HTTP/1.1 のサーバーとクライアントは動く |
+| HTTP/2（`node:http2`） | ブラウザの制約ではなく未実装（nghttp2 の上の `node_http2.cc` の移植は、それだけで大きな仕事） | `require('node:http2')` は読み込める。移植版ランタイムでは `http2.createServer()` はサーバーを返し、セッションを作る（接続を受ける、`http2.connect()`）と `ERR_NOT_IMPLEMENTED`。旧ランタイムでは `createServer`・`createSecureServer`・`connect` が「HTTP/2 is not supported in OpenVessel」（`ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`）を投げる。HTTP/1.1 のサーバーとクライアントは動く |
 
 ### ネイティブのコード
 

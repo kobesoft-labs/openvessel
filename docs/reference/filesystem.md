@@ -124,9 +124,8 @@ Not checked: reading or writing an existing file (a 0444 file can be opened for 
 
 The VFS itself always clears 0o022 from new files and directories, so a umask can only remove more
 bits. Every process starts with a umask of 0o022 — it is not inherited from the parent. It is changed with
-`process.umask()` (ported runtime) or the shell's `umask` builtin (which affects the shell's own
-redirections, not the programs it starts). The legacy runtime keeps `process.umask()` inside the
-process and never tells the kernel.
+`process.umask()` (both runtimes) or the shell's `umask` builtin (which affects the shell's own
+redirections, not the programs it starts).
 
 ## Timestamps
 

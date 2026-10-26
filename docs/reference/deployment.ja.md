@@ -295,11 +295,10 @@ force-push します。ヘッダーが無いので、ランタイムの CSP も 
 `https://example.com/demo/preview/`）。
 
 **ランタイム。** カーネルは自分の基準の URL を `kernel.js` のディレクトリから（`src/kernel/base.ts` の `RUNTIME_BASE`）、
-移植ランタイムは `node-process.js` のディレクトリから取ります。Service Worker は要求のパスからスコープを取り除いて
-から `/__ov/…` と照らし合わせます。npm のクライアントの `/__ov/net` と `compat/` の取得、移植ランタイムの `/__ov/net` と
-`/__ov/mw/` の URL は、どれもこの基準からの相対です。旧ランタイムは `/__ov/esm/`・`/__ov/builtin/`・`/__ov/net` の URL を
-オリジンから作ります（`src/node/worker.ts` の `self.location.origin`）。そのため旧ランタイムでは、ランタイムの
-ディレクトリをオリジンの一番上に置く必要があります。
+それぞれのランタイムは自分の Worker のスクリプト（`node-process.js`・`process.js`）のディレクトリから取ります。
+Service Worker は要求のパスからスコープを取り除いてから `/__ov/…` と照らし合わせます。npm のクライアントの `/__ov/net` と
+`compat/` の取得、移植ランタイムの `/__ov/net` と `/__ov/mw/` の URL、旧ランタイムの `/__ov/esm/`・`/__ov/builtin/`・
+`/__ov/net` の URL（カーネルが配るモジュールに書き込むものも）は、どれもこの基準からの相対です。
 
 **プレビュー。** Service Worker のスコープはプレビューのディレクトリです。OpenVessel の中の開発サーバーは、サイトを
 あくまで `/` で配信するので、Service Worker が両者を対応させます。
@@ -496,4 +495,3 @@ app.example.com {
 - [ ] `runtimeUrl` と `previewUrl` が `/` で終わっている（か、`runtimeUrl` が `runtime.html` の URL）
 - [ ] ハッシュ付きのチャンクは長くキャッシュしてよい。ほか、特に Service Worker は確かめ直す
 - [ ] プロセスを移植ランタイムで動かすなら、`/etc/openvessel/node` が `port` になっている
-- [ ] ランタイムをパスの下で配信するなら、プロセスは移植ランタイムを使う
