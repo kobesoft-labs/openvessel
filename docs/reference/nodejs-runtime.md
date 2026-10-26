@@ -22,7 +22,7 @@ contains two different scripts for that Worker:
 | TypeScript | Node's own type stripping (amaro) | sucrase's `typescript` transform (enums etc. are accepted) |
 | ES modules | `module_wrap` binding, served at `/__ov/mw/<pid>/<id>.mjs` | the kernel's ESM service at `/__ov/esm/…` and `/__ov/builtin/…` |
 | `--loader` | Node's hooks machinery | ignored with a warning |
-| `node:http2` | loads; sessions throw `ERR_NOT_IMPLEMENTED` | throws `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` |
+| `node:http2` | loads; servers listen, but a session fails with `ERR_NOT_IMPLEMENTED` (`Http2Session`, see [Not implemented](#not-implemented)) | `createServer()`, `createSecureServer()` and `connect()` throw `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` (`HTTP/2 is not supported in OpenVessel`) |
 | Default | no | **yes** |
 
 All numbers on the [Compatibility](../compatibility.md) page (Node's test suite and the Astro corpus) were
@@ -80,9 +80,11 @@ registered by a binding (`child-exit`, `signal`, `fd-data`, `fd-writable`, `tcp-
 
 `boot()` in `src/nodejs/boot.ts` does what `node::CreateEnvironment` and `node::StartExecution` do in C++:
 
-1. Records the init message, connects the system-call channel, and (main thread only) parses the command
-   line. An invalid command line prints each error as `<argv0>: <error>` and exits with code 9.
-   `--version`/`-v` prints `v22.23.4` and exits with 0 before anything else is loaded.
+1. Records the init message, connects the system-call channel, and (main thread only) reads the
+   `--env-file` files and parses the command line. An invalid command line prints each error as
+   `<argv0>: <error>` and exits with code 9. `--version`/`-v` prints `v22.23.4` and `--v8-options` prints
+   V8's option list, then exit with 0 before anything else is loaded. `Error.stackTraceLimit` is set from
+   `--stack-trace-limit` (10 by default).
 2. Installs listeners for the Worker's `unhandledrejection`, `rejectionhandled` and `error` events.
 3. Replaces the global `Proxy` with one that records target and handler (so `util.types.isProxy` and
    `util.inspect(…, { showProxy: true })` work), and wraps the methods that create Map/Set iterators (so
@@ -97,8 +99,13 @@ registered by a binding (`child-exit`, `signal`, `fd-data`, `fd-writable`, `tcp-
    `internal/bootstrap/web/exposed-window-or-worker` (`config.noBrowserGlobals` is always `false`).
 8. Runs `internal/bootstrap/switches/is_main_thread` and `…/does_own_process_state` on the main thread,
    or `…/is_not_main_thread` and `…/does_not_own_process_state` in a worker thread.
-9. Reshapes the global object to look like Node's (see [Global object](#global-object)).
-10. Selects and runs the main script inside a callback scope, then starts the event loop.
+9. Reshapes the global object to look like Node's (see [Global object](#global-object)). Without fetch
+   (`--no-experimental-fetch`) `WebAssembly.compileStreaming` and `instantiateStreaming` are removed, as
+   V8 has them only when Node sets up wasm streaming together with fetch.
+10. With `--run`, runs the package script (see [--run](#--run)) instead of a main script. Otherwise sets
+    the `--env-file` variables that `process.env` doesn't have yet (not in watch mode, whose child loads
+    them), selects and runs the main script inside a callback scope with execution async id 1, and
+    starts the event loop.
 
 If anything in steps 2–10 throws, the worker writes `[openvessel] node bootstrap failed: <stack>` to fd 2
 and exits with code 10 (`kBootstrapFailure`).
@@ -109,9 +116,11 @@ The main script is chosen like `node::SelectLoadMode`:
 |---|---|
 | a worker thread | `internal/main/worker_thread` |
 | `--help` | `internal/main/print_help` |
+| `--prof-process` | `internal/main/prof_process` |
 | `-e`/`-p`/`--eval`/`--print` without `--interactive` | `internal/main/eval_string` |
 | `--check` | `internal/main/check_syntax` |
 | `--test` | `internal/main/test_runner` |
+| `--watch` | `internal/main/watch_mode` |
 | a script argument other than `-` | `internal/main/run_main_module` |
 | `--interactive`, or fd 0 is a terminal | `internal/main/repl` |
 | otherwise | `internal/main/eval_stdin` |
@@ -168,8 +177,8 @@ test tools: see [Testing](testing.md) and [Building](building.md).)
 
 | Code | When |
 |---|---|
-| 0 | normal exit, `--version` |
-| 1 | uncaught exception or unhandled rejection (unless an `exit` handler set `process.exitCode`) |
+| 0 | normal exit, `--version`, `--v8-options`, `--run` whose script succeeded |
+| 1 | uncaught exception or unhandled rejection (unless an `exit` handler set `process.exitCode`); `--run` that failed |
 | 6 | `process._fatalException` is not a function (`kInvalidFatalExceptionMonkeyPatching`) |
 | 7 | the fatal-exception handler itself threw (`kExceptionInFatalExceptionHandler`) |
 | 9 | invalid command line or `NODE_OPTIONS` |
@@ -194,28 +203,48 @@ they are allowed in `NODE_OPTIONS`):
   quotes only.
 - Options end at `--`, at `-`, or at the first argument not starting with `-`. What follows is
   `process.argv[1…]`.
+- `_` and `-` are the same in option names (`--stack_trace_limit=3` is `--stack-trace-limit=3`;
+  `process.execArgv` keeps what was typed).
 - `--name=value` and `--name value` are both accepted for options that take a value. Aliases are expanded
   as in Node (`-e` → `--eval`, `-p` → `--print`, `-pe` → `--print --eval`, `-C` → `--conditions`,
   `-r` → `--require`, `--loader` → `--experimental-loader`, `-c` → `--check`, `-i` → `--interactive`, …).
-- `--no-<name>` negates a boolean option. Boolean options listed in the implication table switch on
-  others: `--experimental-transform-types` implies `--experimental-strip-types` and `--enable-source-maps`.
+  `--prof-process` expands to `--prof-process --`, so everything after it is an argument.
+- `--no-<name>` negates a boolean option. Options switch on others as `Implies()` does in
+  `node_options.cc`: `--eval` → `[has_eval_string]`, `--env-file`/`--env-file-if-exists` →
+  `[has_env_file_string]`, `--watch-path` → `--watch`, `--experimental-strip-types` →
+  `--experimental-detect-module`, `--experimental-transform-types` → `--experimental-strip-types` and
+  `--enable-source-maps`, `--inspect-brk` → `--inspect`, `--report-signal` → `--report-on-signal`, ….
 - Integer options are stored as numbers, string lists (`--require`, `--import`, `--conditions`, …)
   accumulate.
+- An option Node doesn't know goes to V8, as in Node. V8's own list of flags (`node --v8-options` of
+  Node v22.23.4 on Linux x64, `src/nodejs/data/v8-options.json`) decides: a V8 flag is accepted (and has
+  no effect, see below), anything else is a bad option. A boolean flag takes `--no-`; any other flag needs
+  its value after `=` (Node hands the argument to V8 alone), which must suit its type.
 
 Errors (each printed as `node: <message>`, exit code 9):
 
 | Message | Cause |
 |---|---|
-| `bad option: <arg>` | an option not in Node's table and not an accepted V8 flag |
-| `<option> is not allowed in NODE_OPTIONS` | an option Node disallows in `NODE_OPTIONS` (40 of them, e.g. `--eval`) |
+| `bad option: <arg>` | an option in neither Node's table nor V8's, or a V8 flag with a value that doesn't suit it (V8's own message comes first, see below) |
+| `<option> is not allowed in NODE_OPTIONS` | an option Node disallows in `NODE_OPTIONS` (40 of them, e.g. `--eval`), and any option not in Node's table (V8 flags included) |
+| `--no-<name> is an invalid negation because it is not a boolean option` | `--no-` on a Node option that isn't boolean |
 | `<arg> requires an argument` | a value option at the end of the line |
+| `<file>: not found` | an `--env-file` that can't be opened (`--env-file-if-exists` prints `<file> not found. Continuing without it.` instead and goes on) |
+| `<file>: invalid format` | an `--env-file` that can't be read (a directory) |
+| `either --watch or --check can be used, not both` (also `--eval`, `--interactive`, `--test-force-exit`), `--watch requires specifying a file` | `EnvironmentOptions::CheckOptions` |
 | `--secure-heap must be a power of 2` / `--secure-heap-min must be a power of 2` | `PerProcessOptions::CheckOptions` |
+
+A V8 flag with a wrong value gets V8's message before Node's:
 
 ```text
 $ node --bogus
 node: bad option: --bogus
 $ NODE_OPTIONS='--eval=1' node -e 1
 node: --eval is not allowed in NODE_OPTIONS
+$ node --stack-trace-limit 5 -e 1
+Error: illegal value for flag --stack-trace-limit of type int
+Try --help for options
+node: bad option: --stack-trace-limit
 ```
 
 ### What the options do
@@ -228,7 +257,11 @@ The parsed values are what `internalBinding('options').getCLIOptionsValues()` re
 | Option | Effect in the runtime |
 |---|---|
 | `--version`, `-v` | printed during boot, before Node's bootstrap |
-| `-e`, `-p`, `--check`, `--test`, `--interactive`, `--help` | choose the main script (table above) |
+| `--v8-options` | prints V8's option list (the dump in `src/nodejs/data/v8-options.json`, whose first line lists the CPU features of the machine it was taken on) |
+| `-e`, `-p`, `--check`, `--test`, `--interactive`, `--help`, `--prof-process`, `--watch` | choose the main script (table above). `--prof-process` runs V8's tick processor from lib (without a log: `Please provide a valid isolate file as the final argument.`, exit code 1); `--watch` runs Node's watch mode, which restarts the script in a child process when a file it loaded (or a `--watch-path`) changes |
+| `--env-file`, `--env-file-if-exists` | see [--env-file](#--env-file) |
+| `--run` | see [--run](#--run) |
+| `--stack-trace-limit` | `Error.stackTraceLimit` (also in worker threads) |
 | `--title` | initial `process.title` |
 | `--trace-exit` | `process.reallyExit` prints `(node:<pid>) WARNING: Exited the environment with code <n>` and the stack |
 | `--pending-deprecation` | DEP0104 warning for non-string `process.env` values; the GCM short-auth-tag deprecation |
@@ -241,20 +274,38 @@ Accepted but without effect:
   `--max-semi-space-size`, `--abort-on-uncaught-exception`, `--prof`, `--perf-*`,
   `--disallow-code-generation-from-strings`, …) — so `node --expose-gc -e 'typeof gc'` gives `undefined`;
 - options of type `kNoOp` (`--experimental-modules`, `--experimental-wasm-modules`, …);
-- unknown options that look like V8 flags: `--max-old-space-size*`, `--max-semi-space-size*`,
-  `--stack-size*`, `--expose-gc*`, `--harmony*`, `--js-*`, `--allow-natives-syntax*`,
-  `--enable-sharedarraybuffer-per-context*`, `--v8-*` and any `--no-*`.
+- every other V8 flag (`--use-strict`, `--stack-size=…`, `--harmony-*`, `--allow-natives-syntax`, …):
+  the browser's V8 is already running and takes no flags.
 
-Parsed but not applied, because Node handles them in C++ before or instead of its JavaScript bootstrap
-and the runtime does not reproduce that:
+### --env-file
 
-| Option | What happens |
-|---|---|
-| `--env-file`, `--env-file-if-exists` | the file is not loaded (`process.loadEnvFile()` does work) |
-| `--run <script>` | no package script is run |
-| `--watch`, `--watch-path` | the script runs once, without watching |
-| `--v8-options` | prints nothing |
-| `--stack-trace-limit` | `Error.stackTraceLimit` stays 10 |
+As in `node.cc`, before the options are parsed: every `--env-file <file>`, `--env-file=<file>` and
+`--env-file-if-exists` on the command line (up to a `--`) is read in order, relative to the working
+directory, and parsed like `util.parseEnv()`; a later file wins. A `NODE_OPTIONS` in the files is used for
+parsing when the environment has none. When the options were given as Node options (not after the script
+name), the variables `process.env` doesn't have yet are set before the main script runs; variables already
+in the environment win. `--run` ignores the files' variables, and watch mode leaves them to its child.
+
+```text
+$ printf 'FOO=fromfile\n' > .env
+$ node --env-file=.env -p process.env.FOO
+fromfile
+$ FOO=outer node --env-file .env -p process.env.FOO
+outer
+```
+
+### --run
+
+`node --run <script>` (`src/nodejs/task_runner.ts`, after `node_task_runner.cc`) looks for the nearest
+`package.json` from the working directory up (the root directory itself is not searched) and runs
+`/bin/sh -c '<script>'` in that file's directory, with stdio inherited and the process's environment plus
+`NODE_RUN_SCRIPT_NAME`, `NODE_RUN_PACKAGE_JSON_PATH`, and every `node_modules/.bin` from the working
+directory up in front of `PATH`. Arguments after `--` are appended, quoted for the shell the way Node quotes
+them. The exit code is 1 if the script failed, else 0. Node does this in C++ before its environment
+exists; here it runs after lib's bootstrap (with `child_process`), and no main script runs. Errors, all with
+exit code 1: `Can't find package.json for directory <dir>`, `Can't parse <path>`,
+`Can't find "scripts" field in <path>`, `Script "<name>" is unexpectedly not a string for <path>`, and
+`Missing script: "<name>" for <path>` followed by the available scripts.
 
 ### Worker threads
 
@@ -330,7 +381,8 @@ as in Node 22 without `--experimental-eventsource`. `localStorage` is not a glob
 | `process.dlopen()` | always `ERR_DLOPEN_FAILED`: `<file>: cannot open shared object file: No such file or directory`, `<file>: file too short`, `<file>: invalid ELF header`, or `Native addons (.node files) cannot run in OpenVessel. Use the WebAssembly build of the package.` |
 | `process.execve()` | the kernel's `execve`; on failure prints `process.execve failed with error code <code>` and exits with 134 |
 | `process.loadEnvFile(path = '.env')` | reads the file from the VFS; sets only variables that are not set |
-| `process.report.getReport()` | Node's layout; header says glibc 2.36 (`glibcVersionRuntime`), `osRelease` `6.8.0-openvessel`, `host` `openvessel` |
+| `process.report.getReport()` | Node's layout; header says glibc 2.36 (`glibcVersionRuntime`), `osRelease` `6.8.0-openvessel`, `osVersion` `#1 SMP OpenVessel`, `osMachine` `x86_64`, `host` `openvessel`, and lists `cpus` and `networkInterfaces` as `os.cpus()`/`os.networkInterfaces()` report them |
+| `os.release()`, `os.version()` | `6.8.0-openvessel`, `#1 SMP OpenVessel` (uname's release and version) |
 | `os.hostname()` | `openvessel` |
 | `os.type()`, `os.machine()`, `os.endianness()` | `Linux`, `x86_64`, `LE` |
 | `os.cpus()` | `navigator.hardwareConcurrency` entries, model `OpenVessel Virtual CPU`, speed 2400 |
@@ -426,7 +478,9 @@ later `rejectionhandled` events as `kPromiseHandlerAddedAfterReject`. From there
 
 `require('fs')`, `require('node:fs')` and `import 'node:fs'` load Node's own `lib/` modules from
 `nodelib.js`. Two dependencies are replaced by overrides (see [Overrides](#overrides)); the V8 profiler
-tools under `internal/deps/v8/tools/` are not shipped.
+tools under `internal/deps/v8/tools/` are not shipped, so `node --prof-process <log>` fails with
+`TypeError [ERR_INVALID_ARG_TYPE]: The "sourceText" argument must be of type string. Received undefined`
+(without a log it answers like Node).
 
 ### CommonJS
 
@@ -479,9 +533,11 @@ console.log(m.v, m.default()); // 42 def
 ### import.meta
 
 `import.meta.url` (a `file://` URL), `import.meta.resolve()` and `import.meta.main` are set by Node's
-callback. `import.meta.dirname` and `import.meta.filename` are currently **not** set (they are
-`undefined`): Node installs them through `internalBinding('modules').setLazyPathHelpers`, which is a no-op
-here.
+callback. For a `file:` module, `internalBinding('modules').setLazyPathHelpers` adds
+`import.meta.dirname` and `import.meta.filename` (the module's directory and path, as
+`url.fileURLToPath()` gives them) as writable, enumerable data properties, so `Object.keys(import.meta)`
+is `['dirname', 'filename', 'main', 'resolve', 'url']` as in Node. Node computes them on first access;
+here they are computed right away.
 
 ### Conditions, preloading and hooks
 
@@ -547,9 +603,21 @@ come from `internal/deps/undici`, which the override replaces with `globalThis._
 | URL | How it is fetched |
 |---|---|
 | `data:`, `blob:` | the browser's `fetch` directly |
-| `http:`/`https:` to `localhost`, `*.localhost`, `127.0.0.1`, `::1`, `[::1]`, `0.0.0.0` | Node's own `http.request()` to `127.0.0.1` on the URL's port (80 when none is given, also for `https:`) — a real TCP connection to a virtual port, so it reaches servers inside OpenVessel |
+| `http:`/`https:` to `localhost`, `*.localhost`, `127.0.0.1`, `::1`, `[::1]`, `0.0.0.0` | Node's own `http.request()` (`https.request()` for `https:`) to `127.0.0.1` on the URL's port, or the scheme's default (80, 443) — a real TCP connection to a virtual port, so it reaches servers inside OpenVessel. `https:` goes through `tls` like any `https` client (server name and certificate check use the URL's host name) |
 | other `http:`/`https:` | the runtime service worker's `/__ov/net?url=…` endpoint, which applies the [network policy](network-policy.md) and makes the request with the browser's `fetch` |
 | any other scheme | `TypeError: fetch failed`, `cause.code` `ERR_INVALID_URL` (`unsupported URL scheme <scheme>`) |
+
+### Behaviour of requests to virtual ports
+
+These follow undici: the request carries `host` (the URL's host), `connection: keep-alive`, the headers
+undici adds when the request doesn't set them (`accept: */*`, `accept-language: *`,
+`sec-fetch-mode: cors`, `user-agent: node`, `accept-encoding: gzip, deflate`) and a `content-length` for a
+body. Redirects (301, 302, 303, 307, 308) are followed up to 20 times as the Fetch Standard says
+(`redirect: 'manual'` returns the redirect, `'error'` fails; a 303, or a 301/302 after `POST`, becomes a
+`GET` without body; `authorization`, `cookie` and `proxy-authorization` don't go to another origin).
+`gzip`, `x-gzip`, `deflate` and `br` response bodies are decoded. Requests to the Fetch Standard's bad
+ports fail with `bad port`. A refused connection rejects with `fetch failed` whose `cause` is the socket's
+own error (`ECONNREFUSED`, with `errno`, `syscall`, `address`, `port`).
 
 ### Behaviour of outside requests
 
@@ -564,7 +632,8 @@ come from `internal/deps/undici`, which the override replaces with `globalThis._
 - The request and each pending body read count as loop requests (`FetchRequest`, `FetchBody`), so the
   process stays alive while they are in flight.
 - `Request` and `Response` accept Node's `AbortSignal`, lib's `ReadableStream` and async iterables as
-  bodies (a streamed request body implies `duplex: 'half'`).
+  bodies (a streamed request body implies `duplex: 'half'`). Every response `fetch` returns is an instance
+  of the global `Response`.
 - The `x-ov-by` header tells the host which process asked (pid and the first argv entries), for permission
   prompts.
 
@@ -575,7 +644,7 @@ Failures reject with `TypeError('fetch failed')` whose `cause` carries a code:
 | `cause.code` | When |
 |---|---|
 | `EACCES` | the network policy denied the host: `OpenVessel: network access to <host> was denied by the network policy` |
-| `ECONNREFUSED` | the browser's `fetch` failed (often CORS): `request to <host> failed: <message>. The server may not allow cross-origin requests (CORS) from the browser.`; also a refused loopback connection |
+| `ECONNREFUSED` | the browser's `fetch` failed (often CORS): `request to <host> failed: <message>. The server may not allow cross-origin requests (CORS) from the browser.`; also a refused loopback connection (there `cause` is the socket's error) |
 | `ERR_INVALID_URL` | unsupported scheme |
 
 Other HTTP clients (`http.get`, undici from npm, axios, got) go through `net`/`tls` instead; the kernel
@@ -701,8 +770,22 @@ als.run(42, async () => {
 ```
 
 `async_hooks.createHook()` hooks fire for the resources lib creates in JavaScript (`Timeout`,
-`Immediate`, `TickObject`, `AsyncResource`, …) and for workers and message ports; most native handles and
-requests (file system requests, sockets, pipes) don't report an `init`, and promise hooks never fire.
+`Immediate`, `TickObject`, `AsyncResource`, …) and, as in Node's C++ `AsyncWrap`, for the native ones:
+handles (`TCPWRAP`, `TCPSERVERWRAP`, `PIPEWRAP`, `PIPESERVERWRAP`, `TTYWRAP`, `TLSWRAP`, `UDPWRAP`,
+`PROCESSWRAP`, `SIGNALWRAP`, `FSEVENTWRAP`, `STATWATCHER`, `WORKER`, `MESSAGEPORT`), requests
+(`FSREQCALLBACK`, `FSREQPROMISE`, `FILEHANDLECLOSEREQ`, `TCPCONNECTWRAP`, `PIPECONNECTWRAP`,
+`SHUTDOWNWRAP`, `WRITEWRAP` for a write that couldn't finish at once, `GETADDRINFOREQWRAP`,
+`GETNAMEINFOREQWRAP`, `QUERYWRAP`) and others (`FILEHANDLE`, `DIRHANDLE`, `DNSCHANNEL`, `ZLIB`,
+`HTTPINCOMINGMESSAGE`, `HTTPCLIENTREQUEST`, the crypto jobs). Each gets an async id when it is made — a
+request object lib creates (`WriteWrap`, `TCPConnectWrap`, …) when the binding starts the request with
+it — and `init` runs then (the trigger is the default trigger id or the current execution id; a request
+started on a handle and a connection accepted by a server are triggered by that handle), its callbacks run in its async context with `before`/`after` around them
+(`executionAsyncId()` and `executionAsyncResource()` are the resource), and `destroy` follows when a
+handle has closed or a request has completed. Resources Node destroys only on garbage collection
+(`FILEHANDLE`, `DIRHANDLE`, `ZLIB`, …) never report `destroy`. Without hooks this costs an id and a
+push/pop of the async context per callback, as in Node. Promise hooks never fire (no `PROMISE`
+resources), so the trigger of a resource made in a promise reaction is the enclosing execution id, not
+the promise.
 
 ## Inspector, profiling and diagnostics
 
@@ -725,7 +808,7 @@ These load but fail when used, with `ERR_NOT_IMPLEMENTED`
 
 | Feature | Behaviour |
 |---|---|
-| `node:http2` | `require` works and `http2.createServer()` returns a server, but creating a session (an incoming connection, `http2.connect()`) fails with `ERR_NOT_IMPLEMENTED` (`Http2Session`) |
+| `node:http2` | `require` works, and `http2.createServer()`/`createSecureServer()` return a server that listens. Every session fails, because `new Http2Session()` throws `ERR_NOT_IMPLEMENTED` (`internalBinding ('http2').Http2Session is not implemented in OpenVessel`): `http2.connect()` returns a `ClientHttp2Session`, which emits that error as its `error` event once the socket has connected, then `close`; a connection to a server throws it from the server's connection listener as an uncaught exception (the process exits with 1 unless `uncaughtException` is handled) |
 | `node:sqlite` | `new DatabaseSync()` fails |
 | `node:sea` | `sea.isSea()` etc. fail |
 | `net.BlockList`, `net.SocketAddress` | construction fails (`block_list`) |
