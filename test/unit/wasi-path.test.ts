@@ -46,6 +46,16 @@ test('.. above the directory is not capable', () => {
   assert.equal(code('sub/../../secret'), 'ENOTCAPABLE');
   // relative to a subdirectory fd, its parent is outside too
   assert.equal(code('../file', true, '/sandbox/sub', '/sandbox/sub'), 'ENOTCAPABLE');
+  assert.equal(code('../file', true, '/sandbox', '.'), 'ENOTCAPABLE');
+});
+
+test('.. above a directory the module sees as / stays there, as in uvwasi', () => {
+  assert.equal(r('..', true, '/sandbox', '/'), '/sandbox');
+  assert.equal(r('../file', true, '/sandbox', '/'), '/sandbox/file');
+  assert.equal(r('sub/../../../file', true, '/sandbox', '/'), '/sandbox/file');
+  // ../secret is /secret in the module's view: inside the preopen, and missing there
+  assert.equal(r('rel-out', true, '/sandbox', '/'), '/sandbox/secret');
+  assert.equal(code('rel-out2', true, '/sandbox', '/'), 'ENOENT');
 });
 
 test('absolute paths are not capable, absolute symlink targets are read in the module\'s view', () => {

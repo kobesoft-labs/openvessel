@@ -25,7 +25,8 @@ const MAX_LINKS = 32;
  * Resolves `p` relative to the directory `dir` (a kernel path) whose path inside the module is `guestDir`
  * (the preopen's name, or the path the module opened it by). Every component is walked: `..` and
  * symlinks are followed inside `dir`, and anything that would leave it — an absolute path, `..` above
- * it, a symlink whose target is outside it — fails with ENOTCAPABLE, as in uvwasi. An absolute symlink
+ * it, a symlink whose target is outside it — fails with ENOTCAPABLE, as in uvwasi. When `guestDir` is
+ * `/`, `..` above it stays at it (the module's root has no parent). An absolute symlink
  * target is read in the module's view (relative to `guestDir`). The final component is followed only
  * when `follow` is set (WASI's LOOKUPFLAGS_SYMLINK_FOLLOW). Returns the kernel path and the part below
  * `dir`.
@@ -52,7 +53,12 @@ export function resolveBeneath(ops: WasiPathOps, dir: string, guestDir: string, 
     const c = rest.shift()!;
     if (c === '' || c === '.') continue;
     if (c === '..') {
-      if (!parts.length) throw new WasiPathError('ENOTCAPABLE');
+      // the module's path is normalized in its own view (uvwasi): '..' of a directory it sees as '/'
+      // is that directory again, like a root's; above any other directory it leaves the fd
+      if (!parts.length) {
+        if (guestRoot === '/') continue;
+        throw new WasiPathError('ENOTCAPABLE');
+      }
       parts.pop();
       continue;
     }

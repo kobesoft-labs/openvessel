@@ -27,7 +27,7 @@ The package-manager side (resolution, placement, lockfiles) is in [Package manag
 | `process.platform`, `process.arch` | `linux`, `x64` (both runtimes) | Loaders pick per-platform packages by these; compat packages are published under the `linux-x64` name where a loader expects one. |
 | `process.versions.napi` | `10` | |
 | `process.report.getReport().header.glibcVersionRuntime` | `2.36` | `detect-libc` reads it, so the system counts as glibc, not musl. |
-| `NAPI_RS_FORCE_WASI` | `1` in the kernel's default environment (`src/kernel/kernel.ts`) | Read by napi-rs generated loaders. Recent loaders force WASI only for `true` or `error` and treat other values as "native first"; the native binding isn't installed (see [Platform filter](#platform-filter)), so they fall back to the `wasm32-wasi` package either way. |
+| `NAPI_RS_FORCE_WASI` | `true` in the kernel's default environment (`src/kernel/kernel.ts`) | Read by napi-rs generated loaders, which then load the `wasm32-wasi` package without trying native bindings first. Older loaders force WASI for any non-empty value, recent ones only for `true` or `error`; `true` works with both. |
 | Platform used by the installer | `os: linux`, `cpu: wasm32` | Packages whose `cpu` is `x64`, `arm64`, … are skipped while installing. |
 
 ## Install-time rules
@@ -172,10 +172,10 @@ only a native file finds it and then fails to load it.
 | | Ported runtime (`src/nodejs/bindings/process.ts`) | Legacy runtime (`src/node/module.ts`, `src/node/process.ts`) |
 |---|---|---|
 | `require('x.node')` | Node's own loader calls `process.dlopen`, which throws `ERR_DLOPEN_FAILED` | throws `ERR_DLOPEN_FAILED`: `Native addons are not supported in OpenVessel (tried to load <file>). Use the WebAssembly build of this package.` |
-| `process.dlopen()` | throws `ERR_DLOPEN_FAILED` with a message like glibc's `dlopen` (below) | throws an `Error` without a code: `process.dlopen is not supported in OpenVessel (native addons cannot run in the browser)` |
+| `process.dlopen()` | throws `ERR_DLOPEN_FAILED` with a message like glibc's `dlopen` (below) | the same |
 | `import 'x.node'` | `ERR_UNKNOWN_FILE_EXTENSION` (as in Node 22 without `--experimental-addon-modules`) | fails |
 
-Messages of the ported runtime's `dlopen`:
+Messages of `process.dlopen` (both runtimes):
 
 | File | Message |
 |---|---|
@@ -197,14 +197,14 @@ functions; the JavaScript API around them differs.
 | | Ported runtime | Legacy runtime |
 |---|---|---|
 | Module | Node's own `lib/wasi.js` over `internalBinding('wasi')` (`src/nodejs/bindings/wasi.ts`) | the `WASI` class of `src/node/wasi.ts` directly |
-| `version` option | required: `'preview1'` or `'unstable'`; missing → `ERR_INVALID_ARG_TYPE`, other values → `ERR_INVALID_ARG_VALUE` | ignored |
-| `getImportObject()` | `{ wasi_snapshot_preview1: … }`, or `{ wasi_unstable: … }` for `'unstable'` | always `{ wasi_snapshot_preview1: … }` |
-| Option validation (`args`, `env`, `preopens`, `stdin`/`stdout`/`stderr`, `returnOnExit`) | Node's | none |
-| `env` entries with value `undefined` | dropped | kept as `KEY=undefined` |
+| `version` option | required: `'preview1'` or `'unstable'`; missing → `ERR_INVALID_ARG_TYPE`, other values → `ERR_INVALID_ARG_VALUE` | the same |
+| `getImportObject()` | `{ wasi_snapshot_preview1: … }`, or `{ wasi_unstable: … }` for `'unstable'` | the same |
+| Option validation (`args`, `env`, `preopens`, `stdin`/`stdout`/`stderr`, `returnOnExit`) | Node's | the same checks and messages, written out in `src/node/wasi.ts` |
+| `env` entries with value `undefined` | left out (as in Node); other values become `KEY=<String(value)>` | the same |
 | `returnOnExit` (default `true`) | `start()` returns the exit code; with `false`, `proc_exit` ends the process | the same |
-| `start(instance)` | requires `_start`, rejects `_initialize` (Node's checks); `ERR_WASI_ALREADY_STARTED` on a second call | requires `_start` (`ERR_INVALID_ARG_TYPE`); `ERR_WASI_ALREADY_STARTED` |
-| `initialize(instance)` | rejects `_start`, calls `_initialize` if present | calls `_initialize` if present |
-| Memory | `instance.exports.memory` | `instance.exports.memory`, or set with `wasi.setMemory(memory)` |
+| `start(instance)` | requires `_start`, rejects `_initialize` (Node's checks); `ERR_WASI_ALREADY_STARTED` on a second call | the same |
+| `initialize(instance)` | rejects `_start`, calls `_initialize` if present | the same |
+| Memory | `instance.exports.memory` | the same |
 | `ExperimentalWarning: WASI is an experimental feature…` | printed once, as in Node | not printed |
 
 ```js
@@ -237,11 +237,11 @@ they see the same in-memory file system as `fs`.
 | `fd_fdstat_get` | file type, `APPEND` flag, all rights |
 | `fd_filestat_get`, `path_filestat_get` | kernel `fstat`/`stat` (`path_filestat_get` follows symlinks only with `SYMLINK_FOLLOW`) |
 | `fd_filestat_set_size` | kernel `ftruncate` |
-| `fd_filestat_set_times`, `path_filestat_set_times` | kernel `utimes` |
+| `fd_filestat_set_times`, `path_filestat_set_times` | kernel `utimes`; `fst_flags` pick which times change and whether to `now` (setting a time and `now` together is `EINVAL`); `path_filestat_set_times` changes a symlink itself unless `SYMLINK_FOLLOW` |
 | `fd_readdir` | entries with `.` and `..` first; `d_next` and `d_ino` are the entry's index + 1 |
 | `fd_renumber` | moves the entry, closing the target |
 | `fd_prestat_get`, `fd_prestat_dir_name` | preopened directories, from fd 3 on |
-| `path_open` | directories become directory handles; `CREAT`, `DIRECTORY`, `EXCL`, `TRUNC` and the `APPEND` fd flag map to `open` flags; read/write access comes from the requested rights |
+| `path_open` | directories become directory handles; `CREAT`, `DIRECTORY`, `EXCL`, `TRUNC` and the `APPEND` fd flag map to `open` flags; read/write access comes from the requested rights; a last component that is a symlink, opened without `SYMLINK_FOLLOW`, is `ELOOP` |
 | `path_create_directory`, `path_remove_directory`, `path_unlink_file`, `path_rename`, `path_link`, `path_symlink`, `path_readlink` | the matching kernel calls |
 | `poll_oneoff` | clock subscriptions block the thread (`Atomics.wait`) for the shortest timeout, relative or absolute; fd subscriptions are reported ready at once and make the call not block |
 | `random_get` | `crypto.getRandomValues` in 64 KiB pieces |
@@ -255,8 +255,20 @@ they see the same in-memory file system as `fs`.
   `stdout`, `stderr`).
 - Each `preopens` entry `{ guestPath: hostPath }` becomes a directory fd from 3 on; `hostPath` is resolved
   against the process's working directory.
-- A path relative to a directory fd is resolved with `path.resolve(<directory>, <path>)`. Paths are not
-  confined to the preopened directory: `..` can leave it.
+- A path argument is looked up beneath the directory fd it is relative to (`src/node/wasi-path.ts`),
+  one component at a time, the way uvwasi confines a module to its preopens. Every `path_*` call does
+  this (`path_open`, `path_filestat_get`, `path_filestat_set_times`, `path_create_directory`,
+  `path_remove_directory`, `path_unlink_file`, `path_rename`, `path_link`, `path_symlink`'s new path,
+  `path_readlink`):
+  - an absolute path, `..` above the directory, or a symlink whose target leads out of it is
+    `ENOTCAPABLE` (76) — except that, as in uvwasi, `..` above a directory the module sees as `/` (a
+    preopen named `/`) stays at it, so `../x` there is `x`;
+  - symlinks on the way are followed inside the directory (an absolute target is read in the module's
+    view, relative to the preopen's guest path); the last component is followed only with
+    `SYMLINK_FOLLOW`; more than 32 links is `ELOOP`;
+  - a missing directory on the way is `ENOENT`; a missing last component is left to the call (it may
+    create it).
+- The text a `path_symlink` stores is not checked; it is confined when a lookup follows it.
 - Rights are not enforced; every fd reports all rights.
 
 ### Errors
