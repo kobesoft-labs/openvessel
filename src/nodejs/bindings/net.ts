@@ -8,7 +8,8 @@ import * as loop from '../loop.ts';
 import { S } from '../state.ts';
 import { NativeURL } from '../web.ts';
 import { fromShape } from './shape.ts';
-import { type HandleDescriptor, LibuvStreamWrap, handleFactories } from './stream.ts';
+import { type HandleDescriptor, LibuvStreamWrap, ReqWrap, handleFactories } from './stream.ts';
+import { completeReq, emitAsyncInit, reqInit, withDefaultTrigger } from './process.ts';
 
 function errno(code: string): number {
   return S.internalBinding('uv')[`UV_${code}`] ?? -1;
@@ -33,7 +34,8 @@ function installAccept() {
         sys('close', { fd: msg.fd });
       } catch {}
     } else {
-      const client = new TCPWrap(0);
+      // the client handle is triggered by the server (ConnectionWrap::OnConnection)
+      const client = withDefaultTrigger(server, () => new TCPWrap(0));
       client._attach(msg.fd, { address: server._address, port: msg.port }, { address: msg.remoteAddress, port: msg.remotePort });
       loop.scope(server.onconnection, server, 0, client);
     }
@@ -53,7 +55,7 @@ class TCPWrap extends LibuvStreamWrap {
   #peer: { address: string; port: number } | null = null;
 
   constructor(public type = 0) {
-    super(type === 1 ? 'TCPServerWrap' : 'TCPSocketWrap');
+    super(type === 1 ? 'TCPServerWrap' : 'TCPSocketWrap', false, type === 1 ? 'TCPSERVERWRAP' : 'TCPWRAP');
   }
 
   /** @internal an accepted or connected socket */
@@ -104,6 +106,7 @@ class TCPWrap extends LibuvStreamWrap {
   }
 
   connect(req: { oncomplete?: (status: number, handle: TCPWrap, req: unknown, readable: boolean, writable: boolean) => void }, address: string, port: number) {
+    reqInit(req, 'TCPCONNECTWRAP', this);
     if (!isLoopback(address)) {
       // no sockets in a browser: the kernel speaks HTTP for us through the network policy (kernel/outbound.ts)
       try {
@@ -144,7 +147,7 @@ class TCPWrap extends LibuvStreamWrap {
     const done = loop.startReq('TCPConnectWrap');
     loop.macrotask(() => {
       done();
-      if (typeof req.oncomplete === 'function') loop.scope(req.oncomplete, req, status, this, req, true, true);
+      completeReq(req, status, this, req, true, true);
     });
     return 0;
   }
@@ -208,7 +211,7 @@ handleFactories['tcp-listen'] = (d) => {
 export function createTcpWrap() {
   return Object.assign(fromShape('tcp_wrap'), {
     TCP: TCPWrap,
-    TCPConnectWrap: class TCPConnectWrap {
+    TCPConnectWrap: class TCPConnectWrap extends ReqWrap {
       oncomplete: unknown = null;
       address = '';
       port = 0;
@@ -260,16 +263,16 @@ function resolve(hostname: string, fam: number): string[] {
 
 export function createCaresWrap() {
   const b = fromShape('cares_wrap');
-  class GetAddrInfoReqWrap {
+  class GetAddrInfoReqWrap extends ReqWrap {
     oncomplete: ((err: number, addresses?: string[]) => void) | null = null;
     family = 0;
     hostname = '';
     callback: unknown = null;
   }
-  class GetNameInfoReqWrap {
+  class GetNameInfoReqWrap extends ReqWrap {
     oncomplete: ((err: number, hostname?: string, service?: string) => void) | null = null;
   }
-  class QueryReqWrap {
+  class QueryReqWrap extends ReqWrap {
     oncomplete: ((...a: unknown[]) => void) | null = null;
   }
   const later = (fn: () => void) => {
@@ -281,7 +284,9 @@ export function createCaresWrap() {
   };
   class ChannelWrap {
     #servers: [string, number][] = [['127.0.0.53', 53]];
-    constructor(_timeout?: number, _tries?: number) {}
+    constructor(_timeout?: number, _tries?: number) {
+      emitAsyncInit(this, 'DNSCHANNEL');
+    }
     getServers() {
       return this.#servers.map(([a, p]) => [a, p]);
     }
@@ -294,17 +299,18 @@ export function createCaresWrap() {
   }
   const query = (kind: string) =>
     function (this: ChannelWrap, req: QueryReqWrap, name: string) {
+      reqInit(req, 'QUERYWRAP');
       later(() => {
         if (kind === 'queryA' || kind === 'queryAny') {
           const addrs = resolve(name, 4);
-          if (req.oncomplete) loop.scope(req.oncomplete, req, 0, addrs, addrs.map(() => 0));
+          completeReq(req, 0, addrs, addrs.map(() => 0));
           return;
         }
         if (kind === 'queryAaaa' && (name === 'localhost' || name.endsWith('.localhost'))) {
-          if (req.oncomplete) loop.scope(req.oncomplete, req, 0, ['::1'], [0]);
+          completeReq(req, 0, ['::1'], [0]);
           return;
         }
-        if (req.oncomplete) loop.scope(req.oncomplete, req, errno('ENODATA') ?? -61);
+        completeReq(req, errno('ENODATA') ?? -61);
       });
       return 0;
     };
@@ -315,21 +321,21 @@ export function createCaresWrap() {
     QueryReqWrap,
     ChannelWrap,
     getaddrinfo(req: GetAddrInfoReqWrap, hostname: string, fam: number, _hints: number, order: number) {
+      reqInit(req, 'GETADDRINFOREQWRAP');
       later(() => {
         let addrs = resolve(hostname, fam);
         if (order === 2) addrs = [...addrs.filter(isV6), ...addrs.filter((a) => !isV6(a))];
         else if (order === 1) addrs = [...addrs.filter((a) => !isV6(a)), ...addrs.filter(isV6)];
-        if (req.oncomplete) {
-          if (addrs.length) loop.scope(req.oncomplete, req, 0, addrs);
-          else loop.scope(req.oncomplete, req, -3008 /* UV_EAI_NODATA */);
-        }
+        if (addrs.length) completeReq(req, 0, addrs);
+        else completeReq(req, -3008 /* UV_EAI_NODATA */);
       });
       return 0;
     },
     getnameinfo(req: GetNameInfoReqWrap, address: string, port: number) {
+      reqInit(req, 'GETNAMEINFOREQWRAP');
       later(() => {
         const name = isLoopback(address) ? 'localhost' : (nameByFake.get(address) ?? address);
-        if (req.oncomplete) loop.scope(req.oncomplete, req, 0, name, String(port));
+        completeReq(req, 0, name, String(port));
       });
       return 0;
     },

@@ -42,7 +42,7 @@ Node の `lib/` は `internalBinding(name)` を通して C++ の半分とやり�
 
 | バインディング | 実装 | 状況 | メモ |
 |---|---|---|---|
-| `async_wrap` | `process.ts` | 一部 | `async_hook_fields`・`async_id_fields`・`async_ids_stack` は `AsyncHooks` の初めの状態から始める（吸い出しがコールバックの中で取られたため）。`pushAsyncContext`／`popAsyncContext`／`executionAsyncResource`／`clearAsyncIdStack` は C++ と同じ。destroy の ID はあとのタスクでまとめて流す。ネイティブの側から `init` を出すのは worker とメッセージのポートだけ。`setPromiseHooks`・`getPromiseHooks`・`registerDestroyHook`・`setCallbackTrampoline` は何もしない（V8 の Promise のフックが無い） |
+| `async_wrap` | `process.ts` | 一部 | `async_hook_fields`・`async_id_fields`・`async_ids_stack` は `AsyncHooks` の初めの状態から始める（吸い出しがコールバックの中で取られたため）。`pushAsyncContext`／`popAsyncContext`／`executionAsyncResource`／`clearAsyncIdStack` は C++ と同じ。destroy の ID はあとのタスクでまとめて流す。スタックの ID は、`grow_async_ids_stack` と同じに大きくなる（バインディングの上で差し替える）`Float64Array` に持つ。ネイティブのリソースは `AsyncWrap`（`process.ts` の `emitAsyncInit`）: 作られたときに `kAsyncIdCounter` から ID をもらって `init` のフックを呼び、`loop.scope()` がそのコールバックの前後で非同期の文脈を出し入れして `before`／`after` を呼び（`InternalCallbackScope`）、ハンドルが閉じたとき・リクエストが終わったときに `destroy` を積む。`getProviderType()` は `Providers` の数を返す（[Node.js の層](nodejs-runtime.ja.md#asynclocalstorage) を参照）。`setPromiseHooks`・`getPromiseHooks`・`registerDestroyHook`・`setCallbackTrampoline` は何もしない（V8 の Promise のフックが無い） |
 | `builtins` | `src/nodejs/boot.ts` | 実装済み | `nodelib.js` から作る: `builtinIds`・`compileFunction`・`natives`・`setInternalLoaders`・`hasCachedBuiltins`・`getCacheUsage` |
 | `config` | `process.ts` | 実装済み | 記録した値。ただし `hasInspector: true`・`isDebugBuild: false`・`noBrowserGlobals: false`・`getDefaultLocale()` は `en-US` |
 | `constants` | `index.ts` | 実装済み | 記録した `os`・`fs`・`crypto`・`zlib`・`trace`・`internal` の組。`NODE_DEFINE_CONSTANT` と同じく、どの組もプロトタイプが null で、どの定数も書き換え・削除できない |
@@ -50,9 +50,9 @@ Node の `lib/` は `internalBinding(name)` を通して C++ の半分とやり�
 | `errors` | `process.ts` | 実装済み | `setPrepareStackTraceCallback` と `setEnhanceStackForFatalException` はスタックトレースのフックへ。`triggerUncaughtException` はループへ。`getErrorSourcePositions` はスタックの最初のフレームから読む。ソースマップの設定は何もしない |
 | `mksnapshot` | `process.ts` | 一部 | 設定の関数は何もしない。`compileSerializeMain` は空（スナップショットは作れない） |
 | `options` | `index.ts` | 実装済み | `getCLIOptionsValues()` は解析したコマンドラインを返す。オプションの情報・別名・埋め込み側のオプション・`envSettings`・`types` は吸い出したもの。`noGlobalSearchPaths: false`・`shouldNotRegisterESMLoader: false` |
-| `os` | `process.ts` | 実装済み | 値は [Node.js の層](nodejs-runtime.ja.md#process-と-os-の値) を参照 |
+| `os` | `process.ts` | 実装済み | 値は [Node.js の層](nodejs-runtime.ja.md#process-と-os-の値) を参照。`getOSInformation()` は `node_os.cc` が uname を返すのと同じ `[sysname, version, release, machine]` |
 | `process_methods` | `process.ts` | 実装済み | `hrtime`、`cwd`／`chdir`／`umask`（カーネル）、`memoryUsage`／`rss`／`cpuUsage`／`resourceUsage`（近い値）、`_kill`、`reallyExit`（`--trace-exit`）、`dlopen`（いつも失敗）、`execve`、`patchProcessObject`、`loadEnvFile`、ループから取る動いているハンドル・リクエスト。`_debugProcess`・`_debugEnd`・`resetStdioForTesting` は何もしない |
-| `report` | `report.ts` | 実装済み | Node のレポートの形で、頭の部分は glibc の Linux のもの（`glibcVersionRuntime` 2.36・`glibcVersionCompiler` 2.28）。`writeReport` はカーネルを通して書く。設定は覚える |
+| `report` | `report.ts` | 実装済み | Node のレポートの形で、頭の部分は glibc の Linux のもの（`glibcVersionRuntime` 2.36・`glibcVersionCompiler` 2.28。`cpus` と `networkInterfaces` は `os` のバインディングから）。`writeReport` はカーネルを通して書く。設定は覚える |
 | `symbols` | `process.ts` | 実装済み | 記録した説明を持つ新しい Symbol |
 | `task_queue` | `process.ts` | 実装済み | `tickInfo` を包み、コールバックの枠の外の `nextTick` で tick のタスクを予約する。`enqueueMicrotask` はブラウザの `queueMicrotask`。`runMicrotasks` は何もしない（マイクロタスクはブラウザが流す）。`setPromiseRejectCallback` には、Worker の拒否のイベントがループを通して届く |
 | `timers` | `process.ts` → `src/nodejs/loop.ts` | 実装済み | lib のタイマー全部で 1 つのブラウザのタイマー。`immediateInfo`・`timeoutInfo`・`toggleImmediateRef`・`getLibuvNow` |
@@ -80,7 +80,7 @@ Node の `lib/` は `internalBinding(name)` を通して C++ の半分とやり�
 
 | バインディング | 実装 | 状況 | メモ |
 |---|---|---|---|
-| `stream_wrap` | `stream.ts` | 実装済み | `LibuvStreamWrap`・`WriteWrap`・`ShutdownWrap`・`streamBaseState`。読みは `readStart()` のあと、カーネルの `fd-data` のメッセージで届く。`readStop()` のあとに届いたものは次の `readStart()` まで取っておく。fd 0〜2 への書き込みは同期で全部書く。ほかのパイプとソケットは、カーネルの入れ物に入る分だけ書き、残りは読み手が空けたとき（`fd-writable`）に書くので、書き手には背圧が見える。`shutdown()` は相手に EOF を送る |
+| `stream_wrap` | `stream.ts` | 実装済み | `LibuvStreamWrap`・`WriteWrap`・`ShutdownWrap`・`streamBaseState`。`StreamBase` と同じに、`WriteWrap` はすぐに終わらない書き込みのときだけ、`ShutdownWrap` は `shutdown()` のときに `AsyncWrap` になる。読みは `readStart()` のあと、カーネルの `fd-data` のメッセージで届く。`readStop()` のあとに届いたものは次の `readStart()` まで取っておく。fd 0〜2 への書き込みは同期で全部書く。ほかのパイプとソケットは、カーネルの入れ物に入る分だけ書き、残りは読み手が空けたとき（`fd-writable`）に書くので、書き手には背圧が見える。`shutdown()` は相手に EOF を送る |
 | `pipe_wrap` | `stream.ts` | 実装済み | カーネルの fd の上のパイプ。Unix ドメインソケット（`bind` がソケットの inode を作り、接続ごとに新しいカーネルのソケットの対ができる。`pipe-accept`）。IPC のパイプはハンドルを運べる |
 | `tty_wrap` | `stream.ts` | 実装済み | `isTTY` はカーネルの `fdKind` から。`getWindowSize`（`ttySize`）・`setRawMode` |
 | `js_stream` | — | 形だけ | JavaScript の `Duplex` をネイティブのストリームとして包むもの（ネイティブでないソケットを渡す `tls.connect({ socket })` など）は失敗する |
@@ -94,9 +94,9 @@ Node の `lib/` は `internalBinding(name)` を通して C++ の半分とやり�
 | `cares_wrap` | `net.ts` | 実装済み | DNS は無い。IP の文字列はそのまま、`localhost`／`*.localhost` は `127.0.0.1` と `::1`、ほかの名前は `198.18.0.0/15` の代わりのアドレス（名前ごとに決まり、外への橋渡しが名前に戻す）。ほかの名前の IPv6 の引きはデータ無し（`EAI_NODATA`）。`ChannelWrap` の問い合わせ: `queryA`／`queryAny` は上と同じ、`queryAaaa` は localhost だけ、ほかは `ENODATA`。既定のサーバーは `127.0.0.53:53` |
 | `udp_wrap` | `udp.ts` | 実装済み | ループバックだけ。カーネルが、データグラムをそのポートの受け手の 1 つに渡す（`udp-msg`）。IPC で送ったソケットはプロセスの間で共有する |
 | `js_udp_wrap` | — | 形だけ | |
-| `tls_wrap` | `tls_wrap.ts` | 一部 | 通信路の上の TLS は無い。外への接続では、ブラウザの `fetch` が TLS をして証明書を確かめるので、`TLSWrap` は平文をそのまま通し、ハンドシェイクは済んだと報告する（`verifyError()` は `null`）。`getPeerCertificate()` は代わりの物（subject は `CN=<servername>`、issuer は `O=OpenVessel, CN=verified by the browser`、1 日前から 90 日有効）を、`getPeerX509Certificate()` は `undefined` を返す。ランタイムの中の 2 つの端の間では、両方とも素通しで、「ハンドシェイク」はカーネルを通した証明書の受け渡し（`tlsHello`）なので、`getPeerCertificate()`／`getPeerX509Certificate()` には相手の証明書が見える。`SecureContext` は設定を覚える。`loadPKCS12` は中身を読んで MAC を確かめる。`addCRL` は形式を確かめる。StreamBase のメンバーのいくつか（`bytesRead`・`onread` など）は記録した空のまま |
-| `http_parser` | `http_parser.ts`・`http/llhttp.ts` | 実装済み | `HTTPParser` は llhttp を節ごとに移したものの上で動くので、コールバック・エラーのコード・理由・エラーの位置が C のパーサーと同じ。サーバーのタイムアウトのための `ConnectionsList`。ヘッダーの大きさの上限の既定値は `--max-http-header-size`（16384） |
-| `http2` | `index.ts` | 一部 | 記録した形に、何もしない `setCallbackFunctions` と `refreshDefaultSettings` を足したもの。そのため `node:http2` は読み込める。`Http2Session`・`Http2Stream`・`packSettings`・`nghttp2ErrorString` は空 |
+| `tls_wrap` | `tls_wrap.ts` | 一部 | 通信路の上の TLS は無い。外への接続では、ブラウザの `fetch` が TLS をして証明書を確かめるので、`TLSWrap` は平文をそのまま通し、ハンドシェイクは済んだと報告する（`verifyError()` は `null`）。`getPeerCertificate()` は代わりの物（subject は `CN=<servername>`、issuer は `O=OpenVessel, CN=verified by the browser`、1 日前から 90 日有効）を、`getPeerX509Certificate()` は `undefined` を返す。ランタイムの中の 2 つの端の間では、両方とも素通しで、「ハンドシェイク」はカーネルを通した証明書の受け渡し（`tlsHello`）なので、`getPeerCertificate()`／`getPeerX509Certificate()` には相手の証明書が見える。サーバーの `TLSWrap` は、包んだソケットの読みを引き継ぐ（lib が包むとき、ソケットはもう読んでいる）。`SecureContext` は設定を覚える。`loadPKCS12` は中身を読んで MAC を確かめる。`addCRL` は形式を確かめる。StreamBase のメンバーのいくつか（`bytesRead`・`onread` など）は記録した空のまま |
+| `http_parser` | `http_parser.ts`・`http/llhttp.ts` | 実装済み | `HTTPParser` は llhttp 9.4.3（Node 22.23.4 が同梱する版。`process.versions.llhttp`）を節ごとに移したものの上で動くので、コールバック・エラーのコード・理由・エラーの位置が C のパーサーと同じ。サーバーのタイムアウトのための `ConnectionsList`。ヘッダーの大きさの上限の既定値は `--max-http-header-size`（16384）。`getProviderType()` は `initialize()` のあと 17／18（`HTTPINCOMINGMESSAGE`／`HTTPCLIENTREQUEST`）。ほかのオブジェクトの上で呼んだメソッドは `TypeError: Illegal invocation` を投げる |
+| `http2` | `index.ts` | 一部 | 記録した形に、何もしない `setCallbackFunctions` と `refreshDefaultSettings` を足したもの。そのため `node:http2` は読み込める。`Http2Session`・`Http2Stream`・`packSettings`・`nghttp2ErrorString` は `ERR_NOT_IMPLEMENTED` を投げる空のものなので、HTTP/2 のセッションはどれも失敗する（[Node.js の層](nodejs-runtime.ja.md#実装していないもの) を参照） |
 | `block_list` | — | 形だけ | `net.BlockList`・`net.SocketAddress` |
 
 ## 子プロセスとシグナル
@@ -113,7 +113,7 @@ Node の `lib/` は `internalBinding(name)` を通して C++ の半分とやり�
 |---|---|---|---|
 | `contextify` | `contextify.ts` | 一部 | `compileFunctionForCJSLoader`・`ContextifyScript`・`compileFunction`・`containsModuleSyntax`（acorn／es-module-lexer）・`makeContext`（まねた文脈: プロキシのグローバルと `with` のスコープ）・`measureMemory`。SIGINT の見張りの関数は何もしない。`timeout`／`breakOnSigint` と `microtaskMode` は効かない。`cachedData` はソースの 16 バイトの記録（`OVC1`）で、V8 と同じように確かめる |
 | `module_wrap` | `module_wrap.ts` | 実装済み | `ModuleWrap`（ソースと合成）。ブラウザへは `/__ov/mw/<pid>/<id>.mjs` で配る。`link` は 22.23 の `link(modules)` と前の `link(specifiers, modules)` の両方を受ける。`require(esm)` のための `evaluateSync` は sucrase で。`createRequiredModuleFacade`。`throwIfPromiseRejected` は何もしない |
-| `modules` | `modules.ts` | 一部 | `readPackageJSON`・`getNearestParentPackageJSON(Type)`・`getPackageScopeConfig`・`getPackageType` をカーネルのファイルの読みの上で。スレッドごとに覚え、Node と同じ組（`imports`／`exports` は JSON の文字列）で返す。JSON が壊れていれば `ERR_INVALID_PACKAGE_CONFIG`。コンパイルのキャッシュ: `enableCompileCache` は無効と答える。`setLazyPathHelpers` は何もしないので、`import.meta.dirname`／`filename` は入らない |
+| `modules` | `modules.ts` | 一部 | `readPackageJSON`・`getNearestParentPackageJSON(Type)`・`getPackageScopeConfig`・`getPackageType` をカーネルのファイルの読みの上で。スレッドごとに覚え、Node と同じ組（`imports`／`exports` は JSON の文字列）で返す。JSON が壊れていれば `ERR_INVALID_PACKAGE_CONFIG`。コンパイルのキャッシュ: `enableCompileCache` は無効と答える。`setLazyPathHelpers` は `file:` の URL に `import.meta.dirname`／`filename` を入れる |
 | `wasi` | `wasi.ts` | 実装済み | `WASI` は `src/node/wasi.ts`（旧ランタイムと共用）の preview1 の関数にバインディングの形を与える。ファイルはカーネルを通る。`proc_exit` はプロセスを終える。`sock_*` は `ENOSYS` を返す |
 | `wasm_web_api` | `index.ts` | 実装済み | `setImplementation` は何もしない。`WebAssembly.compileStreaming`／`instantiateStreaming` はブラウザのもの |
 | `sea` | — | 形だけ | `node:sea` は読み込めるが、関数は投げる |

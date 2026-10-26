@@ -11,6 +11,7 @@
 
 import { macrotask, scope, startReq } from '../loop.ts';
 import { fromShape } from './shape.ts';
+import { asyncIdOf, emitAsyncInit } from './process.ts';
 import { BrotliDecoderContext, BrotliEncoderContext } from './zlib/brotli.ts';
 import { bytesOf, type CompressionContext, type CompressionError, Mode } from './zlib/common.ts';
 import { ZlibContext } from './zlib/zlib-context.ts';
@@ -60,6 +61,11 @@ abstract class CompressionStream<C extends CompressionContext> {
 
   constructor(ctx: C) {
     this.#ctx = ctx;
+    emitAsyncInit(this, 'ZLIB');
+  }
+
+  getAsyncId() {
+    return asyncIdOf(this);
   }
 
   protected get ctx(): C {

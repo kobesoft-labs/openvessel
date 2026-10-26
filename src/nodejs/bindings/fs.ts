@@ -10,6 +10,7 @@ import { registerHostObject } from './messaging.ts';
 import { fromShape } from './shape.ts';
 import { readOnce } from './stream.ts';
 import { HandleWrap } from './stream.ts';
+import { asyncIdOf, completeReq, emitAsyncInit } from './process.ts';
 
 const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
 const nativeClearTimeout = globalThis.clearTimeout.bind(globalThis);
@@ -114,6 +115,13 @@ function validatedMode(v: unknown): number {
   return v;
 }
 
+/** The request behind an fs promise (FSReqPromise, made on the native side): the promise settles in its async context. */
+export class FSReqPromise {
+  constructor() {
+    emitAsyncInit(this, 'FSREQPROMISE', { req: true });
+  }
+}
+
 export function createFs() {
   const b = fromShape('fs');
   const kUsePromises: symbol = b.kUsePromises;
@@ -123,8 +131,14 @@ export function createFs() {
   class FSReqCallback {
     oncomplete: ((...a: unknown[]) => void) | null = null;
     context: unknown = null;
-    constructor(public bigint = false) {}
+    constructor(public bigint = false) {
+      emitAsyncInit(this, 'FSREQCALLBACK', { req: true });
+    }
+    getAsyncId() {
+      return asyncIdOf(this);
+    }
   }
+
 
   /** Runs fn in the mode selected by req. */
   function run<T>(req: unknown, syscall: string, path: unknown, dest: unknown, fn: () => T): T | Promise<T> | undefined {
@@ -137,14 +151,20 @@ export function createFs() {
     }
     if (req === kUsePromises) {
       const done = loop.startReq('FSReqPromise');
+      const wrap = new FSReqPromise();
       return new Promise<T>((resolve, reject) => {
         loop.macrotask(() => {
           done();
+          // the work, then FSReqPromise::Resolve/Reject in the request's async context
+          let result: T;
           try {
-            resolve(fn());
+            result = fn();
           } catch (e) {
-            reject(uvError(e, syscall, path, dest));
+            const err = uvError(e, syscall, path, dest);
+            loop.scope(reject, wrap, err);
+            return;
           }
+          loop.scope(resolve, wrap, result);
         });
       });
     }
@@ -159,12 +179,10 @@ export function createFs() {
         err = uvError(e, syscall, path, dest);
       }
       done();
-      if (typeof r.oncomplete === 'function') {
-        // FSReqCallback::Resolve passes the value only when it isn't undefined
-        if (err) loop.scope(r.oncomplete, r, err);
-        else if (result === undefined) loop.scope(r.oncomplete, r, null);
-        else loop.scope(r.oncomplete, r, null, result);
-      }
+      // FSReqCallback::Resolve passes the value only when it isn't undefined
+      if (err) completeReq(r, err);
+      else if (result === undefined) completeReq(r, null);
+      else completeReq(r, null, result);
     });
     return undefined;
   }
@@ -192,11 +210,19 @@ export function createFs() {
         throw uvError(e, syscall);
       },
     );
-    if (req === kUsePromises) return p;
+    if (req === kUsePromises) {
+      const wrap = new FSReqPromise();
+      return new Promise<T>((resolve, reject) =>
+        p.then(
+          (v) => loop.scope(resolve, wrap, v),
+          (e) => loop.scope(reject, wrap, e),
+        ),
+      );
+    }
     const r = req as FSReqCallback;
     p.then(
-      (v) => typeof r.oncomplete === 'function' && (v === undefined ? loop.scope(r.oncomplete, r, null) : loop.scope(r.oncomplete, r, null, v)),
-      (e) => typeof r.oncomplete === 'function' && loop.scope(r.oncomplete, r, e),
+      (v) => (v === undefined ? completeReq(r, null) : completeReq(r, null, v)),
+      (e) => completeReq(r, e),
     );
     return undefined;
   }
@@ -256,7 +282,7 @@ export function createFs() {
     // libuv's busy_polling: 0 before the first result, 1 after a success, the error code after a failure
     #busy = 0;
     constructor(bigint: boolean) {
-      super('StatWatcher');
+      super('StatWatcher', false, 'STATWATCHER');
       this.#bigint = !!bigint;
     }
     start(path: unknown, interval: number): number {
@@ -311,25 +337,45 @@ export function createFs() {
     onread: unknown = null;
     constructor(fd: number) {
       this.#fd = fd;
+      emitAsyncInit(this, 'FILEHANDLE');
     }
     get fd() {
       return this.#fd;
     }
     getAsyncId() {
-      return -1;
+      return asyncIdOf(this);
     }
     close() {
       const fd = this.#fd;
       this.#closing = true;
-      return run(kUsePromises, 'close', undefined, undefined, () => {
-        if (fd >= 0) sys('close', { fd });
-        this.#fd = -1;
+      // FileHandle::ClosePromise: a FileHandleCloseReq settles the promise
+      const wrap = new FileHandleCloseReq();
+      const done = loop.startReq('FileHandleCloseReq');
+      return new Promise<void>((resolve, reject) => {
+        loop.macrotask(() => {
+          done();
+          loop.scope(() => {
+            try {
+              if (fd >= 0) sys('close', { fd });
+              this.#fd = -1;
+              resolve();
+            } catch (e) {
+              reject(uvError(e, 'close'));
+            }
+          }, wrap);
+        });
       });
     }
     releaseFD() {
       const fd = this.#fd;
       this.#fd = -1;
       return fd;
+    }
+  }
+
+  class FileHandleCloseReq {
+    constructor() {
+      emitAsyncInit(this, 'FILEHANDLECLOSEREQ', { req: true });
     }
   }
 

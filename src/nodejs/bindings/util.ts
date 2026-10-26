@@ -186,7 +186,7 @@ function getCallSites(frames: number) {
 const trimSpaces = (s: string) => s.replace(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, '');
 
 /** Dotenv::ParseContent (node_dotenv.cc), step for step; keys come out sorted (a std::map). */
-function parseEnv(input: string): Record<string, string> {
+export function parseEnv(input: string): Record<string, string> {
   const store = new Map<string, string>();
   let content = trimSpaces(input.replace(/\r/g, ''));
   const afterLine = (from: number) => {

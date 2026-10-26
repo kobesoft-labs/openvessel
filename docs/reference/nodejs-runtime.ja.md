@@ -18,7 +18,7 @@
 | TypeScript | Node の型の除去（amaro） | sucrase の `typescript` 変換（enum なども通る） |
 | ES モジュール | `module_wrap` バインディング。`/__ov/mw/<pid>/<id>.mjs` で配る | カーネルの ESM の配信（`/__ov/esm/…`・`/__ov/builtin/…`） |
 | `--loader` | Node のフックの仕組み | 警告を出して無視 |
-| `node:http2` | 読み込める。セッションで `ERR_NOT_IMPLEMENTED` | 読み込める。`createServer`・`createSecureServer`・`connect` が `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`（「HTTP/2 is not supported in OpenVessel」）を投げる |
+| `node:http2` | 読み込め、サーバーは待ち受けるが、セッションは `ERR_NOT_IMPLEMENTED`（`Http2Session`。[実装していないもの](#実装していないもの) を参照）で失敗する | `createServer()`・`createSecureServer()`・`connect()` が `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`（`HTTP/2 is not supported in OpenVessel`）を投げる |
 | 既定 | いいえ | **はい** |
 
 [互換性](../compatibility.ja.md) のページの数字（Node の試験とAstro のコーパス）は、どれも移植版ランタイムで計ったものです。このページは、断りのない限り移植版ランタイムについて書いています。
@@ -65,7 +65,7 @@ vessel.mount({ node: 'port' }, { path: '/etc/openvessel' });
 
 `src/nodejs/boot.ts` の `boot()` は、C++ の `node::CreateEnvironment` と `node::StartExecution` がすることをします。
 
-1. init のメッセージを覚え、syscall の通り道をつなぎ、（メインのスレッドだけ）コマンドラインを解析します。コマンドラインが正しくなければ、エラーを 1 行ずつ `<argv0>: <エラー>` と出し、終了コード 9 で終わります。`--version`／`-v` は、ほかの何も読み込む前に `v22.23.4` を出して 0 で終わります。
+1. init のメッセージを覚え、syscall の通り道をつなぎ、（メインのスレッドだけ）`--env-file` のファイルを読んでコマンドラインを解析します。コマンドラインが正しくなければ、エラーを 1 行ずつ `<argv0>: <エラー>` と出し、終了コード 9 で終わります。`--version`／`-v` は `v22.23.4` を、`--v8-options` は V8 のオプションの一覧を、ほかの何も読み込む前に出して 0 で終わります。`Error.stackTraceLimit` を `--stack-trace-limit`（既定は 10）にします。
 2. Worker の `unhandledrejection`・`rejectionhandled`・`error` のイベントを受ける準備をします。
 3. グローバルの `Proxy` を、対象とハンドラを記録するものに差し替え（`util.types.isProxy` と `util.inspect(…, { showProxy: true })` のため）、Map・Set の反復子を作るメソッドを包みます（`util.types.isMapIterator` と反復子のプレビューのため）。どちらも Node の primordials が掴む前に行います。
 4. コンテキストごとのスクリプト `internal/per_context/primordials`・`internal/per_context/domexception`・`internal/per_context/messageport` を実行します。
@@ -73,8 +73,8 @@ vessel.mount({ node: 'port' }, { path: '/etc/openvessel' });
 6. `internal/bootstrap/realm` を実行し、スタックトレースのフックを入れます（[スタックトレースとエラー](#スタックトレースとエラー) を参照）。
 7. `internal/bootstrap/node`、続けて `internal/bootstrap/web/exposed-wildcard` と `internal/bootstrap/web/exposed-window-or-worker` を実行します（`config.noBrowserGlobals` はいつも `false`）。
 8. メインのスレッドでは `internal/bootstrap/switches/is_main_thread` と `…/does_own_process_state` を、worker のスレッドでは `…/is_not_main_thread` と `…/does_not_own_process_state` を実行します。
-9. グローバルオブジェクトを Node の形に整えます（[グローバルオブジェクト](#グローバルオブジェクト) を参照）。
-10. メインのスクリプトを選んでコールバックの枠の中で実行し、イベントループを始めます。
+9. グローバルオブジェクトを Node の形に整えます（[グローバルオブジェクト](#グローバルオブジェクト) を参照）。fetch が無いとき（`--no-experimental-fetch`）は `WebAssembly.compileStreaming` と `instantiateStreaming` を消します。V8 にこれがあるのは、Node が fetch と一緒に wasm のストリーミングを用意したときだけだからです。
+10. `--run` のときは、メインのスクリプトの代わりにパッケージのスクリプトを動かします（[--run](#--run) を参照）。そうでなければ、`--env-file` の変数のうち `process.env` にまだ無いものを入れ（watch モードでは入れない。子が読む）、メインのスクリプトを選んで、非同期 ID 1 のコールバックの枠の中で実行し、イベントループを始めます。
 
 2〜10 のどこかで例外が出ると、fd 2 に `[openvessel] node bootstrap failed: <スタック>` と書き、終了コード 10（`kBootstrapFailure`）で終わります。
 
@@ -84,9 +84,11 @@ vessel.mount({ node: 'port' }, { path: '/etc/openvessel' });
 |---|---|
 | worker のスレッド | `internal/main/worker_thread` |
 | `--help` | `internal/main/print_help` |
+| `--prof-process` | `internal/main/prof_process` |
 | `-e`・`-p`・`--eval`・`--print`（`--interactive` なし） | `internal/main/eval_string` |
 | `--check` | `internal/main/check_syntax` |
 | `--test` | `internal/main/test_runner` |
+| `--watch` | `internal/main/watch_mode` |
 | `-` 以外のスクリプトの引数がある | `internal/main/run_main_module` |
 | `--interactive`、または fd 0 が端末 | `internal/main/repl` |
 | それ以外 | `internal/main/eval_stdin` |
@@ -133,8 +135,8 @@ vessel.mount({ node: 'port' }, { path: '/etc/openvessel' });
 
 | コード | いつ |
 |---|---|
-| 0 | ふつうの終了、`--version` |
-| 1 | 捕まえられなかった例外・処理されなかった Promise の拒否（`exit` のハンドラが `process.exitCode` を決めたときはその値） |
+| 0 | ふつうの終了、`--version`、`--v8-options`、スクリプトが成功した `--run` |
+| 1 | 捕まえられなかった例外・処理されなかった Promise の拒否（`exit` のハンドラが `process.exitCode` を決めたときはその値）、失敗した `--run` |
 | 6 | `process._fatalException` が関数でない（`kInvalidFatalExceptionMonkeyPatching`） |
 | 7 | 致命的な例外の処理そのものが例外を投げた（`kExceptionInFatalExceptionHandler`） |
 | 9 | コマンドラインか `NODE_OPTIONS` が正しくない |
@@ -153,24 +155,41 @@ vessel.mount({ node: 'port' }, { path: '/etc/openvessel' });
 
 - 先に `NODE_OPTIONS`、次にコマンドラインを当てます。コマンドラインのほうが勝ちます。`NODE_OPTIONS` は空白で区切ります。`'…'` と `"…"` で囲めて、バックスラッシュは二重引用符の中でだけ次の 1 文字をそのまま入れます。
 - オプションは `--`・`-`・`-` で始まらない最初の引数で終わります。その後ろが `process.argv[1…]` です。
-- 値を取るオプションは `--name=value` でも `--name value` でも書けます。別名は Node と同じに展開します（`-e` → `--eval`、`-p` → `--print`、`-pe` → `--print --eval`、`-C` → `--conditions`、`-r` → `--require`、`--loader` → `--experimental-loader`、`-c` → `--check`、`-i` → `--interactive` など）。
-- `--no-<name>` は真偽のオプションを打ち消します。ほかのオプションを伴う真偽のオプションがあります: `--experimental-transform-types` は `--experimental-strip-types` と `--enable-source-maps` を伴います。
+- オプションの名前では `_` と `-` は同じです（`--stack_trace_limit=3` は `--stack-trace-limit=3`。`process.execArgv` は打ったとおり）。
+- 値を取るオプションは `--name=value` でも `--name value` でも書けます。別名は Node と同じに展開します（`-e` → `--eval`、`-p` → `--print`、`-pe` → `--print --eval`、`-C` → `--conditions`、`-r` → `--require`、`--loader` → `--experimental-loader`、`-c` → `--check`、`-i` → `--interactive` など）。`--prof-process` は `--prof-process --` になるので、その後ろは全部引数です。
+- `--no-<name>` は真偽のオプションを打ち消します。`node_options.cc` の `Implies()` と同じに、ほかのオプションを伴うオプションがあります: `--eval` → `[has_eval_string]`、`--env-file`・`--env-file-if-exists` → `[has_env_file_string]`、`--watch-path` → `--watch`、`--experimental-strip-types` → `--experimental-detect-module`、`--experimental-transform-types` → `--experimental-strip-types` と `--enable-source-maps`、`--inspect-brk` → `--inspect`、`--report-signal` → `--report-on-signal` など。
 - 整数のオプションは数として、文字列の一覧（`--require`・`--import`・`--conditions` など）は積み重ねて持ちます。
+- Node の知らないオプションは、Node と同じに V8 に回します。決めるのは V8 自身のフラグの一覧です（Linux x64 の Node v22.23.4 の `node --v8-options`。`src/nodejs/data/v8-options.json`）。V8 のフラグなら受け付け（効き目は無い。下を参照）、それ以外は bad option です。真偽のフラグは `--no-` を取れます。それ以外のフラグは値を `=` の後ろに書きます（Node は引数を 1 つだけ V8 に渡すため）。値は型に合っていなければなりません。
 
 エラー（どれも `node: <メッセージ>` と出し、終了コード 9）:
 
 | メッセージ | 原因 |
 |---|---|
-| `bad option: <arg>` | Node の表に無く、受け付ける V8 のフラグでもないオプション |
-| `<option> is not allowed in NODE_OPTIONS` | Node が `NODE_OPTIONS` で禁じているオプション（40 個。`--eval` など） |
+| `bad option: <arg>` | Node の表にも V8 の一覧にも無いオプション、または値が合わない V8 のフラグ（先に V8 自身のメッセージが出る。下を参照） |
+| `<option> is not allowed in NODE_OPTIONS` | Node が `NODE_OPTIONS` で禁じているオプション（40 個。`--eval` など）と、Node の表に無いオプション（V8 のフラグも） |
+| `--no-<name> is an invalid negation because it is not a boolean option` | 真偽でない Node のオプションに `--no-` を付けた |
 | `<arg> requires an argument` | 値を取るオプションが行の最後にある |
+| `<file>: not found` | 開けない `--env-file`（`--env-file-if-exists` なら `<file> not found. Continuing without it.` と出して続ける） |
+| `<file>: invalid format` | 読めない `--env-file`（ディレクトリ） |
+| `either --watch or --check can be used, not both`（`--eval`・`--interactive`・`--test-force-exit` も）、`--watch requires specifying a file` | `EnvironmentOptions::CheckOptions` |
 | `--secure-heap must be a power of 2`／`--secure-heap-min must be a power of 2` | `PerProcessOptions::CheckOptions` |
+
+値の合わない V8 のフラグには、Node のメッセージの前に V8 のメッセージが出ます。V8 はそこで止まるので、Node と同じに、そのフラグ、その後ろの V8 のフラグ、Node が自分で足す V8 のフラグ（`--harmony-import-attributes`・`--no-harmony-import-assertions`・`--experimental-wasm-imported-strings`・`--experimental-wasm-memory64`・`--experimental-wasm-exnref`）が全部 bad option になります。
 
 ```text
 $ node --bogus
 node: bad option: --bogus
 $ NODE_OPTIONS='--eval=1' node -e 1
 node: --eval is not allowed in NODE_OPTIONS
+$ node --stack-trace-limit 5 -e 1
+Error: illegal value for flag --stack-trace-limit of type int
+Try --help for options
+node: bad option: --stack-trace-limit
+node: bad option: --harmony-import-attributes
+node: bad option: --no-harmony-import-assertions
+node: bad option: --experimental-wasm-imported-strings
+node: bad option: --experimental-wasm-memory64
+node: bad option: --experimental-wasm-exnref
 ```
 
 ### オプションの効き方
@@ -180,7 +199,11 @@ node: --eval is not allowed in NODE_OPTIONS
 | オプション | ランタイムでの効き目 |
 |---|---|
 | `--version`・`-v` | Node の起動より前に出す |
-| `-e`・`-p`・`--check`・`--test`・`--interactive`・`--help` | メインのスクリプトを選ぶ（上の表） |
+| `--v8-options` | V8 のオプションの一覧を出す（`src/nodejs/data/v8-options.json` に吸い出したもの。最初の行は、吸い出したマシンの CPU の機能） |
+| `-e`・`-p`・`--check`・`--test`・`--interactive`・`--help`・`--prof-process`・`--watch` | メインのスクリプトを選ぶ（上の表）。`--prof-process` は lib の V8 のティックの処理を動かす（ログが無ければ `Please provide a valid isolate file as the final argument.` で終了コード 1）。`--watch` は Node の watch モードで、読み込んだファイル（または `--watch-path`）が変わると子プロセスでスクリプトを動かし直す |
+| `--env-file`・`--env-file-if-exists` | [--env-file](#--env-file) を参照 |
+| `--run` | [--run](#--run) を参照 |
+| `--stack-trace-limit` | `Error.stackTraceLimit`（受け継ぐ worker のスレッドでも） |
 | `--title` | `process.title` の初めの値 |
 | `--trace-exit` | `process.reallyExit` が `(node:<pid>) WARNING: Exited the environment with code <n>` とスタックを出す |
 | `--pending-deprecation` | `process.env` に文字列でない値を入れたときの DEP0104 の警告、GCM の短い認証タグの非推奨の警告 |
@@ -191,21 +214,27 @@ node: --eval is not allowed in NODE_OPTIONS
 
 - Node の表で型が `kV8Option` のもの（`--expose-gc`・`--jitless`・`--max-old-space-size`・`--max-semi-space-size`・`--abort-on-uncaught-exception`・`--prof`・`--perf-*`・`--disallow-code-generation-from-strings` など）。そのため `node --expose-gc -e 'typeof gc'` は `undefined` です
 - 型が `kNoOp` のもの（`--experimental-modules`・`--experimental-wasm-modules` など）
-- 表に無いが V8 のフラグらしいもの: `--max-old-space-size*`・`--max-semi-space-size*`・`--stack-size*`・`--expose-gc*`・`--harmony*`・`--js-*`・`--allow-natives-syntax*`・`--enable-sharedarraybuffer-per-context*`・`--v8-*`・すべての `--no-*`
+- そのほかの V8 のフラグ（`--use-strict`・`--stack-size=…`・`--harmony-*`・`--allow-natives-syntax` など）。ブラウザの V8 はもう動いていて、フラグを受けません
 
-次のものは解析しますが、当てません。Node が JavaScript の起動の前に、または代わりに C++ で扱うもので、ランタイムはそれを再現していないためです。
+### --env-file
 
-| オプション | どうなるか |
-|---|---|
-| `--env-file`・`--env-file-if-exists` | ファイルを読み込まない（`process.loadEnvFile()` は動く） |
-| `--run <script>` | パッケージのスクリプトを動かさない |
-| `--watch`・`--watch-path` | スクリプトを 1 回動かすだけで、見張らない |
-| `--v8-options` | 何も出さない |
-| `--stack-trace-limit` | `Error.stackTraceLimit` は 10 のまま |
+`node.cc` と同じに、オプションを解析する前に、コマンドラインの（`--` までの）`--env-file <file>`・`--env-file=<file>`・`--env-file-if-exists` を順に作業ディレクトリから読み、`util.parseEnv()` と同じに解析します。後のファイルが勝ちます。ファイルの `NODE_OPTIONS` は、環境に `NODE_OPTIONS` が無いときに解析に使います。Node のオプションとして（スクリプトの名前より前に）書いたときは、`process.env` にまだ無い変数をメインのスクリプトの前に入れます。環境にすでにある変数が勝ちます。`--run` はファイルの変数を使わず、watch モードは子に任せます。
+
+```text
+$ printf 'FOO=fromfile\n' > .env
+$ node --env-file=.env -p process.env.FOO
+fromfile
+$ FOO=outer node --env-file .env -p process.env.FOO
+outer
+```
+
+### --run
+
+`node --run <script>`（`src/nodejs/task_runner.ts`。`node_task_runner.cc` に倣う）は、作業ディレクトリから上へいちばん近い `package.json` を探し（ルートのディレクトリそのものは探さない）、そのファイルのディレクトリで `/bin/sh -c '<script>'` を動かします。標準入出力は引き継ぎ、環境はプロセスの環境に `NODE_RUN_SCRIPT_NAME`・`NODE_RUN_PACKAGE_JSON_PATH` を足し、作業ディレクトリから上の `node_modules/.bin` を全部 `PATH` の前に付けたものです。`--` の後ろの引数は、Node と同じ引用のしかたでつなげます。終了コードは、スクリプトが失敗すれば 1、そうでなければ 0 です。Node はこれを環境を作る前に C++ でしますが、ここでは lib の起動のあとに（`child_process` で）動かし、メインのスクリプトは動かしません。エラー（どれも終了コード 1）: `Can't find package.json for directory <dir>`・`Can't parse <path>`・`Can't find "scripts" field in <path>`・`Script "<name>" is unexpectedly not a string for <path>`・`Missing script: "<name>" for <path>`（続けて使えるスクリプトの一覧）。
 
 ### worker のスレッド
 
-worker のスレッドは、自分の `execArgv`（無ければ親のもの）と、自分の環境の `NODE_OPTIONS` を解析します。`new Worker()` は `Worker::New` と同じように確かめます。プロセス全体のオプション（`--title`・`--openssl-config`・`--secure-heap`・`--report-*`・`--use-openssl-ca`・`--v8-options`・`-h`・`-v` など）や正しくないオプションは `ERR_WORKER_INVALID_EXEC_ARGV` になります。`env.NODE_OPTIONS` が正しくないときも、`invalid NODE_OPTIONS env variable` を添えた `ERR_WORKER_INVALID_EXEC_ARGV` になります。
+worker のスレッドは、自分の `execArgv`（無ければ親のもの）と、自分の環境の `NODE_OPTIONS` を解析します。`new Worker()` は `Worker::New` と同じように確かめます。プロセス全体のオプション（`--title`・`--openssl-config`・`--secure-heap`・`--report-*`・`--use-openssl-ca`・`--v8-options`・`-h`・`-v` など）、V8 に回るオプション（`--expose-gc`・`--stack-trace-limit`・`--use-strict` など）、正しくないオプションは `ERR_WORKER_INVALID_EXEC_ARGV` になります。`env.NODE_OPTIONS` が正しくないときも、`invalid NODE_OPTIONS env variable` を添えた `ERR_WORKER_INVALID_EXEC_ARGV` になります。
 
 ## 環境とグローバル
 
@@ -252,7 +281,8 @@ Node の起動は、Web のグローバルを lib の実装に差し替えます
 | `process.dlopen()` | いつも `ERR_DLOPEN_FAILED`。メッセージは `<file>: cannot open shared object file: No such file or directory`・`<file>: file too short`・`<file>: invalid ELF header`・`Native addons (.node files) cannot run in OpenVessel. Use the WebAssembly build of the package.` のどれか |
 | `process.execve()` | カーネルの `execve`。失敗すると `process.execve failed with error code <code>` を出して 134 で終わる |
 | `process.loadEnvFile(path = '.env')` | VFS からファイルを読み、まだ無い変数だけを入れる |
-| `process.report.getReport()` | Node と同じ形。頭の部分は glibc 2.36（`glibcVersionRuntime`）・`osRelease` は `6.8.0-openvessel`・`host` は `openvessel` |
+| `process.report.getReport()` | Node と同じ形。頭の部分は glibc 2.36（`glibcVersionRuntime`）・`osRelease` は `6.8.0-openvessel`・`osVersion` は `#1 SMP OpenVessel`・`osMachine` は `x86_64`・`host` は `openvessel` で、`cpus` と `networkInterfaces` は `os.cpus()`／`os.networkInterfaces()` と同じものを並べる |
+| `os.release()`・`os.version()` | `6.8.0-openvessel`・`#1 SMP OpenVessel`（uname の release と version） |
 | `os.hostname()` | `openvessel` |
 | `os.type()`・`os.machine()`・`os.endianness()` | `Linux`・`x86_64`・`LE` |
 | `os.cpus()` | `navigator.hardwareConcurrency` 個。型名は `OpenVessel Virtual CPU`、速さは 2400 |
@@ -311,7 +341,7 @@ Node の起動は、Web のグローバルを lib の実装に差し替えます
 
 ### 組み込みモジュール
 
-`require('fs')`・`require('node:fs')`・`import 'node:fs'` は、`nodelib.js` の Node の `lib/` のモジュールを読みます。依存の 2 つは差し替えています（[差し替え](#差し替え) を参照）。`internal/deps/v8/tools/` の V8 のプロファイラーの道具は入れていません。
+`require('fs')`・`require('node:fs')`・`import 'node:fs'` は、`nodelib.js` の Node の `lib/` のモジュールを読みます。依存の 2 つは差し替えています（[差し替え](#差し替え) を参照）。`internal/deps/v8/tools/` の V8 のプロファイラーの道具は入れていません。そのため `node --prof-process <ログ>` は `TypeError [ERR_INVALID_ARG_TYPE]: The "sourceText" argument must be of type string. Received undefined` で失敗します（ログが無いときは Node と同じに答えます）。
 
 ### CommonJS
 
@@ -341,7 +371,7 @@ console.log(m.v, m.default()); // 42 def
 
 ### import.meta
 
-`import.meta.url`（`file://` の URL）・`import.meta.resolve()`・`import.meta.main` は Node のコールバックが入れます。`import.meta.dirname` と `import.meta.filename` は、いまは**入りません**（`undefined`）。Node はこれを `internalBinding('modules').setLazyPathHelpers` で入れますが、ここではそれが何もしないためです。
+`import.meta.url`（`file://` の URL）・`import.meta.resolve()`・`import.meta.main` は Node のコールバックが入れます。`file:` のモジュールには、`internalBinding('modules').setLazyPathHelpers` が `import.meta.dirname` と `import.meta.filename`（モジュールのディレクトリとパス。`url.fileURLToPath()` が返すもの）を、書き換えられて列挙できるデータのプロパティとして足します。そのため `Object.keys(import.meta)` は Node と同じ `['dirname', 'filename', 'main', 'resolve', 'url']` です。Node は初めて読まれたときに計算しますが、ここではすぐに計算します。
 
 ### 条件・先読み・フック
 
@@ -389,9 +419,13 @@ Node の `fetch`・`Headers`・`Request`・`Response`・`FormData`・`WebSocket`
 | URL | 取り方 |
 |---|---|
 | `data:`・`blob:` | ブラウザの `fetch` で直接 |
-| `localhost`・`*.localhost`・`127.0.0.1`・`::1`・`[::1]`・`0.0.0.0` への `http:`／`https:` | Node の `http.request()` で `127.0.0.1` の、URL のポート（無ければ 80。`https:` でも 80）へ。仮想ポートへの本物の TCP の接続なので、OpenVessel の中のサーバーに届く |
+| `localhost`・`*.localhost`・`127.0.0.1`・`::1`・`[::1]`・`0.0.0.0` への `http:`／`https:` | Node の `http.request()`（`https:` なら `https.request()`）で `127.0.0.1` の、URL のポート（無ければスキームの既定の 80・443）へ。仮想ポートへの本物の TCP の接続なので、OpenVessel の中のサーバーに届く。`https:` はほかの `https` のクライアントと同じに `tls` を通る（サーバー名と証明書の確かめには URL のホスト名を使う） |
 | ほかの `http:`／`https:` | ランタイムの Service Worker の `/__ov/net?url=…`。ここで [通信の方針](network-policy.ja.md) を当て、ブラウザの `fetch` で出す |
 | それ以外のスキーム | `TypeError: fetch failed`。`cause.code` は `ERR_INVALID_URL`（`unsupported URL scheme <scheme>`） |
+
+### 仮想ポートへの要求の振る舞い
+
+undici と同じにします。要求には `host`（URL のホスト）・`connection: keep-alive`、要求が付けていなければ undici が足すヘッダー（`accept: */*`・`accept-language: *`・`sec-fetch-mode: cors`・`user-agent: node`・`accept-encoding: gzip, deflate`）、本文があれば `content-length` が付きます。リダイレクト（301・302・303・307・308）は Fetch Standard のとおり 20 回までたどります（`redirect: 'manual'` はリダイレクトをそのまま返し、`'error'` は失敗。303 と、`POST` のあとの 301・302 は本文の無い `GET` になる。`authorization`・`cookie`・`proxy-authorization` は別のオリジンへ持っていかない）。`gzip`・`x-gzip`・`deflate`・`br` の応答の本文はほどきます。Fetch Standard の危ないポートへの要求は `bad port` で失敗します。接続を断られたときは `fetch failed` で拒否し、その `cause` はソケット自身のエラー（`ECONNREFUSED`。`errno`・`syscall`・`address`・`port` つき）です。
 
 ### 外への要求の振る舞い
 
@@ -400,7 +434,7 @@ Node の `fetch`・`Headers`・`Request`・`Response`・`FormData`・`WebSocket`
 - `redirect: 'error'` は守ります。それ以外はリダイレクトをたどります。`response.url` と `response.redirected` は最後の URL を表します。
 - 要求は `mode: 'cors'`・`credentials: 'omit'`・`cache: 'no-store'` で出します。相手がオリジンをまたぐ要求を許していなければならず、応答のヘッダーは CORS でブラウザが見せるものだけが見えます。
 - 要求と、待っている本文の読みは、それぞれループのリクエスト（`FetchRequest`・`FetchBody`）として数えるので、その間プロセスは生きています。
-- `Request` と `Response` は、Node の `AbortSignal`、lib の `ReadableStream`、非同期の反復可能な物を本文として受けます（流す本文は `duplex: 'half'` を伴う）。
+- `Request` と `Response` は、Node の `AbortSignal`、lib の `ReadableStream`、非同期の反復可能な物を本文として受けます（流す本文は `duplex: 'half'` を伴う）。`fetch` が返す応答は、どれもグローバルの `Response` のインスタンスです。
 - `x-ov-by` のヘッダーで、どのプロセスが頼んだか（pid と argv の最初のいくつか）をホストに伝えます。許可の問い合わせに使います。
 
 ### エラー
@@ -410,7 +444,7 @@ Node の `fetch`・`Headers`・`Request`・`Response`・`FormData`・`WebSocket`
 | `cause.code` | いつ |
 |---|---|
 | `EACCES` | 通信の方針がそのホストを断った: `OpenVessel: network access to <host> was denied by the network policy` |
-| `ECONNREFUSED` | ブラウザの `fetch` が失敗した（多くは CORS）: `request to <host> failed: <message>. The server may not allow cross-origin requests (CORS) from the browser.`。ループバックへの接続を断られたときも |
+| `ECONNREFUSED` | ブラウザの `fetch` が失敗した（多くは CORS）: `request to <host> failed: <message>. The server may not allow cross-origin requests (CORS) from the browser.`。ループバックへの接続を断られたときも（このときの `cause` はソケットのエラー） |
 | `ERR_INVALID_URL` | 扱えないスキーム |
 
 ほかの HTTP のクライアント（`http.get`、npm の undici、axios、got）は `net`／`tls` を通ります。カーネルがその HTTP/1.1 の要求を読み、同じ方針つきの中継で出します。その道筋は [通信の方針](network-policy.ja.md) と [カーネル](kernel.ja.md) にあります。
@@ -493,7 +527,7 @@ als.run(42, async () => {
 });
 ```
 
-`async_hooks.createHook()` のフックは、lib が JavaScript で作るリソース（`Timeout`・`Immediate`・`TickObject`・`AsyncResource` など）と、worker・メッセージのポートで呼ばれます。ネイティブのハンドルとリクエストの多く（ファイルシステムのリクエスト・ソケット・パイプ）は `init` を報告せず、Promise のフックは呼ばれません。
+`async_hooks.createHook()` のフックは、lib が JavaScript で作るリソース（`Timeout`・`Immediate`・`TickObject`・`AsyncResource` など）と、Node の C++ の `AsyncWrap` と同じにネイティブのリソースで呼ばれます。ハンドル（`TCPWRAP`・`TCPSERVERWRAP`・`PIPEWRAP`・`PIPESERVERWRAP`・`TTYWRAP`・`TLSWRAP`・`UDPWRAP`・`PROCESSWRAP`・`SIGNALWRAP`・`FSEVENTWRAP`・`STATWATCHER`・`WORKER`・`MESSAGEPORT`）、リクエスト（`FSREQCALLBACK`・`FSREQPROMISE`・`FILEHANDLECLOSEREQ`・`TCPCONNECTWRAP`・`PIPECONNECTWRAP`・`SHUTDOWNWRAP`、すぐには終わらなかった書き込みの `WRITEWRAP`、`GETADDRINFOREQWRAP`・`GETNAMEINFOREQWRAP`・`QUERYWRAP`）、そのほか（`FILEHANDLE`・`DIRHANDLE`・`DNSCHANNEL`・`ZLIB`・`HTTPINCOMINGMESSAGE`・`HTTPCLIENTREQUEST`・暗号のジョブ）です。どれも作られたときに非同期 ID をもらい — lib が作るリクエストのオブジェクト（`WriteWrap`・`TCPConnectWrap` など）は、バインディングがそれでリクエストを始めたとき — そのとき `init` が呼ばれます（トリガーは既定のトリガー ID か、いまの実行の ID。ハンドルで始めたリクエストと、サーバーが受けた接続は、そのハンドルがトリガー）。コールバックはそのリソースの非同期の文脈で動き、前後に `before`／`after` が呼ばれ（`executionAsyncId()` と `executionAsyncResource()` はそのリソース）、ハンドルが閉じたあと・リクエストが終わったあとに `destroy` が続きます。Node がガベージコレクションのときにしか壊さないリソース（`FILEHANDLE`・`DIRHANDLE`・`ZLIB` など）は `destroy` を報告しません。フックが無いときにかかるのは、Node と同じに、ID を 1 つと、コールバックごとの非同期の文脈の出し入れだけです。Promise のフックは呼ばれない（`PROMISE` のリソースは無い）ので、Promise の反応の中で作ったリソースのトリガーは、Promise ではなく外側の実行の ID です。
 
 ## インスペクター・プロファイル・診断
 
@@ -510,7 +544,7 @@ als.run(42, async () => {
 
 | 機能 | 振る舞い |
 |---|---|
-| `node:http2` | `require` はでき、`http2.createServer()` もサーバーを返すが、セッションを作る（接続を受ける、`http2.connect()`）と `ERR_NOT_IMPLEMENTED`（`Http2Session`） |
+| `node:http2` | `require` はでき、`http2.createServer()`／`createSecureServer()` は待ち受けるサーバーを返す。ただし `new Http2Session()` が `ERR_NOT_IMPLEMENTED`（`internalBinding ('http2').Http2Session is not implemented in OpenVessel`）を投げるので、セッションはどれも失敗する。`http2.connect()` は `ClientHttp2Session` を返し、ソケットがつながるとそのエラーを `error` のイベントとして出し、続けて `close`。サーバーへの接続では、サーバーの接続のリスナーからそのエラーが捕まえられない例外として投げられる（`uncaughtException` を扱わなければプロセスは 1 で終わる） |
 | `node:sqlite` | `new DatabaseSync()` が失敗する |
 | `node:sea` | `sea.isSea()` などが失敗する |
 | `net.BlockList`・`net.SocketAddress` | 作ると失敗する（`block_list`） |

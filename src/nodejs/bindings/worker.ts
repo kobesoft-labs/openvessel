@@ -8,7 +8,6 @@ import { shareEnv } from '../env.ts';
 import { workerOptionErrors } from '../options.ts';
 import { S } from '../state.ts';
 import { NodeMessagePort } from './messaging.ts';
-import { emitAsyncInit } from './process.ts';
 import { fromShape } from './shape.ts';
 import { HandleWrap } from './stream.ts';
 
@@ -66,9 +65,8 @@ class WorkerImpl extends HandleWrap {
   #profiles = new Set<string>();
 
   constructor(url: string | null, env: Record<string, string> | null, execArgv: string[] | undefined, resourceLimits: Float64Array, trackFds: boolean, _isInternal: boolean, name?: string) {
-    super('WorkerThread');
-    // AsyncWrap first, then the parent port (MessagePort::New inside the Worker constructor)
-    emitAsyncInit(this, 'WORKER');
+    // AsyncWrap first (HandleWrap's), then the parent port (MessagePort::New inside the Worker constructor)
+    super('WorkerThread', false, 'WORKER');
     this.#url = url;
     this.#env = env;
     this.#execArgv = execArgv;

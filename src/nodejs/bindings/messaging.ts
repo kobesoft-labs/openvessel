@@ -13,7 +13,7 @@ import { sys } from '../../node/sys.ts';
 import * as loop from '../loop.ts';
 import { S } from '../state.ts';
 import { fromShape } from './shape.ts';
-import { emitAsyncInit } from './process.ts';
+import { asyncDestroy, emitAsyncInit } from './process.ts';
 import { cloneKeyObject, deserializeKeyObject, isKeyObjectClone } from './crypto/keys.ts';
 import { NativeBlob, NativeBroadcastChannel, NativeMessageChannel, NativeMessagePort, nativeStructuredClone } from '../web.ts';
 
@@ -985,6 +985,7 @@ export class NodeMessagePort {
       const onclose = (this as any)[S.perIsolateSymbols.handle_onclose];
       if (typeof onclose === 'function') loop.scope(onclose, this);
       this.#gone = true;
+      asyncDestroy(this);
     });
   }
 

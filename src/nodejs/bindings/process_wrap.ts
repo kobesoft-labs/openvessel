@@ -80,7 +80,7 @@ class ProcessWrap extends HandleWrap {
   onexit: ((exitCode: number, signalCode: string | null) => void) | null = null;
 
   constructor() {
-    super('ProcessWrap');
+    super('ProcessWrap', false, 'PROCESSWRAP');
   }
 
   spawn(options: { file: string; args?: string[]; cwd?: string; envPairs?: string[]; stdio?: StdioOption[]; detached?: boolean; uid?: number; gid?: number }) {
@@ -190,7 +190,7 @@ class SignalWrap extends HandleWrap {
   onsignal: ((signum: number) => void) | null = null;
   #name: string | null = null;
   constructor() {
-    super('SignalWrap');
+    super('SignalWrap', false, 'SIGNALWRAP');
   }
   start(signum: number) {
     const names = S.internalBinding('constants').os.signals as Record<string, number>;

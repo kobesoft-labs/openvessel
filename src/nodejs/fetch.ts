@@ -87,10 +87,14 @@ const NodeRequest = class Request extends NativeRequest {
   }
 } as typeof Request;
 
-function fetchFailed(message: string, code: string): TypeError {
-  const cause = Object.assign(new Error(message), { code });
-  return Object.assign(new TypeError('fetch failed'), { cause });
+function fetchFailed(message: string, code?: string): TypeError {
+  return new TypeError('fetch failed', { cause: code === undefined ? new Error(message) : Object.assign(new Error(message), { code }) });
 }
+
+/** undici's badPorts (the Fetch Standard's list): requests to them fail before connecting. */
+const BAD_PORTS = new Set([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080,
+]);
 
 const isLoopback = (h: string) => h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '::1' || h === '0.0.0.0' || h.endsWith('.localhost');
 
@@ -125,9 +129,9 @@ async function proxyFetch(url: string, req: Request, body: ArrayBuffer | null): 
     outHeaders = JSON.parse(decodeURIComponent(res.headers.get('x-ov-rh') ?? '[]'));
   } catch {}
   const nullBody = status === 204 || status === 205 || status === 304 || req.method === 'HEAD';
-  const r = new NativeResponse(nullBody ? null : countedBody(res.body), { status: status || 200, statusText: decodeURIComponent(res.headers.get('x-ov-status-text') ?? ''), headers: outHeaders });
-  Object.defineProperty(r, 'url', { value: decodeURIComponent(res.headers.get('x-ov-url') ?? url) });
-  Object.defineProperty(r, 'redirected', { value: res.headers.get('x-ov-redirected') === '1' });
+  const r = new NodeResponse(nullBody ? null : countedBody(res.body), { status: status || 200, statusText: decodeURIComponent(res.headers.get('x-ov-status-text') ?? ''), headers: outHeaders });
+  Object.defineProperty(r, 'url', { value: decodeURIComponent(res.headers.get('x-ov-url') ?? url), configurable: true });
+  Object.defineProperty(r, 'redirected', { value: res.headers.get('x-ov-redirected') === '1', configurable: true });
   return r;
 }
 
@@ -154,32 +158,72 @@ function countedBody(body: ReadableStream<Uint8Array> | null): ReadableStream<Ui
   });
 }
 
-/** A request to a virtual port, made with Node's http module (so it is a real TCP connection). */
-function loopbackFetch(url: URL, req: Request, body: Uint8Array | null): Promise<Response> {
-  const http = lib('http');
+/** The headers undici adds to every request that doesn't set them, in its order. */
+const DEFAULT_HEADERS: [string, string][] = [
+  ['accept', '*/*'],
+  ['accept-language', '*'],
+  ['sec-fetch-mode', 'cors'],
+  ['user-agent', 'node'],
+  ['accept-encoding', 'gzip, deflate'],
+];
+
+const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
+const NULL_BODY_STATUS = new Set([101, 204, 205, 304]);
+
+/**
+ * A request to a virtual port, made with Node's http or https module (so it is a real TCP connection,
+ * and https goes through the same TLS handling as any tls/https client). The port is the URL's, else
+ * the scheme's default; the Host header is the URL's host, as undici sends it.
+ */
+function loopbackRequest(url: URL, req: Request, body: Uint8Array | null, willFollow: (status: number, location: string | null) => boolean): Promise<Response> {
+  const https = url.protocol === 'https:';
+  const mod = lib(https ? 'https' : 'http');
+  const headers: [string, string][] = [['host', url.host], ['connection', 'keep-alive'], ...req.headers];
+  for (const [k, v] of DEFAULT_HEADERS) if (!req.headers.has(k)) headers.push([k, v]);
+  // the body is complete, so its length is known (an empty one is announced only by methods that expect one)
+  if (body && (body.length || req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH')) headers.push(['content-length', String(body.length)]);
   return new Promise((resolve, reject) => {
-    const r = http.request(
-      { host: '127.0.0.1', port: Number(url.port || 80), path: url.pathname + url.search, method: req.method, headers: Object.fromEntries(req.headers) },
+    const r = mod.request(
+      {
+        host: '127.0.0.1',
+        port: Number(url.port || (https ? 443 : 80)),
+        path: url.pathname + url.search,
+        method: req.method,
+        headers: headers.flat(),
+        // SNI and the certificate check use the URL's host name (undici connects to it by that name)
+        ...(https && { servername: lib('net').isIP(url.hostname.replace(/^\[|\]$/g, '')) ? '' : url.hostname }),
+      },
       (res: any) => {
+        const location = res.headers.location ?? null;
+        // undici decodes the content codings it asked for, unless the response is followed or has no body
+        let source = res;
+        if (req.method !== 'HEAD' && req.method !== 'CONNECT' && !NULL_BODY_STATUS.has(res.statusCode) && !willFollow(res.statusCode, location)) {
+          const codings = String(res.headers['content-encoding'] ?? '').toLowerCase().split(',').map((c) => c.trim()).filter(Boolean).reverse();
+          const zlib = lib('zlib');
+          const make: Record<string, () => any> = { gzip: () => zlib.createGunzip({ flush: zlib.constants.Z_SYNC_FLUSH, finishFlush: zlib.constants.Z_SYNC_FLUSH }), 'x-gzip': () => make.gzip(), deflate: () => zlib.createInflate(), br: () => zlib.createBrotliDecompress() };
+          if (codings.length && codings.every((c) => make[c])) for (const c of codings) source = source.pipe(make[c]());
+          if (source !== res) res.on('error', (e: Error) => source.destroy(e));
+        }
         const stream = new NativeReadableStream<Uint8Array>({
           start(c) {
-            res.on('data', (d: Uint8Array) => c.enqueue(new Uint8Array(d)));
-            res.on('end', () => c.close());
-            res.on('error', (e: Error) => c.error(e));
+            source.on('data', (d: Uint8Array) => c.enqueue(new Uint8Array(d)));
+            source.on('end', () => c.close());
+            source.on('error', (e: Error) => c.error(new TypeError('terminated', { cause: e })));
           },
           cancel() {
             res.destroy();
           },
         });
-        const headers: [string, string][] = [];
-        for (let i = 0; i < res.rawHeaders.length; i += 2) headers.push([res.rawHeaders[i], res.rawHeaders[i + 1]]);
-        const nullBody = res.statusCode === 204 || res.statusCode === 304 || req.method === 'HEAD';
-        const response = new NativeResponse(nullBody ? null : stream, { status: res.statusCode, statusText: res.statusMessage, headers });
-        Object.defineProperty(response, 'url', { value: url.href });
+        const outHeaders: [string, string][] = [];
+        for (let i = 0; i < res.rawHeaders.length; i += 2) outHeaders.push([res.rawHeaders[i], res.rawHeaders[i + 1]]);
+        const nullBody = NULL_BODY_STATUS.has(res.statusCode) || req.method === 'HEAD';
+        const response = new NodeResponse(nullBody ? null : stream, { status: res.statusCode, statusText: res.statusMessage, headers: outHeaders });
+        Object.defineProperty(response, 'url', { value: url.href, configurable: true });
         resolve(response);
       },
     );
-    r.on('error', (e: Error & { code?: string }) => reject(fetchFailed(e.message, e.code ?? 'ECONNREFUSED')));
+    // undici's cause is the socket's own error (code, errno, syscall, address, port)
+    r.on('error', (e: Error) => reject(new TypeError('fetch failed', { cause: e })));
     req.signal?.addEventListener('abort', () => {
       r.destroy();
       reject(req.signal.reason ?? Object.assign(new Error('This operation was aborted'), { name: 'AbortError' }));
@@ -189,16 +233,53 @@ function loopbackFetch(url: URL, req: Request, body: Uint8Array | null): Promise
   });
 }
 
+/** The request body headers dropped when a redirect turns the request into a GET. */
+const BODY_HEADERS = ['content-encoding', 'content-language', 'content-location', 'content-type'];
+
+/** undici's main fetch and HTTP-redirect fetch, for one request (and the redirects it follows). */
+async function route(req: Request, redirects: number): Promise<Response> {
+  const url = new NativeURL(req.url);
+  // a Response of the global class (lib's Response is NodeResponse), as instanceof checks expect
+  if (url.protocol === 'data:' || url.protocol === 'blob:') return Object.setPrototypeOf(await nativeFetch(req), NodeResponse.prototype);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw fetchFailed(`unsupported URL scheme ${url.protocol}`, 'ERR_INVALID_URL');
+  if (BAD_PORTS.has(Number(url.port))) throw fetchFailed('bad port');
+  const body = req.method === 'GET' || req.method === 'HEAD' ? null : new Uint8Array(await req.arrayBuffer());
+  // outside requests: the browser's fetch follows redirects (the proxy reports where it ended)
+  if (!isLoopback(url.hostname)) return proxyFetch(url.href, req, body ? (body.buffer as ArrayBuffer) : null);
+  const follows = (status: number, location: string | null) => REDIRECT_STATUS.has(status) && location !== null && req.redirect === 'follow';
+  const res = await loopbackRequest(url, req, body, follows);
+  const location = res.headers.get('location');
+  if (!REDIRECT_STATUS.has(res.status) || location === null || req.redirect === 'manual') return res;
+  void res.body?.cancel();
+  if (req.redirect === 'error') throw fetchFailed('unexpected redirect');
+  let next: URL;
+  try {
+    next = new NativeURL(location, url);
+  } catch {
+    throw fetchFailed('Invalid URL');
+  }
+  if (next.protocol !== 'http:' && next.protocol !== 'https:') throw fetchFailed('URL scheme must be a HTTP(S) scheme');
+  if (redirects >= 20) throw fetchFailed('redirect count exceeded');
+  let method = req.method;
+  let nextBody: Uint8Array | null = body;
+  const headers = new NativeHeaders(req.headers);
+  if (((res.status === 301 || res.status === 302) && method === 'POST') || (res.status === 303 && method !== 'GET' && method !== 'HEAD')) {
+    method = 'GET';
+    nextBody = null;
+    for (const h of BODY_HEADERS) headers.delete(h);
+  }
+  // credentials don't follow a request to another origin
+  if (next.origin !== url.origin) for (const h of ['authorization', 'proxy-authorization', 'cookie', 'host']) headers.delete(h);
+  const r = await route(new NativeRequest(next.href, { method, headers, body: nextBody as BodyInit | null, redirect: req.redirect, signal: req.signal }), redirects + 1);
+  Object.defineProperty(r, 'redirected', { value: true, configurable: true });
+  return r;
+}
+
 function fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   return loop.track(
     (async () => {
       const req = input instanceof NativeRequest && !init ? input : new NodeRequest(input as any, init);
-      const url = new NativeURL(req.url);
-      if (url.protocol === 'data:' || url.protocol === 'blob:') return nativeFetch(req);
-      if (url.protocol !== 'http:' && url.protocol !== 'https:') throw fetchFailed(`unsupported URL scheme ${url.protocol}`, 'ERR_INVALID_URL');
-      const body = req.method === 'GET' || req.method === 'HEAD' ? null : new Uint8Array(await req.arrayBuffer());
-      if (isLoopback(url.hostname)) return loopbackFetch(url, req, body);
-      return proxyFetch(url.href, req, body ? (body.buffer as ArrayBuffer) : null);
+      return route(req, 0);
     })(),
   );
 }
