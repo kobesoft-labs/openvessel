@@ -14,7 +14,7 @@ import fsMod, { onKernelData, onWatchEvent, setCwd } from './fs.ts';
 import httpMod, { https as httpsMod } from './http.ts';
 import * as loop from './loop.ts';
 import * as misc from './misc.ts';
-import M, { dimport, installStackMapping, lexerInit, loadFile, metaFor, preloadSucrase, setBuiltinGetter, setConditions, setRuntimeOrigin } from './module.ts';
+import M, { dimport, installStackMapping, lexerInit, loadFile, metaFor, preloadSucrase, setBuiltinGetter, setConditions, setRuntimeBase } from './module.ts';
 import netMod from './net.ts';
 import { onNetMessage } from './netbridge.ts';
 import { ovFetch, setNetInfo } from './netfetch.ts';
@@ -38,7 +38,8 @@ declare const self: DedicatedWorkerGlobalScope;
 const scope = self;
 const scopePost = self.postMessage.bind(self);
 const scopeListen = self.addEventListener.bind(self);
-const runtimeOrigin = self.location.origin;
+// where the runtime is served (its directory, e.g. https://example.github.io/demo/runtime): /__ov/… lives under it
+const runtimeBase = new URL('.', self.location.href).href.replace(/\/$/, '');
 
 interface InitMsg {
   t: 'init';
@@ -630,13 +631,13 @@ async function repl() {
 async function boot(init: InitMsg) {
   isThread = init.kind === 'thread';
   initSys(init.sab, (m, t) => scopePost(m, t ?? []));
-  setRuntimeOrigin(runtimeOrigin);
+  setRuntimeBase(runtimeBase);
   const execArgvInit = init.execArgv ?? [];
   proc = createProcess({ pid: init.pid, ppid: init.ppid, argv: init.argv, execArgv: execArgvInit, env: init.env, cwd: init.cwd, ttys: init.ttys, isThread });
   setCwd(() => proc.cwd());
   setCwdProvider(() => proc.cwd());
   setOsInfo({ hostname: init.hostname, home: init.env.HOME });
-  setNetInfo(runtimeOrigin, init.pid, init.argv.slice(0, 3).join(' '));
+  setNetInfo(runtimeBase, init.pid, init.argv.slice(0, 3).join(' '));
   defineBuiltins();
   setBuiltinGetter(builtin);
   installGlobals();

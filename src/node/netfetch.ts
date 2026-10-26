@@ -6,10 +6,10 @@ import { loopbackRequest } from './netbridge.ts';
 import { sys } from './sys.ts';
 
 export const nativeFetch: typeof fetch = globalThis.fetch.bind(globalThis);
-let runtimeOrigin = '';
+let runtimeBase = '';
 let pidLabel = '';
-export function setNetInfo(origin: string, pid: number, cmd: string) {
-  runtimeOrigin = origin;
+export function setNetInfo(base: string, pid: number, cmd: string) {
+  runtimeBase = base;
   pidLabel = `${pid} ${cmd}`.slice(0, 200);
 }
 
@@ -38,7 +38,7 @@ export async function proxyFetch(url: string, init: { method?: string; headers?:
   headers.set('x-ov-h', encodeURIComponent(JSON.stringify(init.headers ?? [])));
   headers.set('x-ov-by', encodeURIComponent(pidLabel));
   if (init.redirect) headers.set('x-ov-redirect', init.redirect);
-  const res = await nativeFetch(`${runtimeOrigin}/__ov/net?url=${encodeURIComponent(url)}`, {
+  const res = await nativeFetch(`${runtimeBase}/__ov/net?url=${encodeURIComponent(url)}`, {
     method: init.method === 'GET' || init.method === 'HEAD' ? init.method : 'POST',
     headers: { ...Object.fromEntries(headers), 'x-ov-method': init.method ?? 'GET' },
     body: init.method === 'GET' || init.method === 'HEAD' ? undefined : (init.body as BodyInit | null | undefined),

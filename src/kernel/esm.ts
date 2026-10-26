@@ -10,6 +10,7 @@ import { parse as parseCjs } from 'cjs-module-lexer/lexer.js';
 import builtinExports from '../shared/builtin-exports.json';
 import * as path from '../shared/path.ts';
 import { ESM_CONDITIONS, ResolveError, Resolver, builtinName, encodePathForUrl, pathToFileURLString } from '../shared/resolve.ts';
+import { RUNTIME_BASE } from './base.ts';
 import type { Kernel } from './kernel.ts';
 import { isDir } from './vfs.ts';
 
@@ -23,12 +24,14 @@ const dec = new TextDecoder();
 const ID = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const RESERVED = new Set(['break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'return', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield', 'let', 'static', 'enum', 'await', 'implements', 'package', 'protected', 'interface', 'private', 'public', 'null', 'true', 'false', 'arguments', 'eval']);
 
+// The URLs written into rewritten modules carry the runtime's base: a root-relative /__ov/… would miss
+// the service worker when the runtime is served under a path.
 export function esmUrlFor(p: string, query = ''): string {
-  return ESM_PREFIX + encodePathForUrl(p) + query;
+  return RUNTIME_BASE + ESM_PREFIX + encodePathForUrl(p) + query;
 }
 
 export function builtinUrlFor(name: string): string {
-  return BUILTIN_PREFIX + encodeURIComponent(name);
+  return RUNTIME_BASE + BUILTIN_PREFIX + encodeURIComponent(name);
 }
 
 export interface ModuleResponse {
@@ -218,7 +221,7 @@ export class EsmService {
         // keep linking intact: point at an error module that declares the imported names and throws when evaluated
         const names = importedNames(src.slice(imp.importStart, imp.start));
         const msg = `${e?.message ?? e}`;
-        url = `${ERROR_PREFIX}?code=${encodeURIComponent(e?.code ?? 'ERR_MODULE_NOT_FOUND')}&msg=${encodeURIComponent(msg)}&names=${encodeURIComponent(names.join(','))}`;
+        url = `${RUNTIME_BASE}${ERROR_PREFIX}?code=${encodeURIComponent(e?.code ?? 'ERR_MODULE_NOT_FOUND')}&msg=${encodeURIComponent(msg)}&names=${encodeURIComponent(names.join(','))}`;
       }
       edits.push({ s: imp.start, e: imp.end, text: url.replace(/['"\\\n]/g, (c) => '\\' + c) });
       if (imp.attributesStart != null && imp.attributesStart >= 0) {
