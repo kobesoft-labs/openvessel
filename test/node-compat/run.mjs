@@ -170,7 +170,8 @@ async function runOv(tests) {
     await session.page.evaluate(() => window.ov.network.setPolicy({ mode: 'allow-all' }));
     // no preview of the ports tests listen on (its requests would reach the test servers)
     await session.page.evaluate(() => (window.ovNoAutoPreview = true));
-    if (flag('--port')) await session.page.evaluate(() => window.ov.exec('mkdir -p /etc/openvessel && echo port > /etc/openvessel/node'));
+    // the ported runtime is the kernel's default; without --port the run is on the legacy one
+    if (!flag('--port')) await session.page.evaluate(() => window.ov.exec('mkdir -p /etc/openvessel && echo legacy > /etc/openvessel/node'));
     await mount(session.page, files);
   };
   await boot();

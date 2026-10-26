@@ -183,6 +183,27 @@ export function dropHeldRejection(promise: Promise<unknown>): boolean {
   return heldRejections.delete(promise);
 }
 
+/**
+ * V8 tells Node at once when a handler is attached to a rejected promise; the browser only fires
+ * `rejectionhandled` as a later task, which can lose the race with the held check below. then() (which
+ * catch() and finally() call) is where a handler is attached explicitly, so a held rejection is dropped
+ * right there. Installed before the primordials copy Promise.prototype.then.
+ */
+export function installThenTracking() {
+  const proto = Promise.prototype as any;
+  const then = proto.then;
+  Object.defineProperty(proto, 'then', {
+    value: function then_(this: Promise<unknown>, onFulfilled?: unknown, onRejected?: unknown) {
+      if (heldRejections.size) heldRejections.delete(this);
+      return then.call(this, onFulfilled, onRejected);
+    },
+    writable: true,
+    configurable: true,
+    enumerable: false,
+  });
+  Object.defineProperty(proto.then, 'name', { value: 'then' });
+}
+
 function queueHeldCheck() {
   if (heldQueued) return;
   heldQueued = true;

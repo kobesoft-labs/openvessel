@@ -457,6 +457,7 @@ function boot(init: InitMsg) {
 
   installProxyTracking();
   installIteratorTracking();
+  loop.installThenTracking();
   // per-context scripts (node_realm / node_context_data)
   const util = getInternalBinding('util');
   const symbols = getInternalBinding('symbols');
