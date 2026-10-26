@@ -17,6 +17,7 @@ import { fromShape } from './shape.ts';
 import { sucrase } from '../typescript.ts';
 import { cachedDataMatches, contextScope, makeCachedData, setPrivate } from './contextify.ts';
 import { fulfilledPromise, rejectedPromise } from './util.ts';
+import { hasV8StackApi } from '../callsites.ts';
 
 const kUninstantiated = 0;
 const kInstantiating = 1;
@@ -267,7 +268,7 @@ export class ModuleWrap {
     // keep source maps pointing at the original file
     // the module evaluate() runs: an import that reports evaluation has begun (imports are hoisted:
     // it runs after the dependencies, right before this module's body)
-    if (this.#reportStart) out += `\nimport "data:text/javascript,globalThis.__ovEvaluationStarted(${encodeURIComponent(JSON.stringify(this.id))})";`;
+    if (this.#reportStart) out += `\nimport ${JSON.stringify(startModuleUrl(this.id))};`;
     return out + `\n//# sourceURL=${this.url}`;
   }
 
@@ -858,12 +859,31 @@ export function importFromScript(referrerSymbol: unknown, referrerName: string, 
   return dynamicImportCallback(referrerSymbol, String(specifier), attributes, referrerName);
 }
 
+// Firefox (seen in 157) fails a static import of a data: URL from a module fetched over http in a
+// worker; there the module is a blob: URL, revoked once it has run
+const nativeCreateObjectURL = URL.createObjectURL;
+const nativeRevokeObjectURL = URL.revokeObjectURL;
+const NativeBlob = Blob;
+const startBlobs = new Map<string, string>();
+function startModuleUrl(id: string): string {
+  const code = `globalThis.__ovEvaluationStarted(${JSON.stringify(id)})`;
+  if (hasV8StackApi) return `data:text/javascript,${encodeURIComponent(code)}`;
+  let url = startBlobs.get(id);
+  if (!url) startBlobs.set(id, (url = nativeCreateObjectURL(new NativeBlob([code], { type: 'text/javascript' }))));
+  return url;
+}
+
 export function createModuleWrap() {
   S.unsettledTopLevelAwait = unsettledTopLevelAwait;
   Object.defineProperty(globalThis, '__ovEvaluationStarted', {
     value: (id: string) => {
       const done = evaluationStarted.get(id);
       evaluationStarted.delete(id);
+      const blob = startBlobs.get(id);
+      if (blob) {
+        startBlobs.delete(id);
+        nativeRevokeObjectURL(blob);
+      }
       done?.();
     },
     configurable: true,
