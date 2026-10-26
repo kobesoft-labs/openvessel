@@ -540,7 +540,8 @@ function looksLikeModule(code: string): boolean {
   }
 }
 
-const ESM_SYNTAX_ERRORS = [/Cannot use import statement outside a module/, /Unexpected token 'export'/, /Cannot use 'import\.meta' outside a module/, /await is only valid in async functions/, /Unexpected reserved word/, /Unexpected identifier 'await'/];
+// V8's messages, then SpiderMonkey's (Firefox) for import/export and import.meta
+const ESM_SYNTAX_ERRORS = [/Cannot use import statement outside a module/, /Unexpected token 'export'/, /Cannot use 'import\.meta' outside a module/, /await is only valid in async functions/, /Unexpected reserved word/, /Unexpected identifier 'await'/, /declarations may only appear at top level of a module/, /import\.meta may only appear in a module/];
 
 function isEsmSyntaxError(e: unknown): boolean {
   return e instanceof SyntaxError && ESM_SYNTAX_ERRORS.some((re) => re.test(e.message));
@@ -606,7 +607,8 @@ function checkFunctionBody(params: string[], code: string) {
   try {
     new Function(...params, code);
   } catch (e) {
-    if (!(e instanceof SyntaxError) || !/Single function literal required/.test(e.message)) throw e;
+    // (SpiderMonkey: "unexpected garbage after function body")
+    if (!(e instanceof SyntaxError) || !/Single function literal required|unexpected garbage after function body/.test(e.message)) throw e;
     let message = e.message;
     try {
       lib('internal/deps/acorn/acorn/dist/acorn').parse(code, { ecmaVersion: 'latest', sourceType: 'script', allowReturnOutsideFunction: true });
@@ -715,7 +717,7 @@ export function createContextify() {
       try {
         new Function(this.#code);
       } catch (e) {
-        if (e instanceof SyntaxError && !/Illegal return statement/.test(e.message)) throw e;
+        if (e instanceof SyntaxError && !/Illegal return statement|return not in function/.test(e.message)) throw e;
       }
       Object.assign(this, cacheResult(code, cachedData, !!produce));
     }

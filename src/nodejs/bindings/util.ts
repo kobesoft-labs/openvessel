@@ -53,8 +53,9 @@ function isPromise(v: unknown): boolean {
     promiseThen.call(v);
     result = true;
   } catch (e) {
-    // only the receiver check throws a TypeError before the constructor is looked up
-    result = e === stop || !(e instanceof TypeError && /incompatible receiver/.test(e.message));
+    // only the receiver check throws a TypeError before the constructor is looked up (V8: "…incompatible
+    // receiver…", SpiderMonkey: "…called on incompatible Object")
+    result = e === stop || !(e instanceof TypeError && /incompatible receiver|called on incompatible/.test(e.message));
   } finally {
     if (ctor) Object.defineProperty(Promise.prototype, 'constructor', bare(ctor));
     if (species) Object.defineProperty(Promise, Symbol.species, bare(species));
