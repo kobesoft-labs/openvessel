@@ -13,9 +13,9 @@ resolves and lays out `node_modules`, which lockfiles are read, and how the regi
   async program. It is not the real npm, pnpm, Yarn or Bun, and it does not start a `node` process.
 - All four front ends install the same way: an npm-style hoisted `node_modules` tree. There is no
   pnpm content-addressed store or `.pnpm` directory, and no Yarn Plug'n'Play.
-- Lockfiles are read as version hints only. No lockfile is written or updated by any front end; the
-  only file written besides `node_modules` is `node_modules/.package-lock.json` (see
-  [Hidden lockfile](#hidden-lockfile)).
+- Lockfiles are read as version hints only. Only `yarn` writes one (`yarn.lock` in the v1 format, see
+  [yarn.lock](#yarnlock)); otherwise the only file written besides `node_modules` is
+  `node_modules/.package-lock.json` (see [Hidden lockfile](#hidden-lockfile)).
 - Registry traffic goes through the runtime's network gate like every other outgoing request
   ([Network policy](network-policy.md)).
 - Lifecycle scripts run only for the project itself, never for dependencies.
@@ -32,47 +32,67 @@ All programs are registered in `/usr/bin` (`installNpm()` in `src/kernel/npm/cli
 | `pnpm` | the `pnpm` front end | `9.15.9` |
 | `yarn` | the `yarn` front end | `1.22.22` |
 | `bun` | the `bun` front end | `1.2.21` |
-| `npx` | `npm exec -- <args>`, with every `-y`/`--yes` removed from the arguments | — |
+| `npx` | `npm exec`, with an `--` inserted after the command name: `npx -y tsc --help` runs as `npm exec -y -- tsc --help` | — |
 | `pnpx` | `pnpm dlx <args>` | — |
 | `bunx` | `bun x <args>` | — |
 | `corepack` | prints `corepack: package managers are built into OpenVessel; nothing to do` to stderr, exit 0 | — |
 
-The front end changes only a few things: the version, the user agent given to scripts, the summary line
-after an install, the banner before a script, what happens with no command, and whether an unknown
-command runs a script (see [Commands](#commands)).
+The front ends share the installer and the script runner. They differ in the version, the user agent
+given to scripts, which commands they have and whether a script can be run by its name
+([Commands](#commands)), where options are read ([Options](#options)), how workspaces are selected
+([Selecting workspaces](#selecting-workspaces)), the banner before a script, the summary line after an
+install, and `yarn.lock`.
 
 ## Command line
 
-### Flags
+### Options
 
-Flags are parsed by `parseFlags()` the same way for every command and every front end. They may appear
-anywhere before `--`.
+Options are parsed by `parseFlags()`. Which arguments are read as options depends on the front end and
+the command, as in the real clients:
 
-| Flag | Effect |
+- The arguments before the command name are always the client's options (`npm -s run build`,
+  `pnpm --filter a build`).
+- `npm` reads options anywhere before `--`, after the command name too (`npm run build -s`,
+  `npm install foo -D`). Everything after `--` is passed on.
+- `pnpm`, `yarn` and `bun` read options after the command name only for commands that don't pass
+  arguments on (`install`, `add`, `remove`, `view`, …). For `run`, `exec`, `dlx` and a script run by its
+  name, the options between the command and the script, package or command name are the client's, and
+  everything after that name is passed on unchanged: `yarn build --watch` and `pnpm run build --watch`
+  run the script with `--watch`.
+- `npx` inserts an `--` after the command name (see [Programs](#programs)), and `pnpx`/`bunx` pass on
+  everything after the package name, so `npx tsc --noEmit`, `bunx tsc --watch` keep their flags.
+- `-h`/`--help` print the usage text only where options are read. After `--`, or after a script or command
+  name whose arguments are passed on, they belong to the script or command: `npx tsc --help` and
+  `npm run x -- --help` run `tsc --help` and `x --help`.
+
+| Option | Effect |
 |---|---|
-| `-D`, `-d`, `--save-dev`, `--dev` | `add`/`install <pkg>`: save to `devDependencies`. |
+| `-D`, `--save-dev`, `--dev` (and `-d` with `bun`) | `add`/`install <pkg>`: save to `devDependencies`. With `npm`, `-d` is `--loglevel info` and has no effect. |
 | `-E`, `--save-exact`, `--exact` | `add`/`install <pkg>`: save the exact resolved version. |
-| `-g`, `--global` | `install`/`add`: global install. `prefix`, `root`: print the global path. |
-| `--production`, `--prod`, `-P`, `--omit=dev` | Don't install the project's `devDependencies` (or the workspaces'). |
-| `--omit=optional`, `--no-optional` | Don't install `optionalDependencies` (of any package). |
+| `-g`, `--global` | `install`/`add`, `uninstall`/`remove`: [global install](#global-install). `prefix`, `root`, `bin`, `ls`: the global paths. |
+| `--production`, `--prod`, `--omit=dev`, `-P` (`pnpm`), `-p` (`bun`) | Don't install the project's `devDependencies` (or the workspaces'). |
+| `--include=dev` | Install them even with `NODE_ENV=production`. |
+| `--omit=optional`, `--no-optional` | Don't install `optionalDependencies` (of any package); `--include=optional` undoes it. |
 | `--ignore-scripts` | Don't run the project's install lifecycle scripts. |
-| `-y`, `--yes` | `init`: write `package.json` even if one exists. |
+| `-y`, `--yes` | `exec`: install a missing package without the warning. `init`: write `package.json` even if one exists. |
+| `--no`, `--no-yes` | `npm exec`/`npx`: refuse to install a missing package. |
 | `-s`, `--silent`, `--loglevel=silent`, `--reporter=silent` | No summary line, no warnings, no progress; `run` prints no banner and no failure message. |
 | `--legacy-peer-deps`, `--force` | Don't install peer dependencies. |
+| `--json` | `view`: print JSON. |
+| `--if-present` | `run`: a missing script is not an error. |
+| `--frozen-lockfile`, `--pure-lockfile`, `--no-lockfile` | `yarn`: don't write `yarn.lock`. |
 | `--prefix <dir>`, `-C <dir>`, `--dir <dir>`, `--cwd <dir>` and the `=` forms | Use `<dir>` instead of the working directory as the starting point. |
-| `-w <x>`, `--workspace <x>`, `--filter <x>`, `-F <x>` and the `=` forms | Accepted (the value is consumed) but has no effect. |
+| `-w <x>`, `--workspace <x>`, `--workspaces`, `-ws`, `--include-workspace-root` | `npm`: [select workspaces](#selecting-workspaces). |
+| `--filter <x>`, `-F <x>`, `-r`, `--recursive`, `-w`, `--workspace-root`, `--include-workspace-root` | `pnpm` (`bun`: `--filter`/`-F`): [select workspaces](#selecting-workspaces). |
+| `-p <spec>`, `--package <spec>` and the `=` forms | `exec`/`dlx`: the package to install (see [exec](#exec-npx-dlx)). |
+| `-c <cmd>`, `--call <cmd>` | `npm exec`: run a shell command with the packages' binaries on `PATH`. `pnpm dlx -c`/`--shell-mode`: the arguments after the package are a shell command. |
 | `--` | Everything after it is passed through unchanged (to the script for `run`, to the command for `exec`). |
 | `-v`, `--version` | With no command: print the front end's version, exit 0. |
-| `-h`, `--help` | Anywhere in the arguments, even after `--`: print a short usage text, exit 0. |
-| any other argument starting with `-` | Ignored (e.g. `--no-fund`, `--no-audit`, `--frozen-lockfile`, `--save`). |
+| `-h`, `--help` | Where options are read: print a short usage text, exit 0. |
+| any other option | `npm`: a `--<name>[=<value>]` option is kept as config, given to scripts as `npm_config_<name>` (`--no-<name>` as `false`), and if `<name>` is not one of npm's config names, `npm warn Unknown cli config "--<name>". This will stop working in the next major version of npm.` is printed to stderr (not with `-s`). Other front ends: ignored (e.g. `--no-fund`, `--no-audit`, `--save`). |
 
-Two consequences of this parsing:
-
-- An unknown flag before `--` is dropped, also for `run` and `exec`: `yarn build --watch` and
-  `npm run build --watch` run the script without `--watch`. Use `npm run build -- --watch`. `npx`
-  puts all its arguments after `--`, so `npx tsc --noEmit` keeps the flag.
-- Because `-h`/`--help` are checked first, `npx tsc --help` or `npm run x -- --help` print the
-  OpenVessel usage text instead of running anything.
+So `npm run build --watch` runs the script without `--watch` (with the warning, and with
+`npm_config_watch=true` in its environment), like npm; write `npm run build -- --watch`.
 
 ### Project directory
 
@@ -81,32 +101,46 @@ use the nearest directory containing `package.json`, searching upward from the w
 from `--prefix`). If there is none, the starting directory itself is used. `init`, `create`, `exec` and
 `view` use the starting directory directly.
 
+Commands that install (`install`, `add`, `ci`, `update`, `uninstall`, `prune`, …) install the workspace
+root when the project directory is one of its [workspaces](#workspaces); `add` and `uninstall` still
+change the workspace's own `package.json`.
+
 ### Commands
 
-| Command | Aliases | Behaviour |
-|---|---|---|
-| `install` | `i`, `in`, `isntall`, `add` | With package arguments: [add](#add) them. Without: install the project. `add` without arguments fails with `<pm> add requires at least one package` (exit 1). With `-g`: [global install](#global-install). |
-| `ci` | `clean-install`, `install-clean` | Delete `node_modules`, then install. A lockfile is not required, and is not checked against `package.json`. |
-| `update` | `up`, `upgrade` | Install while ignoring lockfiles (newest versions within the ranges). Package arguments are ignored; everything is updated. |
-| `uninstall` | `remove`, `rm`, `un`, `unlink` | Remove the names from `dependencies`, `devDependencies`, `optionalDependencies` and `peerDependencies`, write `package.json`, install. Exit 1 without output if there is no `package.json`. |
-| `run` | `run-script`, `rum`, `urn` | [Run a script](#npm-run). Without a name: list the scripts. |
-| `test` | `t`, `tst` | `run test` |
-| `start`, `stop`, `restart` | — | `run start` / `run stop` / `run restart`. `start` without a `start` script runs `node server.js` if `server.js` exists in the project directory. |
-| `exec` | `x`, `dlx` | [Run a package's binary](#exec-npx-dlx). |
-| `create` | — | [Run a `create-*` package](#create-and-init). |
-| `init` | — | With a name: same as `create`. Without one (or with only flags): [write a `package.json`](#create-and-init). |
-| `view` | `info`, `show`, `v` | [Show registry metadata](#view). |
-| `ls` | `list`, `ll`, `la` | [List direct dependencies](#ls). |
-| `why` | `explain` | Same output as `ls`. |
-| `prune`, `dedupe`, `rebuild` | `ddp`, `rb` | Run a normal install. |
-| `config` | `c` | [Read and write `.npmrc` settings](#config). |
-| `pkg` | — | [Read and write `package.json` fields](#pkg). |
-| `cache` | — | `cache clean`, `cache clear`, `cache verify`: delete the tarball cache and print `Cache cleaned`. Other subcommands do nothing (exit 0). |
-| `prefix` | — | Print the project directory; with `-g`, `/usr/local`. |
-| `root` | — | Print `<project>/node_modules`; with `-g`, `/usr/local/lib/node_modules`. |
-| `bin` | — | Print `<project>/node_modules/.bin`. |
-| `audit`, `fund` | — | Print `<pm> <cmd> is not supported in OpenVessel` to stderr, exit 0. |
-| `doctor`, `outdated`, `login`, `publish`, `whoami` | — | Print `<pm> <cmd> is not supported in OpenVessel` to stderr, exit 1. |
+Each front end has its own command names. A name in the table runs that command, also when the project
+has a script of the same name (`yarn info`, `pnpm show` and `bun build` are never scripts); use
+`<pm> run <name>` for such a script.
+
+| Command | `npm` | `pnpm` | `yarn` | `bun` | Behaviour |
+|---|---|---|---|---|---|
+| install | `install`, `i`, `in`, `ins`, `inst`, `insta`, `instal`, `isnt`, `isnta`, `isntal`, `isntall`, `add` | `install`, `i` | `install` | `install`, `i` | With package arguments: [add](#add) them. Without: install the project. With `-g`: [global install](#global-install). |
+| add | — | `add` | `add` | `add`, `a` | As install; without packages fails with `<pm> add requires at least one package` (exit 1). |
+| ci | `ci`, `clean-install`, `ic`, `install-clean`, `isntall-clean` | `ci` | — | — | Delete `node_modules`, then install. A lockfile is not required, and is not checked against `package.json`. |
+| update | `update`, `up`, `upgrade`, `udpate` | `update`, `up`, `upgrade` | `upgrade` | `update` | Install while ignoring lockfiles (newest versions within the ranges). Package arguments are ignored; everything is updated. |
+| uninstall | `uninstall`, `unlink`, `remove`, `rm`, `r`, `un` | `remove`, `rm`, `uninstall`, `un`, `uni` | `remove` | `remove`, `rm` | Remove the names from `dependencies`, `devDependencies`, `optionalDependencies` and `peerDependencies`, write `package.json`, install. Exit 1 without output if there is no `package.json`. With `-g`: from the global packages. |
+| run | `run`, `run-script`, `rum`, `urn` | `run`, `run-script` | `run` | `run` | [Run a script](#npm-run). Without a name: list the scripts. |
+| test, start | `test`, `t`, `tst`, `start`, `stop`, `restart` | `test`, `t`, `tst`, `start`, `restart` | — | — | `run test` / `run start` / …. `start` without a `start` script runs `node server.js` if `server.js` exists in the project directory. |
+| exec | `exec`, `x` | `dlx` | `dlx` | `x` | [Install if needed and run a package's binary](#exec-npx-dlx). |
+| local exec | — | `exec` | `exec` | — | Run a command with the project's binaries on `PATH`, without installing: a `node_modules/.bin/<cmd>` of the project or an ancestor, else (`pnpm exec` and `yarn exec`) any program on `PATH`. |
+| shell | — | — | — | `exec` | `bun exec "<script>"`: run the arguments as one `/bin/sh -c` script with the [script environment](#script-environment). |
+| create | (`init <name>`) | `create` | `create` | `create`, `c` | [Run a `create-*` package](#create-and-init). |
+| init | `init`, `create`, `innit` | `init` | `init` | `init` | `npm init`/`npm create` with a name: same as `create`. Otherwise: [write a `package.json`](#create-and-init). |
+| view | `view`, `info`, `show`, `v` | `view`, `info`, `show`, `v` | `info` | `info` | [Show registry metadata](#view). |
+| ls | `ls`, `list`, `la`, `ll` | `list`, `ls`, `la`, `ll` | `list` | — | [List direct dependencies](#ls). |
+| why | `why`, `explain` | `why` | `why` | `why` | Same output as `ls`. |
+| reinstall | `prune`, `dedupe`, `ddp`, `rebuild`, `rb` | `prune`, `dedupe`, `rebuild`, `rb` | — | — | Run a normal install. |
+| config | `config`, `c`, `get`, `set` | `config`, `c`, `get`, `set` | `config` | — | [Read and write `.npmrc` settings](#config). `get`/`set` are `config get`/`config set`. |
+| pkg | `pkg` | `pkg` | — | — | [Read and write `package.json` fields](#pkg). |
+| cache | `cache` | — | `cache` | — | `cache clean`, `clear`, `verify`, `rm`: delete the tarball cache and print `Cache cleaned`. Other subcommands do nothing (exit 0). |
+| prefix | `prefix` | `prefix` | — | — | Print the project directory; with `-g`, `/usr/local`. |
+| root | `root` | `root` | — | — | Print `<project>/node_modules`; with `-g`, `/usr/local/lib/node_modules/.ov-global/node_modules`, where global packages are. |
+| bin | — | `bin` | `bin` | — | Print `<project>/node_modules/.bin`; with `-g`, `/usr/local/bin`. |
+| help | `help` | `help` | `help` | `help` | Print the usage text, exit 0. |
+| global | — | — | `global` | — | `yarn global add`/`remove` are `add -g`/`remove -g`; `yarn global bin` is `bin -g`; `yarn global list` lists the global packages. |
+| workspace | — | — | `workspace`, `workspaces` | — | [Selecting workspaces](#selecting-workspaces). |
+| pm | — | — | — | `pm` | `bun pm ls` (as `npm ls`), `bun pm bin [-g]`, `bun pm cache rm`, `bun pm view`. |
+| not supported, exit 0 | `audit`, `fund` | `audit` | `audit` | `audit` | Print `<pm> <cmd> is not supported in OpenVessel` to stderr. |
+| not supported, exit 1 | `doctor`, `outdated`, `login`, `publish`, `whoami`, `link`, `pack`, `version`, … | `outdated`, `publish`, `link`, `pack`, `patch`, `store`, `deploy`, … | `outdated`, `publish`, `link`, `pack`, `version`, `check`, … | `test`, `build`, `outdated`, `link`, `publish`, `patch`, `upgrade`, `repl`, `list` | Print `<pm> <cmd> is not supported in OpenVessel` to stderr. (`bun test` and `bun build` are Bun's test runner and bundler, not the scripts.) |
 
 No command:
 
@@ -115,12 +149,14 @@ No command:
 
 Any other command:
 
-- `npm` prints `Unknown command: "<cmd>"` and a hint, exit 1. (`npm help` is not a command and also ends
-  here.)
-- `pnpm`, `yarn` and `bun` run the script `<cmd>` if `package.json` has one. Otherwise `bun` runs
-  `node <cmd> <args>` when `<cmd>` ends in `.js`, `.mjs`, `.cjs`, `.ts`, `.mts` or `.tsx`. Otherwise the
-  command is run like [`exec`](#exec-npx-dlx). The commands in the table take precedence over scripts:
-  `yarn show` runs `view` even if the project has a `show` script; use `yarn run show`.
+- `npm` prints `Unknown command: "<cmd>"` and a hint to run `npm help`, exit 1.
+- `pnpm`, `yarn` and `bun` run the script `<cmd>` with the arguments that follow if `package.json` has
+  one (`yarn show`, `bun t` run the scripts `show` and `t`). With `-r` or `--filter` (`pnpm`, `bun`),
+  `<cmd>` is run as a script in the [selected workspaces](#selecting-workspaces).
+- Otherwise `bun` runs `node <cmd> <args>` when `<cmd>` ends in `.js`, `.mjs`, `.cjs`, `.ts`, `.mts` or
+  `.tsx`; `pnpm` runs it like `pnpm exec`; `yarn` and `bun` run a `node_modules/.bin/<cmd>` of the
+  project or an ancestor, and otherwise fail with `error Command "<cmd>" not found.` (`yarn`) or
+  `error: Script not found "<cmd>"` (`bun`), exit 1.
 - `bun run <file>` looks for a script named `<file>`; only `bun <file>` runs a file.
 
 ### add
@@ -135,8 +171,7 @@ Each argument is `name` or `name@spec` (`@scope/name@spec` for scoped names). Wh
 | `name` | `^<latest>` (the `latest` dist-tag) |
 | `name@<range>` (a valid semver range other than an exact version) | the range as given |
 | `name@<version>` (exact) | `^<version>` |
-| `name@<dist-tag>` | `^<version the tag points to>` |
-| `name@latest` | `latest` (it parses as a range, see [semver](#semver)) |
+| `name@<dist-tag>` (`latest`, `next`, …) | `^<version the tag points to>` |
 | `name@file:…`, `link:…`, `workspace:…`, `http(s)://…`, `git…`, `github:…`, `npm:…` | the spec as given, without contacting the registry |
 | any of the above with `-E` | the exact resolved version (registry specs only) |
 
@@ -160,8 +195,10 @@ Each argument is `name` or `name@spec` (`@scope/name@spec` for scoped names). Wh
    `/usr/local/bin` as an absolute symlink, replacing existing links of the same name. `/usr/local/bin`
    is on the default `PATH`.
 
-`npm root -g` prints `/usr/local/lib/node_modules`, not the `.ov-global` directory. `uninstall -g` has
-no global mode; it works on the current project.
+`npm root -g` prints `/usr/local/lib/node_modules/.ov-global/node_modules`, where the packages are.
+`uninstall -g <pkg…>` (`remove -g`, `yarn global remove`) removes the packages from the `.ov-global`
+project and deletes the links in `/usr/local/bin` that point into it and whose package is gone.
+`ls -g` lists the global packages.
 
 ### npm run
 
@@ -171,8 +208,10 @@ no global mode; it works on the current project.
 2. No name: prints `Scripts available in <name> via \`npm run-script\`:` and each script with its
    command, exit 0.
 3. No script `<name>`: `npm error Missing script: "<name>"` and a hint, exit 1 (with every front end).
-4. Otherwise runs `pre<name>`, `<name>`, `post<name>`, each only if defined. The arguments (those after
-   `--`, and plain arguments after the name) go to `<name>` only. The first script that exits non-zero
+4. Otherwise runs `pre<name>`, `<name>`, `post<name>`, each only if defined. The arguments go to
+   `<name>` only: with `npm`, the arguments after the name that are not options and everything after
+   `--`; with `pnpm`, `yarn` and `bun`, everything after the name ([Options](#options)). `yarn` and `bun`
+   drop an `--` right after the name (`yarn` warns that scripts don't require it); `pnpm` passes it on. The first script that exits non-zero
    stops the sequence; its exit code is returned. With `npm`, and without `-s`, a failure also prints:
 
 ```text
@@ -194,6 +233,29 @@ script a banner is written to stdout, unless `-s` is given:
 | `yarn` | `$ <command>` |
 
 `pre`/`post` scripts always run; `--ignore-scripts` does not affect `run`.
+
+### Selecting workspaces
+
+Scripts, `exec` and `add`/`uninstall` can work on [workspaces](#workspaces) of the workspace root (found
+from the project directory) instead of the project:
+
+| Front end | Selection |
+|---|---|
+| `npm` | `-w <name>`/`--workspace=<name>` (repeatable): the workspace with that name, or the workspaces in that directory or below it. `--workspaces`/`-ws`: all of them. `--include-workspace-root` adds the root. A name that matches nothing: `npm error No workspaces found:` / `npm error   --workspace=<name>`, exit 1. |
+| `pnpm` | `--filter <sel>`/`-F <sel>` (repeatable): `<sel>` is a name (with `*`), `./path` or `{path}` (with `*`), or `!<sel>` to exclude; the dependency selectors `...` and `^` are dropped (the package itself is selected). `-r`/`--recursive`: all workspaces (the root only with `--include-workspace-root`). `-w`/`--workspace-root`: the root. |
+| `bun` | `--filter <sel>`/`-F <sel>`, as `pnpm`. |
+| `yarn` | `yarn workspace <name> <command…>` runs the command as if started in that workspace (`error Unknown workspace "<name>".` if there is none). `yarn workspaces run <script…>` runs the script in every workspace, stopping at the first failure. `yarn workspaces info` prints each workspace's `location` and `workspaceDependencies` as JSON. |
+
+- `run` and scripts run by name run in each selected project in turn. `npm` runs every one and returns
+  the last failing exit code (a workspace without the script is a `Missing script` error). `pnpm` and
+  `bun` skip projects without the script, fail if none has it
+  (` ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT  None of the selected packages has a "<name>" script`), and stop
+  at the first failure. When the filters match nothing, `pnpm` prints
+  `No projects matched the filters in "<root>"` (exit 0).
+- `npm exec -w`, `pnpm exec --filter`/`-r` run the command in each selected project's directory.
+- `install <pkg…> -w <name>` (`pnpm add --filter`) adds the packages to each selected workspace's
+  `package.json`, then installs the workspace root once.
+- `install` without packages, `ci` and `update` always install the whole workspace root.
 
 ### Install lifecycle
 
@@ -236,6 +298,7 @@ Built by `scriptEnv()` from the caller's environment plus:
 | `INIT_CWD` | the working directory the command was started in |
 | `NODE` | `/usr/bin/node` |
 | `COLOR` | `1` if stdout is a terminal, else `0` |
+| `npm_config_<name>` | `npm` only: each `--<name>[=<value>]` option of the command line, with `-` in the name replaced by `_` (`--watch` → `npm_config_watch=true`, `--mode=prod` → `npm_config_mode=prod`) |
 
 No other `npm_package_*` or `npm_config_*` variables are set.
 
@@ -247,8 +310,7 @@ where in /home/user/app
 
 ### exec, npx, dlx
 
-`npx <cmd> [args…]`, `npm exec <cmd>`, `npm x`, `pnpm dlx`, `yarn dlx`, `pnpx`, `bunx`, and the
-fallback for unknown `pnpm`/`yarn`/`bun` commands:
+`npx <cmd> [args…]`, `npm exec <cmd>`, `npm x`, `pnpm dlx`, `yarn dlx`, `pnpx`, `bunx` and `bun x`:
 
 1. No command: `npm error npx requires a command`, exit 1.
 2. If the command has no version (`cowsay`, not `cowsay@1`), no `--package` was given, and the install
@@ -272,14 +334,20 @@ fallback for unknown `pnpm`/`yarn`/`bun` commands:
 
 | Entry | Forced reinstall | Notes |
 |---|---|---|
-| `npx`, `npm exec`, `npm x`, `bunx`, `npm dlx` | no | |
+| `npx`, `npm exec`, `npm x`, `bunx`, `bun x` | no | |
 | `pnpm dlx`, `yarn dlx`, `pnpx` | yes | |
 | `create`, `init <name>` | yes | |
 
-`--package <spec>` / `-p <spec>` / `--package=<spec>` installs `<spec>` and runs the following command
-from it. This works with `npm exec -p <spec> -- <cmd> [args]`. With `npx -p …` the flags end up after
-the implicit `--` and are taken as the command, which fails with
-`npm error could not determine executable to run for -p`.
+There is no terminal prompt. When `npm exec`/`npx` installs a package that is not in the cache, it goes
+ahead and prints `npm warn exec The following package was not found and will be installed: <name>@<version>`
+to stderr, as npm does when it cannot ask; `-y`/`--yes` (or `-s`) installs without the warning, and
+`--no` refuses with `npm error npx canceled due to missing packages and no YES option: ["<spec>"]`
+(exit 1).
+
+`--package <spec>` / `-p <spec>` / `--package=<spec>` (repeatable) installs `<spec>` and runs the
+following command from it: `npx -p typescript tsc --version`, `npm exec -p <spec> -- <cmd> [args]`.
+With `-c <cmd>`/`--call <cmd>`, `npm exec` runs `<cmd>` with `/bin/sh -c` and the packages' binaries on
+`PATH` (`npx -p cowsay -c 'cowsay hi'`).
 
 ### create and init
 
@@ -314,26 +382,29 @@ It prints `Wrote to <path>:` and the JSON. If `package.json` exists, it prints
 
 ### view
 
-`npm view <name>[@<spec>] [field…]` fetches the package's metadata. The version is the `latest` tag, the
-highest version matching a range, or the version a dist-tag points to.
+`npm view <name>[@<spec>] [field…]` fetches the package's full registry document (with `description`,
+`license`, `maintainers`, `time`, …; the installer uses the abbreviated one). Without a name, or with
+`.`, it shows the project's own package. The versions shown are the one a dist-tag points to (`latest`
+without a spec), or every version matching a range.
 
-- With fields, each is printed on its own line: `versions` (all published versions), `dist-tags`, or a
-  dotted path into that version's manifest (`dependencies.react`). Strings are printed raw, everything
-  else as indented JSON.
-- Without fields, a summary: `<name>@<version> | <license> | deps: <n>`, the description and the
-  dist-tags.
-- No argument, or no matching version: exit 1 without output. A registry error prints
-  `npm error code <code>` and the message, exit 1.
-
-The metadata is the abbreviated document the installer uses, which has no `description` or `license`,
-so the summary shows `Proprietary` and an empty description, and fields that only exist in the full
-document print `undefined`.
+- With fields, each is looked up in the version's manifest merged with the document's top level
+  (`versions`, `dist-tags`, `time`, `maintainers`, …), with dotted paths (`dist.tarball`,
+  `dependencies.react`). A single field of a single version prints a string raw; otherwise values are
+  printed like `util.inspect` (`'1.2.0'`, `[ 'a', 'b' ]`), several fields as `<field> = <value>`, and
+  several versions each prefixed with `<name>@<version> `. Missing fields print nothing.
+- Without fields, npm's summary: `<name>@<version> | <license> | deps: <n> | versions: <n>`, the
+  description, homepage, keywords, bin, `dist` (tarball, shasum, integrity, unpacked size),
+  dependencies, maintainers, dist-tags and the publish date.
+- `--json` prints the data (or the fields) as JSON; an array when several versions match.
+- No matching version: `npm error code E404` / `npm error 404 No match found for version <spec>`, exit 1.
+  A registry error prints `npm error code <code>` and the message, exit 1.
 
 ### ls
 
 `npm ls` prints `<name>@<version> <dir>`, then one line per direct dependency (`dependencies`,
 `devDependencies` and `optionalDependencies` together, sorted) with the version recorded in
 `node_modules/.package-lock.json`, or `UNMET DEPENDENCY`. There is no tree, `--depth` or `--all`.
+`ls -g` lists the global packages.
 
 ```text
 app@1.0.0 /home/user/app
@@ -382,7 +453,8 @@ app@1.0.0 /home/user/app
 | `peerDependencies` | every dependency (not the project), except peers marked optional in `peerDependenciesMeta`, unless `--legacy-peer-deps`/`--force` or `legacy-peer-deps=true` in `.npmrc` |
 | `bundleDependencies` | not handled specially (whatever the tarball contains is unpacked) |
 
-`NODE_ENV` has no effect on what is installed. `engines` and `libc` are not checked.
+With `NODE_ENV=production` and none of `--omit=dev`, `--include=dev`, `--production`, the project's
+`devDependencies` are not installed, as with npm. `engines` and `libc` are not checked.
 
 These names are never installed, whatever lists them: `fsevents`, `bufferutil`, `utf-8-validate`,
 `cpu-features`, `ssh2`.
@@ -391,8 +463,8 @@ These names are never installed, whatever lists them: `fsevents`, `bufferutil`, 
 
 | Spec in `package.json` | Resolved as |
 |---|---|
-| semver range, exact version, `*`, `""`, `latest` | registry, see [Version selection](#version-selection) |
-| other dist-tag (`next`, `beta`) | registry, the version the tag points to |
+| semver range, exact version, `*`, `""` | registry, see [Version selection](#version-selection) |
+| dist-tag (`latest`, `next`, `beta`) | registry, the version the tag points to |
 | `npm:<name>@<range>`, `npm:<name>` | registry package `<name>`, installed under the alias |
 | `workspace:<range>` | the workspace of that name if there is one, else the registry with the prefix removed (`*`, `^`, `~` mean any version) |
 | `catalog:`, `catalog:<name>` | any version (`*`) from the registry; catalogs are not read |
@@ -479,21 +551,22 @@ are not read). Both are used together.
   `dependencies`, `optionalDependencies` and `devDependencies` are installed in the root tree.
 - A dependency on a workspace's name resolves to the workspace whatever its range.
 - Workspace `bin` entries are linked into the root `node_modules/.bin`.
-- `--workspace`/`--filter` do not select workspaces; commands always work on the root project.
+- Commands can be run in selected workspaces, see [Selecting workspaces](#selecting-workspaces).
 
 ### Writing node_modules
 
 - Packages from the previous install (in `node_modules/.package-lock.json`) that are no longer in the
   tree are deleted.
-- A package is left alone if the previous record has the same version and source and its
-  `package.json` still has that version. A summary of `up to date` means nothing changed.
+- A package is left alone if the previous record has the same version, source and kind (link or not),
+  its `package.json` still has that version, and it is still a directory (a symlink for links and
+  workspaces). A summary of `up to date` means nothing changed.
 - Otherwise its directory is emptied (its nested `node_modules` is kept) and the tarball is unpacked:
   the first path component is removed, entries containing `..` are skipped, directories, regular files
   and symlinks are created, hard links and other entry types are skipped. Files with any execute bit
   get mode `0755`, others `0644`.
 - When a package is installed under another name (an `npm:` alias, a WebAssembly substitute, a compat
   package), its `package.json` is rewritten with the installed `name` and `version` and a field
-  `_openvesselSource: "<source package>@<version>"`.
+  `_openvesselSource: "<source package>@<version>"`, with the version that was actually unpacked.
 - `file:`/`link:` dependencies and workspaces are relative symlinks.
 
 ### Binaries
@@ -527,8 +600,10 @@ packages):
 }
 ```
 
-Each entry has `version`, `resolved` (tarball URL or link target), `integrity`, and `dev`, `optional`,
-`link` when true. It is used for "up to date" checks, pruning, `npm ls`, and by `exec` to recognize a
+Each entry has `version`, `resolved` (tarball URL, or a link's target relative to the project),
+`integrity`, and `dev`, `optional`, `link` when true. A workspace has two entries, as in npm's lockfile:
+`node_modules/<name>` with `link: true` and `resolved` its directory, and `<directory>` with its `name`
+and `version`. It is used for "up to date" checks, pruning, `npm ls`, and by `exec` to recognize a
 cache directory. It is not read for version hints.
 
 ### Progress and summary
@@ -543,7 +618,7 @@ The summary goes to stdout (not with `-s`). `<time>` is `<n>ms` below one second
 |---|---|
 | `npm`, `bun` | an empty line, then `added <n> package(s)[, and audited <total+1> packages] in <time>`, or `up to date in <time>` when nothing was added. The `audited` part appears when some packages were already in place. |
 | `pnpm` | `Packages: +<n>` and `Done in <time>` |
-| `yarn` | `success Saved lockfile.` and `Done in <time>.` (no lockfile is actually written) |
+| `yarn` | `success Saved lockfile.` when `yarn.lock` was written (it changed), `success Already up-to-date.` when nothing changed, then `Done in <time>.` |
 
 ## Lockfiles
 
@@ -555,7 +630,7 @@ this order, and uses the first one that exists and parses (even if it yields no 
 | `package-lock.json` | v2/v3: every entry of `packages` except the root and `link` entries; the name is the entry's `name` or the path after the last `node_modules/`. v1: the nested `dependencies` tree (`npm:` alias versions are reduced to the version). |
 | `npm-shrinkwrap.json` | as `package-lock.json` |
 | `pnpm-lock.yaml` | keys in the `packages:` and `snapshots:` sections: `name@version` (v6–v9) and `/name/version` (v5), quoted or not, with peer suffixes ignored |
-| `yarn.lock` | Yarn v1: each entry's names (aliases `alias@npm:real@range` count as `real`) and its `version "x"`. Yarn Berry files are parsed with the same rules, but their `name@npm:range` keys produce names that never match a package, so a Berry lockfile has no effect. |
+| `yarn.lock` | Yarn v1: each entry's names (aliases `alias@npm:real@range` count as `real`) and its `version "x"`. Yarn Berry (a file with `__metadata:`): each entry's `resolution: "<name>@npm:<version>"`; workspace, patch and other non-npm resolutions are skipped. Berry's `checksum` is Yarn's hash of its own zip archive and is not used. |
 | `bun.lock` | every `"name@x.y.z"` string in the file |
 
 `bun.lockb` (binary) is not read.
@@ -563,7 +638,31 @@ this order, and uses the first one that exists and parses (even if it yields no 
 The result is only a set of versions per package name. It is used in [Version selection](#version-selection)
 step 2: the highest locked version that satisfies the range wins. The tree shape, `resolved` URLs and
 `integrity` values of the lockfile are not used, and a lockfile that disagrees with `package.json` is
-not an error. `update` ignores lockfiles. No front end writes or updates a lockfile.
+not an error. `update` ignores lockfiles.
+
+### yarn.lock
+
+After an install, `yarn` writes `yarn.lock` in the Yarn v1 format (`Installer.yarnLockfile()`), unless
+`--frozen-lockfile`, `--pure-lockfile` or `--no-lockfile` is given; the file is only rewritten when its
+contents change. Other front ends write no lockfile.
+
+```text
+# THIS IS AN AUTOGENERATED FILE. DO NOT EDIT THIS FILE DIRECTLY.
+# yarn lockfile v1
+
+
+is-number@^6.0.0:
+  version "6.0.0"
+  resolved "https://registry.npmjs.org/is-number/-/is-number-6.0.0.tgz#e6d15ad31fc262887cccf217ae5f9316f81b1995"
+  integrity sha512-…
+```
+
+- One entry per installed package, keyed by every `name@spec` that resolved to it (the spec as written
+  by the dependent, before overrides), sorted.
+- `resolved` is the tarball URL with `#<shasum>`; `dependencies` and `optionalDependencies` are those of
+  the registry manifest, so a package replaced by a WebAssembly build or compat package is recorded as
+  the registry package.
+- Workspaces, `file:`/`link:` dependencies and peer edges get no entry.
 
 ## Registry and .npmrc
 
@@ -642,7 +741,7 @@ With neither (GitHub and URL tarballs), nothing is checked.
 
 | Code | When |
 |---|---|
-| 0 | success; `-v`, `-h`; `audit`, `fund`; `config`/`cache` subcommands that do nothing |
+| 0 | success; `-v`, `-h`, `help`; `audit`, `fund`; `config`/`cache` subcommands that do nothing |
 | 1 | resolution, registry, network or integrity errors; missing script; unknown command; `npm` without a command; `add` without packages; `doctor`, `outdated`, `login`, `publish`, `whoami`; `exec` without a command or binary |
 | 254 | no `package.json` for `install` or `run` |
 | other | the exit code of a failing lifecycle or `run` script, or of the program started by `exec` |
@@ -655,7 +754,7 @@ With neither (GitHub and URL tarballs), nothing is checked.
 |---|---|
 | `1.2.3`, `=1.2.3`, `v1.2.3` | exactly that version (leading `v`/`=` ignored, build metadata `+…` ignored) |
 | `1`, `1.x`, `1.2`, `1.2.*` | partial versions as ranges (`>=1.0.0 <2.0.0-0`, …) |
-| `*`, `x`, `X`, `""`, `latest` | any version |
+| `*`, `x`, `X`, `""` | any version (a dist-tag such as `latest` is not a range) |
 | `^1.2.3`, `^0.2.3`, `^0.0.3`, `^1.x` | caret: up to the next major, or minor/patch for `0.x` |
 | `~1.2.3`, `~1.2`, `~1`, `~>1.2` | tilde: up to the next minor (next major for `~1`) |
 | `>`, `>=`, `<`, `<=` with full or partial versions | comparators (`>1.2` → `>=1.3.0`, `<=1.2` → `<1.3.0-0`) |
