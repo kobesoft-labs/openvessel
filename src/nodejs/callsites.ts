@@ -40,7 +40,7 @@ class CallSite {
     return null;
   }
   getFileName() {
-    return EVAL_FILE.test(this.#file) ? undefined : this.#file || undefined;
+    return this.#scriptName();
   }
   getLineNumber() {
     return this.#line;
@@ -54,8 +54,12 @@ class CallSite {
   getEnclosingColumnNumber() {
     return null;
   }
+  // (not through getFileName, which boot.ts wraps with a call back to this one)
   getScriptNameOrSourceURL() {
-    return this.getFileName();
+    return this.#scriptName();
+  }
+  #scriptName() {
+    return EVAL_FILE.test(this.#file) ? undefined : this.#file || undefined;
   }
   getScriptHash() {
     return '';
@@ -97,7 +101,7 @@ class CallSite {
 }
 
 /** Frames of a SpiderMonkey stack string. Names of closures ("outer/<", "outer/inner<") are dropped, as V8 shows them anonymous. */
-function parseStack(stack: string): CallSite[] {
+export function parseStack(stack: string): CallSite[] {
   const out: CallSite[] = [];
   const lines = stack.split('\n');
   for (let i = 0; i < lines.length; i++) {

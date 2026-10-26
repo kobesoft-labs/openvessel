@@ -239,7 +239,6 @@ function patchCallSites() {
 }
 
 function installStackTraceHook() {
-  installCallSites();
   patchCallSites();
   const nodePrepare = (Error as any).prepareStackTrace as (e: Error, t: any[]) => unknown;
   const runtimeFile = new URL(import.meta.url).pathname;
@@ -409,6 +408,8 @@ function boot(init: InitMsg) {
   // per-context scripts (node_realm / node_context_data)
   const util = getInternalBinding('util');
   const symbols = getInternalBinding('symbols');
+  // before the primordials copy Error.captureStackTrace
+  installCallSites();
   const primordials: Record<string, unknown> = Object.create(null);
   const perContext: Record<string, any> = Object.create(null);
   for (const id of ['internal/per_context/primordials', 'internal/per_context/domexception', 'internal/per_context/messageport']) {
