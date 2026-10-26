@@ -1,7 +1,14 @@
 // `test` / `[` builtin.
 
-import { S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFMT, S_IFREG } from '../vfs.ts';
+import { S_IFBLK, S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK } from '../vfs.ts';
 import type { Shell } from './interp.ts';
+
+const UID = 1000;
+
+/** Unary operators of test / [[ ]]. */
+export const UNARY_OPS = new Set(['-a', '-b', '-c', '-d', '-e', '-f', '-g', '-h', '-k', '-p', '-r', '-s', '-t', '-u', '-w', '-x', '-G', '-L', '-N', '-O', '-S', '-z', '-n', '-v', '-o']);
+/** Binary operators of test / [[ ]] (besides the pattern and regex ones of [[ ]]). */
+export const BINARY_OPS = new Set(['=', '==', '!=', '<', '>', '-eq', '-ne', '-lt', '-le', '-gt', '-ge', '-nt', '-ot', '-ef']);
 
 export function builtinTest(sh: Shell, args: string[]): number {
   const vfs = sh.kernel.vfs;
@@ -16,29 +23,57 @@ export function builtinTest(sh: Shell, args: string[]): number {
     if (!/^\s*-?\d+\s*$/.test(s)) throw new Error(`${s}: integer expression expected`);
     return parseInt(s, 10);
   };
+  const type = (a: string, t: number, follow = true) => {
+    const s = st(a, follow);
+    return !!s && (s.mode & S_IFMT) === t;
+  };
+  // processes run as uid/gid 1000 (not root): the owner, group or other bits apply
+  const access = (a: string, bit: number) => {
+    const s = st(a);
+    if (!s) return false;
+    const shift = s.uid === UID ? 6 : s.gid === UID ? 3 : 0;
+    return ((s.mode >> shift) & bit) !== 0;
+  };
   const unary = (op: string, a: string): boolean | null => {
     switch (op) {
       case '-e':
       case '-a':
         return !!st(a);
       case '-f':
-        return !!st(a) && (st(a)!.mode & S_IFMT) === S_IFREG;
+        return type(a, S_IFREG);
       case '-d':
-        return !!st(a) && (st(a)!.mode & S_IFMT) === S_IFDIR;
+        return type(a, S_IFDIR);
       case '-L':
       case '-h':
-        return !!st(a, false) && (st(a, false)!.mode & S_IFMT) === S_IFLNK;
+        return type(a, S_IFLNK, false);
       case '-p':
-        return !!st(a) && (st(a)!.mode & S_IFMT) === S_IFIFO;
+        return type(a, S_IFIFO);
       case '-c':
-        return !!st(a) && (st(a)!.mode & S_IFMT) === S_IFCHR;
+        return type(a, S_IFCHR);
+      case '-b':
+        return type(a, S_IFBLK);
+      case '-S':
+        return type(a, S_IFSOCK);
       case '-s':
         return !!st(a) && st(a)!.size > 0;
       case '-r':
+        return access(a, 4);
       case '-w':
-        return !!st(a);
+        return access(a, 2);
       case '-x':
-        return !!st(a) && (st(a)!.mode & 0o111) !== 0;
+        return access(a, 1);
+      case '-u':
+        return !!st(a) && (st(a)!.mode & 0o4000) !== 0;
+      case '-g':
+        return !!st(a) && (st(a)!.mode & 0o2000) !== 0;
+      case '-k':
+        return !!st(a) && (st(a)!.mode & 0o1000) !== 0;
+      case '-O':
+        return st(a)?.uid === UID;
+      case '-G':
+        return st(a)?.gid === UID;
+      case '-N':
+        return !!st(a) && st(a)!.mtimeMs > st(a)!.atimeMs;
       case '-z':
         return a.length === 0;
       case '-n':
@@ -47,6 +82,8 @@ export function builtinTest(sh: Shell, args: string[]): number {
         return sh.fds.get(Number(a))?.kind === 'tty';
       case '-v':
         return sh.getVar(a) !== undefined;
+      case '-o':
+        return sh.optionIsSet(a);
     }
     return null;
   };

@@ -4,7 +4,7 @@ export type WordPart =
   | { t: 'lit'; v: string }
   | { t: 'sq'; v: string }
   | { t: 'dq'; parts: WordPart[] }
-  | { t: 'param'; name: string; op?: string; arg?: Word; arg2?: Word; length?: boolean }
+  | { t: 'param'; name: string; op?: string; arg?: Word; arg2?: Word; length?: boolean; index?: string }
   | { t: 'cmd'; src: string }
   | { t: 'arith'; expr: Word }
   | { t: 'tilde'; user: string };
@@ -28,9 +28,16 @@ export type Node =
   | { t: 'if'; clauses: { cond: Node; body: Node }[]; else?: Node; redirs: Redir[] }
   | { t: 'while'; until: boolean; cond: Node; body: Node; redirs: Redir[] }
   | { t: 'for'; name: string; words: Word[] | null; body: Node; redirs: Redir[] }
-  | { t: 'case'; word: Word; items: { patterns: Word[]; body: Node | null }[]; redirs: Redir[] }
+  | { t: 'case'; word: Word; items: CaseItem[]; redirs: Redir[] }
   | { t: 'func'; name: string; body: Node }
   | { t: 'dbracket'; words: Word[]; redirs: Redir[] };
+
+/** A case clause; `term` is how it ends: `;;` (stop), `;&` (run the next body), `;;&` (test the next patterns). */
+export interface CaseItem {
+  patterns: Word[];
+  body: Node | null;
+  term: ';;' | ';&' | ';;&';
+}
 
 export class ShellSyntaxError extends Error {
   incomplete: boolean;
@@ -43,15 +50,24 @@ export class ShellSyntaxError extends Error {
 const RESERVED = new Set(['if', 'then', 'else', 'elif', 'fi', 'do', 'done', 'case', 'esac', 'while', 'until', 'for', 'in', '{', '}', '!', 'function', '[[', ']]']);
 const META = new Set([' ', '\t', '\n', ';', '&', '|', '<', '>', '(', ')']);
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** Single-character escapes of $'...' (bash). */
+const ANSI_C_ESCAPES: Record<string, string> = { a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '\\': '\\', "'": "'", '"': '"', '?': '?' };
 
 export function parse(src: string): Node {
   return new Parser(src).parseProgram();
 }
 
-class Parser {
+export class Parser {
   i = 0;
   pending: Redir[] = [];
-  constructor(public s: string) {}
+  /** Text spliced in by alias expansion: an alias isn't expanded again inside its own text. */
+  private aliasRegions: { name: string; start: number; end: number }[] = [];
+  /** The last alias ended with a blank: the next word is checked for an alias too. */
+  private aliasNextWord = false;
+  constructor(
+    public s: string,
+    private aliases?: Map<string, string>,
+  ) {}
 
   private eof() {
     return this.i >= this.s.length;
@@ -135,6 +151,69 @@ class Parser {
     return list;
   }
 
+  /**
+   * Parses the next complete command (a list up to the end of the line), or null at the end.
+   * Scripts run one such command at a time, so an alias defined on a line applies from the next
+   * line on, and a syntax error further down doesn't stop the lines before it (as in bash).
+   */
+  parseNext(): Node | null {
+    this.skipLinebreaks();
+    if (this.eof()) return null;
+    const items: { node: Node; async: boolean }[] = [];
+    for (;;) {
+      const node = this.parseAndOr();
+      this.skipBlank();
+      let async = false;
+      if (this.ch() === '&' && this.ch(1) !== '&') {
+        this.i++;
+        async = true;
+      } else if (this.ch() === ';' && this.ch(1) !== ';' && this.ch(1) !== '&') {
+        this.i++;
+      } else if (!this.eof() && this.ch() !== '\n') {
+        this.fail(`syntax error near unexpected token '${this.ch() === ';' ? this.s.slice(this.i, this.i + 2) : this.ch()}'`);
+      }
+      items.push({ node, async });
+      this.skipBlank();
+      if (this.eof()) {
+        this.readHeredocs();
+        break;
+      }
+      if (this.ch() === '\n') {
+        this.i++;
+        this.readHeredocs();
+        break;
+      }
+    }
+    if (items.length === 1 && !items[0].async) return items[0].node;
+    return { t: 'list', items };
+  }
+
+  /**
+   * Alias expansion at a command word: the alias text replaces the word in the input, so it may
+   * hold several commands, pipes or reserved words. Returns true when it expanded one.
+   */
+  private tryAlias(): boolean {
+    if (!this.aliases?.size) return false;
+    this.skipBlank();
+    let j = this.i;
+    while (j < this.s.length && !META.has(this.s[j]) && !'"\'`$\\'.includes(this.s[j])) j++;
+    // a quoted or expanded part makes it a different word
+    if (j === this.i || (j < this.s.length && !META.has(this.s[j]))) return false;
+    const w = this.s.slice(this.i, j);
+    const v = this.aliases.get(w);
+    if (v === undefined) return false;
+    if (this.aliasRegions.some((r) => r.name === w && this.i >= r.start && this.i < r.end)) return false;
+    // an alias ending in a blank makes the word after its text an alias candidate too, also when
+    // the first word of that text is itself an alias (alias q='e ': `q x` checks x)
+    const keep = this.aliasNextWord && this.aliasRegions.some((r) => r.start <= this.i && j < r.end);
+    const delta = v.length - w.length;
+    for (const r of this.aliasRegions) if (r.end > this.i) r.end += delta;
+    this.s = this.s.slice(0, this.i) + v + this.s.slice(j);
+    this.aliasRegions.push({ name: w, start: this.i, end: this.i + v.length });
+    this.aliasNextWord = keep || /[ \t]$/.test(v);
+    return true;
+  }
+
   /** Parses a compound list until one of the terminators (reserved words, `)`, `;;`). */
   private parseList(terms: string[]): Node {
     const items: { node: Node; async: boolean }[] = [];
@@ -160,7 +239,7 @@ class Parser {
         // handled by skipLinebreaks
       } else if (!this.eof()) {
         const c2 = this.ch();
-        if (!(c2 === ')' || (c2 === ';' && this.ch(1) === ';') || this.peekReserved())) {
+        if (!(c2 === ')' || (c2 === ';' && (this.ch(1) === ';' || (this.ch(1) === '&' && terms.includes(';;')))) || this.peekReserved())) {
           this.fail(`syntax error near unexpected token '${c2}'`);
         }
       }
@@ -213,6 +292,7 @@ class Parser {
 
   private parseCommand(): Node {
     this.skipBlank();
+    while (this.tryAlias());
     const rw = this.peekReserved();
     let node: Node | null = null;
     switch (rw) {
@@ -369,7 +449,7 @@ class Parser {
     this.skipBlank();
     const word = this.readWord();
     this.expectReserved('in');
-    const items: { patterns: Word[]; body: Node | null }[] = [];
+    const items: CaseItem[] = [];
     for (;;) {
       this.skipLinebreaks();
       if (this.peekReserved() === 'esac') {
@@ -394,12 +474,17 @@ class Parser {
         this.fail("syntax error in case pattern");
       }
       const body = this.parseList(['esac', ';;']);
-      items.push({ patterns, body: body.t === 'list' && body.items.length === 0 ? null : body });
+      let term: CaseItem['term'] = ';;';
       this.skipLinebreaks();
       if (this.ch() === ';' && (this.ch(1) === ';' || this.ch(1) === '&')) {
+        term = this.ch(1) === '&' ? ';&' : ';;';
         this.i += 2;
-        if (this.ch() === '&') this.i++;
+        if (term === ';;' && this.ch() === '&') {
+          term = ';;&';
+          this.i++;
+        }
       }
+      items.push({ patterns, body: body.t === 'list' && body.items.length === 0 ? null : body, term });
     }
     return { t: 'case', word, items, redirs: [] };
   }
@@ -482,8 +567,10 @@ class Parser {
           continue;
         }
       }
+      if (words.length === 0 ? this.tryAlias() : this.aliasNextWord && ((this.aliasNextWord = false), this.tryAlias())) continue;
       words.push(this.readWord());
     }
+    this.aliasNextWord = false;
     if (words.length === 0 && assigns.length === 0 && redirs.length === 0) {
       this.fail(`syntax error near unexpected token '${this.ch() ?? 'newline'}'`);
     }
@@ -597,42 +684,38 @@ class Parser {
       if (c === '\\') {
         const n = this.ch(1);
         this.i += 2;
-        switch (n) {
-          case 'n':
-            out += '\n';
-            break;
-          case 't':
-            out += '\t';
-            break;
-          case 'r':
-            out += '\r';
-            break;
-          case 'e':
-          case 'E':
-            out += '\x1b';
-            break;
-          case '0':
-            out += '\0';
-            break;
-          case 'x': {
-            const m = /^[0-9a-fA-F]{1,2}/.exec(this.s.slice(this.i));
-            if (m) {
-              out += String.fromCharCode(parseInt(m[0], 16));
-              this.i += m[0].length;
-            }
-            break;
-          }
-          case 'u': {
-            const m = /^[0-9a-fA-F]{1,4}/.exec(this.s.slice(this.i));
-            if (m) {
-              out += String.fromCharCode(parseInt(m[0], 16));
-              this.i += m[0].length;
-            }
-            break;
-          }
-          default:
-            out += n ?? '';
+        const simple = ANSI_C_ESCAPES[n ?? ''];
+        if (simple !== undefined) {
+          out += simple;
+          continue;
         }
+        if (n !== undefined && n >= '0' && n <= '7') {
+          // \nnn: one to three octal digits
+          const m = /^[0-7]{0,2}/.exec(this.s.slice(this.i))!;
+          out += String.fromCharCode(parseInt(n + m[0], 8) & 0xff);
+          this.i += m[0].length;
+          continue;
+        }
+        const hex = n === 'x' ? 2 : n === 'u' ? 4 : n === 'U' ? 8 : 0;
+        if (hex) {
+          const m = new RegExp(`^[0-9a-fA-F]{1,${hex}}`).exec(this.s.slice(this.i));
+          if (!m) {
+            out += '\\' + n;
+            continue;
+          }
+          const cp = parseInt(m[0], 16);
+          out += n === 'x' ? String.fromCharCode(cp) : cp <= 0x10ffff ? String.fromCodePoint(cp) : '';
+          this.i += m[0].length;
+          continue;
+        }
+        if (n === 'c' && this.i < this.s.length) {
+          // \cX: control character
+          out += String.fromCharCode(this.s.charCodeAt(this.i) & 0x1f);
+          this.i++;
+          continue;
+        }
+        // unknown escapes are kept as they are
+        out += '\\' + (n ?? '');
         continue;
       }
       out += c;
@@ -826,6 +909,8 @@ function findMatchingParen(s: string, start: number): number {
 
 function parseBraceParam(inner: string): WordPart {
   if (inner.startsWith('#') && inner.length > 1 && /^#[A-Za-z_0-9@*#?]/.test(inner) && !/^#[#%]/.test(inner.slice(1))) {
+    const m = /^([^[]*)\[(.*)\]$/.exec(inner.slice(1));
+    if (m) return { t: 'param', name: m[1], length: true, index: m[2] };
     return { t: 'param', name: inner.slice(1), length: true };
   }
   const m = /^([A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!\-])/.exec(inner);
@@ -833,11 +918,13 @@ function parseBraceParam(inner: string): WordPart {
   const name = m[1];
   let rest = inner.slice(name.length);
   if (!rest) return { t: 'param', name };
-  // ${a[0]} (arrays: treat as plain)
+  // ${a[0]}: indexed arrays exist only for BASH_REMATCH; other names treat [0] as the plain value
+  let index: string | undefined;
   if (rest.startsWith('[')) {
     const e = rest.indexOf(']');
+    index = rest.slice(1, e);
     rest = rest.slice(e + 1);
-    if (!rest) return { t: 'param', name };
+    if (!rest) return { t: 'param', name, index };
   }
   const opm = /^(:-|:=|:\?|:\+|-|=|\?|\+|##|#|%%|%|\/\/|\/#|\/%|\/|\^\^|\^|,,|,|:)/.exec(rest);
   if (!opm) throw new ShellSyntaxError(`bad substitution: \${${inner}}`);
@@ -852,14 +939,14 @@ function parseBraceParam(inner: string): WordPart {
       pat += argSrc[k++];
     }
     const rep = argSrc.slice(k + 1);
-    return { t: 'param', name, op, arg: new Parser(pat).readWordAll(), arg2: new Parser(rep).readWordAll() };
+    return { t: 'param', name, index, op, arg: new Parser(pat).readWordAll(), arg2: new Parser(rep).readWordAll() };
   }
   if (op === ':') {
     // ${x:off:len}
     const [off, len] = argSrc.split(':');
-    return { t: 'param', name, op: ':', arg: [{ t: 'lit', v: off }], arg2: len !== undefined ? [{ t: 'lit', v: len }] : undefined };
+    return { t: 'param', name, index, op: ':', arg: [{ t: 'lit', v: off }], arg2: len !== undefined ? [{ t: 'lit', v: len }] : undefined };
   }
-  return { t: 'param', name, op, arg: new Parser(argSrc).readWordAll() };
+  return { t: 'param', name, index, op, arg: new Parser(argSrc).readWordAll() };
 }
 
 // helper used for ${...} arguments: reads the whole string as one word (spaces kept literally)
@@ -875,7 +962,7 @@ function parseBraceParam(inner: string): WordPart {
   }
   return parts;
 };
-interface Parser {
+export interface Parser {
   readWordAll(): Word;
 }
 
