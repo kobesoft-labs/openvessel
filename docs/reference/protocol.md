@@ -24,7 +24,7 @@ people writing their own host instead of using `dist/host`.
 | Host page ↔ preview relay iframe | `window.postMessage` | `{ t: 'openvessel-preview-…' }` | `src/host/index.ts`, `src/preview/relay.ts` |
 | Relay ↔ preview service worker | `ServiceWorker.postMessage` | `{ t: 'kernel-port' \| 'default-port' \| 'need-kernel-port' }` | `src/preview/relay.ts`, `src/preview/sw.ts` |
 | Preview service worker ↔ kernel | a `MessagePort` | `{ id, k: 'req' \| 'body' \| … }` | `src/preview/sw.ts`, `src/kernel/index.ts` |
-| Preview page ↔ preview service worker | `postMessage` + a `MessagePort` per WebSocket | `{ t: 'ws-connect' }`, `{ t: 'open' \| 'msg' \| 'close' \| 'send' }` | `src/preview/inject.ts` |
+| Preview page ↔ preview service worker | `postMessage` + a `MessagePort` per WebSocket | `{ t: 'ws-connect' \| 'ws-check' }`, `{ t: 'open' \| 'msg' \| 'close' \| 'send' }` | `src/preview/inject.ts` |
 | Kernel ↔ process worker | `Worker.postMessage` | `{ t: … }` | `src/kernel/kernel.ts`, `src/kernel/syscalls.ts`, `src/kernel/net.ts` |
 | Process worker → kernel (syscalls) | a `SharedArrayBuffer` + `Atomics` | JSON + binary | `src/shared/syncchan.ts` |
 
@@ -36,10 +36,10 @@ host page                                   runtime.html (runtime origin)
 append <iframe src=".../runtime.html" allow="cross-origin-isolated">
                               ◀──────────── { t: 'openvessel-runtime-loaded' }            (to '*')
 new MessageChannel()
-{ t: 'openvessel-connect', port, init } ──▶  checks; registers sw.js; starts kernel.js
+{ t: 'openvessel-connect', port, init } ──▶  checks; starts __ov/k/<kid>/kernel.js
    (to the runtime origin, port transferred)  kernel ◀ { t: 'policy', policy }   (if init.policy)
                                               kernel ◀ { t: 'sw-port', port }
-                                              sw.js  ◀ { t: 'kernel-port', port }
+                                              sw.js  ◀ { t: 'kernel-port', port, kid }
                                               kernel ◀ { t: 'host-port', port }
 port ◀──────────────────────────────────────  { ev: 'ready' }                    (from the kernel)
 ```
@@ -60,8 +60,8 @@ The host accepts runtime messages only when `ev.origin` is the runtime origin an
 |---|---|---|
 | 1 | `ev.origin` is in `<meta name="openvessel-allowed-hosts">` (space/comma separated, `*` = any) | `origin <origin> is not allowed to use this runtime` |
 | 2 | `location.ancestorOrigins`, when present, has at most one entry | `the runtime must be embedded directly by the host page` |
-| 3 | `crossOriginIsolated` | `OpenVessel needs a cross-origin isolated page (COOP: same-origin and COEP: require-corp/credentialless on the host page, and allow="cross-origin-isolated" on the iframe).` |
-| 4 | service worker registration | `service worker registration failed: <message>` |
+| 3 | service worker registration | `service worker registration failed: <message>` |
+| 4 | `crossOriginIsolated` (after the worker controls the frame) | `OpenVessel needs a cross-origin isolated page (COOP: same-origin and COEP: require-corp/credentialless on the host page, and allow="cross-origin-isolated" on the iframe).` |
 | later | the kernel worker's `error` event | `kernel failed: <message>` |
 
 After failing check 1 or 2 the runtime still accepts another `openvessel-connect`. The host rejects
@@ -72,14 +72,22 @@ After failing check 1 or 2 the runtime still accepts another `openvessel-connect
 Service worker start-up in `runtime.js`: `register('./sw.js', { scope: './', updateViaCache: 'none' })`,
 then `reg.update()`; while a worker is installing or waiting it waits for `controllerchange`; then
 `navigator.serviceWorker.ready`; if the page still has no controller it waits for `controllerchange`
-(the worker calls `clients.claim()` on activation).
+(the worker calls `clients.claim()` on activation). This already happens when `runtime.html` loads,
+before `openvessel-runtime-loaded` is posted: if the frame is not cross-origin isolated once the worker
+controls it, `runtime.js` reloads it once (flag `openvessel-coi-reload` in `sessionStorage`), so that the
+worker's isolation headers apply; check 4 reports a frame that is still not isolated.
+
+Each runtime frame picks a random kernel id `<kid>` (16 hex digits) and starts its kernel as
+`__ov/k/<kid>/kernel.js`. Everything the kernel and its process workers request relative to their own
+URL is under that prefix, and the service worker sends it to the kernel whose channel was registered
+with that `kid` ([Runtime service worker](#runtime-service-worker)).
 
 ### Messages to the kernel worker
 
 | Message | From | Effect |
 |---|---|---|
 | `{ t: 'policy', policy }` | `runtime.js`, before `host-port`, if `init.policy` was given | sets the network policy (normalized) |
-| `{ t: 'sw-port', port }` | `runtime.js`, at start and on every `controllerchange` and `need-kernel-port` | attaches a runtime service worker channel |
+| `{ t: 'sw-port', port }` | `runtime.js`, at start and on every `controllerchange` and `need-kernel-port` naming its `kid` (or none) | attaches a runtime service worker channel |
 | `{ t: 'host-port', port }` | `runtime.js` | attaches the host channel (replacing a previous one) and posts `{ ev: 'ready' }` on it |
 
 ## Host RPC
@@ -91,14 +99,18 @@ then `reg.update()`; while a worker is installing or waiting it waits for `contr
 | Call (host → kernel) | `{ id: number, m: string, a: object }` |
 | Result (kernel → host) | `{ id, r: any }` — a `Uint8Array` result is transferred (its `buffer`) |
 | Error (kernel → host) | `{ id, e: { message: string, code?: string } }` |
-| Unknown method | `{ id, e: { message: 'unknown method <m>', code: 'ENOSYS' } }` |
+| Unknown method | `{ id, e: { message: 'unknown method <m>', code: 'ENOSYS' } }` (only the kernel's own method names count: `toString` and other inherited names are unknown) |
 | Event (kernel → host) | `{ ev: string, … }` (no `id`) |
 | Preview channel hand-over (host → kernel, not a call) | `{ t: 'preview-port', port: MessagePort }` |
 
 Methods may be synchronous or return a promise; calls are answered in completion order. Errors thrown by the
 file system are `KernelError`s with an errno `code` (`ENOENT`, `EEXIST`, `ENOTDIR`, `EISDIR`, `ENOTEMPTY`,
-…) and the errno text as `message` (for example `no such file or directory`). `dist/host` turns `e` into an
-`Error` with `code`.
+…) and the errno text as `message` (for example `no such file or directory`). Before a call, the kernel
+checks the required arguments (`path`, `from`/`to`, `files`, `argv`, `pid`, `cols`/`rows`, `id`) and
+throws Node's `ERR_INVALID_ARG_TYPE` (`The "path" argument must be of type string. Received …`) or, for an
+empty `argv`, `ERR_INVALID_ARG_VALUE`. Every error has a `code`: other errors without one get
+`ERR_INVALID_ARG_TYPE` (`TypeError`), `ERR_OUT_OF_RANGE` (`RangeError`) or `ERR_INVALID_ARG_VALUE`.
+`dist/host` turns `e` into an `Error` with `code`.
 
 ```js
 // a minimal call over the host port
@@ -164,7 +176,7 @@ The default environment is `PATH=/usr/local/bin:/usr/bin:/bin`, `HOME=/home/user
 | `port-closed` | `port` | that listener went away |
 | `fs-change` | `id`, `type: 'rename' \| 'change'`, `path` | a change under a watched path |
 | `permission-request` | `id`, `url`, `host`, `initiator`, `source: 'runtime' \| 'preview'` | the policy says `ask` for a host; answer with `permission.respond` |
-| `permission-settled` | `id`, `host`, `allowed: boolean` | a permission request was answered, or timed out |
+| `permission-settled` | `id`, `host`, `allowed: boolean`, `decision: 'once' \| 'session' \| 'deny' \| 'deny-session' \| 'timeout'` | a permission request was answered, or timed out after 5 minutes |
 
 Permission requests: the kernel merges concurrent questions about the same host name into one (all waiters
 get the same answer), denies a question that isn't answered within 5 minutes, and denies at once while no
@@ -196,14 +208,18 @@ new channel.
 
 | Message | Direction | Fields | Accepted when |
 |---|---|---|---|
-| `kernel-port` | relay → SW | `port: MessagePort`, `defaultPort: number` | the sender's URL path ends in `/relay.html`; a non-zero `defaultPort` replaces the default port |
-| `default-port` | relay → SW | `port: number` | sender path ends in `/relay.html` |
-| `need-kernel-port` | SW → every window client whose path ends in `/relay.html` | — | the SW needs a channel and has none; it waits up to 15 s (`preview is not connected to OpenVessel`) |
+| `kernel-port` | relay → SW | `port: MessagePort`, `defaultPort: number` | the sender is the relay: a window in a frame whose URL path is exactly `<scope>__ov/relay.html`; a non-zero `defaultPort` replaces the default port; the previous channel is closed |
+| `default-port` | relay → SW | `port: number` | the sender is the relay |
+| `need-kernel-port` | SW → every relay window client | — | the SW needs a channel and has none; it waits up to 15 s (`preview is not connected to OpenVessel`; outside requests are refused meanwhile) |
+
+The relay itself takes `openvessel-preview-connect` and `openvessel-preview-default-port` only from its
+parent, and only when the parent is of another origin than the relay.
 
 ### Preview page ↔ preview service worker (WebSockets)
 
 | Message | Direction | Fields |
 |---|---|---|
+| `ws-check` | page → SW | `url` (the outside `ws:`/`wss:` URL), `port: MessagePort` (transferred); the SW answers `{ allow: boolean }` on the port after asking the kernel like for an `http:`/`https:` URL |
 | `ws-connect` | page → SW (`navigator.serviceWorker.controller`) | `port: MessagePort` (transferred), `path` (path + query), `protocols: string[]`, `vport: number`, `origin` |
 | `open` | SW → page (on that port) | `protocol` |
 | `msg` | SW → page | `data: string \| Uint8Array`, `binary: boolean` |
@@ -232,9 +248,13 @@ has a numeric `id` chosen by the service worker and a string `k`; the kernel ign
 | `ws-opened` | kernel → SW | `id`, `protocol: string \| null` | the server accepted the upgrade |
 | `ws-msg` | both | `id`, `data: string \| Uint8Array`, `binary` | a message |
 | `ws-close` | SW → kernel | `id`, `code` (`Number(code) \|\| 1000`), `reason` | close from the page |
-| `ws-closed` | kernel → SW | `id`, `code`, `reason` | closed by the server, or failed to open (`1006`, reason = error message) |
+| `ws-closed` | kernel → SW | `id`, `code`, `reason` | closed by the server, or failed to open (`1006`, reason = error message, or `Unexpected server response: <status>` when the server answered the upgrade with an ordinary response) |
 | `net` | SW → kernel | `id`, `url` | may the preview fetch this outside URL? (initiator `preview`, source `preview`) |
-| `net-result` | kernel → SW | `id`, `allow: boolean` | the decision |
+| `net-result` | kernel → SW | `id`, `allow: boolean`, `cache: boolean`, `timeout: boolean` | the decision; `cache` is true when it follows from the policy or a "for this session" answer (the SW may reuse it), `timeout` when the prompt was not answered |
+| `net-flush` | kernel → SW | — (no `id`) | the policy or the session decisions changed: drop cached allows |
+
+When the service worker replaces or loses the channel (the port's `close` event), the kernel aborts the
+requests and WebSockets still open on it.
 
 The kernel can't do anything else on this channel; file system, process and policy methods exist only on
 the host channel.
@@ -242,7 +262,10 @@ the host channel.
 ## Runtime service worker
 
 `dist/runtime/sw.js` handles same-origin requests under its scope. Paths below are relative to the
-runtime directory (the scope is stripped before matching).
+runtime directory (the scope is stripped before matching), or to a kernel's prefix `/__ov/k/<kid>/` under
+it: a request under a prefix goes to the kernel `<kid>`. A request to `/__ov/…` without a prefix (the
+legacy runtime's root URLs) goes to the kernel named by its referrer — a file under a kernel's prefix or
+a module that kernel served — else to the kernel that connected last.
 
 ### Endpoints
 
@@ -251,8 +274,10 @@ runtime directory (the scope is stripped before matching).
 | `/__ov/esm/<absolute VFS path>[?query]` | any | an ES module made from a VFS file by the kernel ([below](#module-endpoints)). Used by the legacy runtime |
 | `/__ov/builtin/<name>[.mjs]` | any | an ES module facade over a builtin (`node:fs` etc.). Used by the legacy runtime |
 | `/__ov/mw/<pid>/<id>.mjs` | any | a module source the ported runtime registered with the `esmRegister` syscall |
+| `/__ov/esm-error?…` | any | a module that throws the error of an import the kernel couldn't resolve (answered by the kernel) |
 | `/__ov/net?url=<encoded URL>` | any | the network gate ([below](#__ovnet)) |
 | `/__ov/ping` | any | `pong` (`text/plain`) |
+| `/__ov/k/<kid>/<file>` (not an endpoint) | `GET`, `HEAD` | `<file>` of the runtime directory, as a new response with the requested URL and the isolation headers (so `kernel.js`, `process.js`, chunks and `compat/` work under the prefix) |
 | anything else | `GET` | fetched from the server, with the isolation headers added if missing |
 | anything else | other | not handled (goes to the server) |
 
@@ -281,9 +306,10 @@ cleared above 4000 entries). Registered `/__ov/mw/` sources are dropped when the
 ### `/__ov/net`
 
 The only way from the runtime to the network. Callers: the ported runtime's `fetch` and the legacy
-runtime's network layer (from process workers), the kernel's npm client (`initiator` `npm`) and the
+runtime's network layer (from process workers), the kernel's npm client and `curl`/`wget`, and the
 kernel's outbound TCP bridge, which turns HTTP/1.1 written to a socket into these requests
-(`src/kernel/outbound.ts`).
+(`src/kernel/outbound.ts`). The kernel's own clients send loopback URLs to virtual ports instead
+([Network policy](network-policy.md#localhost-and-virtual-ports)).
 
 Request:
 
@@ -293,14 +319,16 @@ Request:
 | Method | `GET` or `HEAD` as is; everything else is sent as `POST` with the body |
 | `x-ov-method` | the real method (default: the request's method) |
 | `x-ov-h` | `encodeURIComponent(JSON.stringify([[name, value], …]))`: the headers to send |
-| `x-ov-by` | `encodeURIComponent(initiator)` for the permission prompt (default `process`) |
+| `x-ov-by` | `encodeURIComponent(initiator)`: processes send `<pid> <command line>`; the kernel takes only the pid from it and names the process from its process table ([Network policy](network-policy.md#permission-requests)) |
+| `x-ov-k` | the kernel's secret token, sent only by the kernel's own clients (`npm` and the other package managers, `curl`, `wget`); with it the `x-ov-by` label is shown as is |
 | `x-ov-redirect` | `error` makes a redirect fail; anything else (or none) follows redirects |
 
-The service worker asks the kernel (`{ k: 'net', url, initiator }`), drops headers the browser controls
+The service worker asks the kernel (`{ k: 'net', url, initiator, token }`), drops headers the browser controls
 (`host`, `connection`, `content-length`, `keep-alive`, `transfer-encoding`, `upgrade`, `te`, `trailer`,
 `expect`, `cookie`, `cookie2`, `origin`, `referer`, `accept-encoding`, `access-control-request-headers`,
 `access-control-request-method`, `date`, `dnt`, `via`, `proxy-connection`, `sec-*`, `proxy-*`) and fetches
-the target with `credentials: 'omit'`, `mode: 'cors'`, `cache: 'no-store'`.
+the target with `credentials: 'omit'`, `mode: 'cors'`, `cache: 'no-store'`. If the response was
+redirected, it asks the kernel again about the final URL and answers a refusal as below.
 
 Response when the request was made (always status `200`):
 
@@ -318,25 +346,27 @@ The body is streamed; it is empty for `204`, `205`, `304` and `HEAD`. Failures:
 
 | Status | `x-ov-error` | `x-ov-message` (URI-encoded, also the plain-text body) |
 |---|---|---|
-| `403` | `denied` | `OpenVessel: network access to <host> was denied by the network policy` |
+| `403` | `denied` | `OpenVessel: network access to <host> was denied by the network policy` (for the first or the final URL) |
+| `504` | `timeout` | `OpenVessel: network access to <host> was not answered in time` (the permission request timed out) |
 | `502` | `network` | `request to <host> failed: <message>. The server may not allow cross-origin requests (CORS) from the browser.` |
 | `502` | `network` | the kernel channel couldn't be obtained (`OpenVessel kernel is not connected`) |
 
 The ported runtime's `fetch` turns these into `TypeError('fetch failed')` with a `cause` whose `code` is
-`EACCES` (`denied`), `ETIMEDOUT` (`timeout`) or `ECONNREFUSED` (anything else); the outbound TCP bridge
-writes an HTTP `403` or `502` back to the socket.
+`EACCES` (`denied`), `ETIMEDOUT` (`timeout`) or `ECONNREFUSED` (anything else), and so do the legacy
+runtime and the kernel's npm client; the outbound TCP bridge writes an HTTP `403` or `502` back to the
+socket.
 
 ### Service worker ↔ runtime frame and kernel
 
 | Message | Direction | Fields |
 |---|---|---|
-| `kernel-port` | `runtime.html` → SW | `port: MessagePort`. Accepted only from a window client whose URL path ends in `/runtime.html` |
+| `kernel-port` | `runtime.html` → SW | `port: MessagePort`, `kid` (8–32 hex digits). Accepted only from a window client whose URL path ends in `/runtime.html`. A new channel for the same `kid` replaces the old one, which is closed once its pending answers are in |
 | `ping` | `runtime.html` → SW | ignored (sent so `clients.claim()` triggers `controllerchange`) |
-| `need-kernel-port` | SW → every window client whose path ends in `/runtime.html` | the SW lost its channel; `runtime.js` answers by sending new `sw-port` / `kernel-port` messages |
+| `need-kernel-port` | SW → every window client whose path ends in `/runtime.html` | `kid` (or `null` for any kernel): the SW has no channel to that kernel; the frame with that `kid` answers by sending new `sw-port` / `kernel-port` messages |
 | `{ id, k: 'esm', pathname, search }` | SW → kernel | load a module |
 | `{ id, status, body, type }` | kernel → SW | the module |
-| `{ id, k: 'net', url, initiator }` | SW → kernel | policy decision for `url` (`source` is `runtime`) |
-| `{ id, allow }` | kernel → SW | the decision |
+| `{ id, k: 'net', url, initiator, token }` | SW → kernel | policy decision for `url` (`source` is `runtime`); `initiator` and `token` from the `x-ov-by` and `x-ov-k` headers |
+| `{ id, allow, timeout }` | kernel → SW | the decision; `timeout` when the permission request was not answered |
 
 The service worker waits up to 15 s for a channel; there is no timeout on the kernel's answers.
 

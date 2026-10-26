@@ -90,7 +90,7 @@ async function curl(ctx: ProgramContext): Promise<number> {
   const abort = new AbortController();
   const timer = maxTime > 0 ? setTimeout(() => abort.abort(), maxTime * 1000) : undefined;
   try {
-    const res = await getNetFetch()(url, { method: verb, headers, body, signal: abort.signal });
+    const res = await getNetFetch()(url, { method: verb, headers, body, signal: abort.signal, initiator: `${ctx.proc.pid} ${ctx.argv.slice(0, 3).join(' ')}`.slice(0, 200) });
     // through the proxy, the origin's status line and headers travel in x-ov-* headers
     const rh = res.headers.get('x-ov-rh');
     const resHeaders: [string, string][] = rh ? JSON.parse(decodeURIComponent(rh)) : [...res.headers];

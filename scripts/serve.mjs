@@ -44,7 +44,7 @@ const sites = [
       ].join('; '),
     },
   },
-  { port: PREVIEW, dir: 'preview', headers: { ...isolation, 'cross-origin-resource-policy': 'cross-origin', 'service-worker-allowed': '/' } },
+  { port: PREVIEW, dir: 'preview', headers: { ...isolation, 'cross-origin-resource-policy': 'cross-origin' } },
 ];
 
 for (const site of sites) {
