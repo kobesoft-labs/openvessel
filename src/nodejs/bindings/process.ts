@@ -584,7 +584,8 @@ export function createOs() {
       return 0;
     },
     getAvailableParallelism: () => hardwareConcurrency,
-    getOSInformation: () => ['Linux', '6.8.0-openvessel', '#1 SMP OpenVessel', 'x86_64'],
+    // uname(2) as node_os.cc returns it: [sysname, version, release, machine]
+    getOSInformation: () => ['Linux', '#1 SMP OpenVessel', '6.8.0-openvessel', 'x86_64'],
     isBigEndian: false,
   });
 }

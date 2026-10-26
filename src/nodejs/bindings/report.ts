@@ -31,10 +31,31 @@ function header(trigger: string) {
     osRelease: '6.8.0-openvessel',
     osVersion: '#1 SMP OpenVessel',
     osMachine: 'x86_64',
-    cpus: [],
-    networkInterfaces: [],
+    cpus: cpus(),
+    networkInterfaces: networkInterfaces(),
     host: S.init.hostname || 'openvessel',
   };
+}
+
+// the same values os.cpus() and os.networkInterfaces() report, in node_report.cc's layout
+function cpus() {
+  const flat = S.internalBinding('os').getCPUs() as (string | number)[];
+  const out: object[] = [];
+  for (let i = 0; i < flat.length; i += 7) {
+    const [model, speed, user, nice, sys, idle, irq] = flat.slice(i, i + 7);
+    out.push({ model, speed, user, nice, sys, idle, irq });
+  }
+  return out;
+}
+
+function networkInterfaces() {
+  const flat = S.internalBinding('os').getInterfaceAddresses() as (string | boolean | number)[];
+  const out: object[] = [];
+  for (let i = 0; i < flat.length; i += 7) {
+    const [name, address, netmask, family, mac, internal, scopeid] = flat.slice(i, i + 7);
+    out.push(family === 'IPv6' ? { name, internal, mac, address, netmask, family, scopeid } : { name, internal, mac, address, netmask, family });
+  }
+  return out;
 }
 
 export function createReport() {
