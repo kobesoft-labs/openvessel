@@ -425,7 +425,7 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         return null;
       }
       case 'utimes':
-        vfs.utimes(abs(proc, a.p), a.atime, a.mtime);
+        vfs.utimes(abs(proc, a.p), a.atime, a.mtime, !a.l);
         return null;
       case 'futimes': {
         const f = proc.getFd(a.fd);
