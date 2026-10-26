@@ -23,8 +23,17 @@ navigator.serviceWorker.addEventListener('message', (ev) => {
   if (ev.data?.t === 'need-kernel-port') window.parent.postMessage({ t: 'openvessel-preview-need-port' }, '*');
 });
 
+// only the host page (another origin) hands over channels, not a preview page that opened the relay in
+// a frame of its own
+let fromHost = window.parent !== window;
+try {
+  if (window.parent.location.origin === location.origin) fromHost = false;
+} catch {
+  // another origin: the host
+}
+
 window.addEventListener('message', async (ev) => {
-  if (ev.source !== window.parent) return;
+  if (ev.source !== window.parent || !fromHost) return;
   const d = ev.data;
   if (d?.t === 'openvessel-preview-connect' && d.port instanceof MessagePort) {
     kernelPort = d.port;
