@@ -174,7 +174,7 @@ vessel.mount({ node: 'port' }, { path: '/etc/openvessel' });
 | `either --watch or --check can be used, not both`（`--eval`・`--interactive`・`--test-force-exit` も）、`--watch requires specifying a file` | `EnvironmentOptions::CheckOptions` |
 | `--secure-heap must be a power of 2`／`--secure-heap-min must be a power of 2` | `PerProcessOptions::CheckOptions` |
 
-値の合わない V8 のフラグには、Node のメッセージの前に V8 のメッセージが出ます。
+値の合わない V8 のフラグには、Node のメッセージの前に V8 のメッセージが出ます。V8 はそこで止まるので、Node と同じに、そのフラグ、その後ろの V8 のフラグ、Node が自分で足す V8 のフラグ（`--harmony-import-attributes`・`--no-harmony-import-assertions`・`--experimental-wasm-imported-strings`・`--experimental-wasm-memory64`・`--experimental-wasm-exnref`）が全部 bad option になります。
 
 ```text
 $ node --bogus
@@ -185,6 +185,11 @@ $ node --stack-trace-limit 5 -e 1
 Error: illegal value for flag --stack-trace-limit of type int
 Try --help for options
 node: bad option: --stack-trace-limit
+node: bad option: --harmony-import-attributes
+node: bad option: --no-harmony-import-assertions
+node: bad option: --experimental-wasm-imported-strings
+node: bad option: --experimental-wasm-memory64
+node: bad option: --experimental-wasm-exnref
 ```
 
 ### オプションの効き方
@@ -198,7 +203,7 @@ node: bad option: --stack-trace-limit
 | `-e`・`-p`・`--check`・`--test`・`--interactive`・`--help`・`--prof-process`・`--watch` | メインのスクリプトを選ぶ（上の表）。`--prof-process` は lib の V8 のティックの処理を動かす（ログが無ければ `Please provide a valid isolate file as the final argument.` で終了コード 1）。`--watch` は Node の watch モードで、読み込んだファイル（または `--watch-path`）が変わると子プロセスでスクリプトを動かし直す |
 | `--env-file`・`--env-file-if-exists` | [--env-file](#--env-file) を参照 |
 | `--run` | [--run](#--run) を参照 |
-| `--stack-trace-limit` | `Error.stackTraceLimit`（worker のスレッドでも） |
+| `--stack-trace-limit` | `Error.stackTraceLimit`（受け継ぐ worker のスレッドでも） |
 | `--title` | `process.title` の初めの値 |
 | `--trace-exit` | `process.reallyExit` が `(node:<pid>) WARNING: Exited the environment with code <n>` とスタックを出す |
 | `--pending-deprecation` | `process.env` に文字列でない値を入れたときの DEP0104 の警告、GCM の短い認証タグの非推奨の警告 |
@@ -229,7 +234,7 @@ outer
 
 ### worker のスレッド
 
-worker のスレッドは、自分の `execArgv`（無ければ親のもの）と、自分の環境の `NODE_OPTIONS` を解析します。`new Worker()` は `Worker::New` と同じように確かめます。プロセス全体のオプション（`--title`・`--openssl-config`・`--secure-heap`・`--report-*`・`--use-openssl-ca`・`--v8-options`・`-h`・`-v` など）や正しくないオプションは `ERR_WORKER_INVALID_EXEC_ARGV` になります。`env.NODE_OPTIONS` が正しくないときも、`invalid NODE_OPTIONS env variable` を添えた `ERR_WORKER_INVALID_EXEC_ARGV` になります。
+worker のスレッドは、自分の `execArgv`（無ければ親のもの）と、自分の環境の `NODE_OPTIONS` を解析します。`new Worker()` は `Worker::New` と同じように確かめます。プロセス全体のオプション（`--title`・`--openssl-config`・`--secure-heap`・`--report-*`・`--use-openssl-ca`・`--v8-options`・`-h`・`-v` など）、V8 に回るオプション（`--expose-gc`・`--stack-trace-limit`・`--use-strict` など）、正しくないオプションは `ERR_WORKER_INVALID_EXEC_ARGV` になります。`env.NODE_OPTIONS` が正しくないときも、`invalid NODE_OPTIONS env variable` を添えた `ERR_WORKER_INVALID_EXEC_ARGV` になります。
 
 ## 環境とグローバル
 

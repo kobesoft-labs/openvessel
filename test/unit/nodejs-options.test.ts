@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCommandLine } from '../../src/nodejs/options.ts';
+import { parseCommandLine, workerOptionErrors } from '../../src/nodejs/options.ts';
 
 // The expectations are what Node.js v22.23.4 does with these command lines.
 
@@ -19,13 +19,23 @@ test('V8 flags are checked against V8 list', () => {
   assert.equal(parseCommandLine(['node', '--no-expose-gc', 'a.js']).error, undefined);
   assert.equal(parseCommandLine(['node', '--no-max-http-header-size']).error, '--no-max-http-header-size is an invalid negation because it is not a boolean option');
   const bool = parseCommandLine(['node', '--expose-gc=1']);
-  assert.equal(bool.error, 'bad option: --expose-gc=1');
+  assert.equal(bool.error!.split('\n')[0], 'bad option: --expose-gc=1');
   assert.equal(bool.v8Error, 'Error: illegal value for flag --expose-gc=1 of type bool\nTo set or unset a boolean flag, use --flag or --no-flag.\nTry --help for options\n');
   // a value has to come after '=' (Node passes the flag to V8 on its own)
   const int = parseCommandLine(['node', '--stack-trace-limit', '5']);
-  assert.equal(int.error, 'bad option: --stack-trace-limit');
+  assert.equal(int.error!.split('\n')[0], 'bad option: --stack-trace-limit');
   assert.equal(int.v8Error, 'Error: illegal value for flag --stack-trace-limit of type int\nTry --help for options\n');
-  assert.equal(parseCommandLine(['node', '--stack-size=abc']).error, 'bad option: --stack-size=abc');
+  // V8 stops at a bad value: that flag, the ones after it and Node's own V8 flags are left over
+  const NODE_V8 = ['--harmony-import-attributes', '--no-harmony-import-assertions', '--experimental-wasm-imported-strings', '--experimental-wasm-memory64', '--experimental-wasm-exnref'];
+  assert.equal(parseCommandLine(['node', '--foo', '--stack-size=x', '--bar']).error, ['--foo', '--stack-size=x', '--bar', ...NODE_V8].map((a) => `bad option: ${a}`).join('\n'));
+  assert.equal(parseCommandLine(['node', '--foo', '--bar']).error, 'bad option: --foo\nbad option: --bar');
+});
+
+test('worker execArgv takes no V8 flags', () => {
+  assert.deepEqual(workerOptionErrors(['--expose-gc'], false), ['--expose-gc']);
+  assert.deepEqual(workerOptionErrors(['--stack-trace-limit=3'], false), ['--stack-trace-limit=3']);
+  assert.equal(workerOptionErrors('--expose-gc --stack-trace-limit=4', true), null);
+  assert.equal(workerOptionErrors(['--no-warnings'], false), null);
 });
 
 test('NODE_OPTIONS takes only the options in Node table', () => {

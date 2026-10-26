@@ -234,7 +234,10 @@ Errors (each printed as `node: <message>`, exit code 9):
 | `either --watch or --check can be used, not both` (also `--eval`, `--interactive`, `--test-force-exit`), `--watch requires specifying a file` | `EnvironmentOptions::CheckOptions` |
 | `--secure-heap must be a power of 2` / `--secure-heap-min must be a power of 2` | `PerProcessOptions::CheckOptions` |
 
-A V8 flag with a wrong value gets V8's message before Node's:
+A V8 flag with a wrong value gets V8's message before Node's. V8 stops there, so that flag, the V8
+flags after it and the V8 flags Node adds itself (`--harmony-import-attributes`,
+`--no-harmony-import-assertions`, `--experimental-wasm-imported-strings`, `--experimental-wasm-memory64`,
+`--experimental-wasm-exnref`) are all reported as bad options, as in Node:
 
 ```text
 $ node --bogus
@@ -245,6 +248,11 @@ $ node --stack-trace-limit 5 -e 1
 Error: illegal value for flag --stack-trace-limit of type int
 Try --help for options
 node: bad option: --stack-trace-limit
+node: bad option: --harmony-import-attributes
+node: bad option: --no-harmony-import-assertions
+node: bad option: --experimental-wasm-imported-strings
+node: bad option: --experimental-wasm-memory64
+node: bad option: --experimental-wasm-exnref
 ```
 
 ### What the options do
@@ -261,7 +269,7 @@ The parsed values are what `internalBinding('options').getCLIOptionsValues()` re
 | `-e`, `-p`, `--check`, `--test`, `--interactive`, `--help`, `--prof-process`, `--watch` | choose the main script (table above). `--prof-process` runs V8's tick processor from lib (without a log: `Please provide a valid isolate file as the final argument.`, exit code 1); `--watch` runs Node's watch mode, which restarts the script in a child process when a file it loaded (or a `--watch-path`) changes |
 | `--env-file`, `--env-file-if-exists` | see [--env-file](#--env-file) |
 | `--run` | see [--run](#--run) |
-| `--stack-trace-limit` | `Error.stackTraceLimit` (also in worker threads) |
+| `--stack-trace-limit` | `Error.stackTraceLimit` (also in worker threads, which inherit it) |
 | `--title` | initial `process.title` |
 | `--trace-exit` | `process.reallyExit` prints `(node:<pid>) WARNING: Exited the environment with code <n>` and the stack |
 | `--pending-deprecation` | DEP0104 warning for non-string `process.env` values; the GCM short-auth-tag deprecation |
@@ -312,7 +320,8 @@ exit code 1: `Can't find package.json for directory <dir>`, `Can't parse <path>`
 A worker thread parses its own `execArgv` (or the parent's when none is given) together with the
 `NODE_OPTIONS` of its environment. `new Worker()` checks them like `Worker::New`: a per-process option
 (`--title`, `--openssl-config`, `--secure-heap`, `--report-*`, `--use-openssl-ca`, `--v8-options`, `-h`,
-`-v`, …) or an invalid option fails with `ERR_WORKER_INVALID_EXEC_ARGV`; a bad `env.NODE_OPTIONS` fails with
+`-v`, …), an option that goes to V8 (`--expose-gc`, `--stack-trace-limit`, `--use-strict`, …) or an
+invalid option fails with `ERR_WORKER_INVALID_EXEC_ARGV`; a bad `env.NODE_OPTIONS` fails with
 `ERR_WORKER_INVALID_EXEC_ARGV` as well (reported through `invalidNodeOptions`).
 
 ## Environment and globals

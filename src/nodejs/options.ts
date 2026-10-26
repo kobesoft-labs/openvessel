@@ -84,8 +84,11 @@ function expand(arg: string, next: string | undefined): { names: string[]; value
   return { names: [name], value, consumedNext: false };
 }
 
-/** Applies one option. Returns how many following args it consumed, or an error. */
-function apply(values: Record<string, unknown>, arg: string, next: string | undefined, fromEnv: boolean): number | string | { v8: string; error: string } {
+/**
+ * Applies one option. Returns how many following args it consumed, or an error. What goes to V8
+ * (options Node doesn't know, and Node's own V8 options) is added to v8Args, as written.
+ */
+function apply(values: Record<string, unknown>, arg: string, next: string | undefined, fromEnv: boolean, v8Args: string[]): number | string {
   const { names, value } = expand(arg, next);
   let consumed = 0;
   for (let i = 0; i < names.length; i++) {
@@ -100,21 +103,17 @@ function apply(values: Record<string, unknown>, arg: string, next: string | unde
       info = INFO.get(name);
     }
     if (!info) {
-      // Node hands what it doesn't know to V8, which takes its own flags (they have no effect
-      // here) and rejects the rest; NODE_OPTIONS takes only the options in Node's table
+      // Node hands what it doesn't know to V8 (see v8Pass); NODE_OPTIONS takes only the options in
+      // Node's table
       if (fromEnv) return `${name} is not allowed in NODE_OPTIONS`;
-      const v8 = v8Check(arg, name, value);
-      if (v8 === null) return consumed;
-      return v8 ? { v8, error: `bad option: ${arg}` } : `bad option: ${arg}`;
+      v8Args.push(arg);
+      return consumed;
     }
     if (fromEnv && info.envVarSettings === proc.envSettings.kDisallowedInEnvvar) return `${name} is not allowed in NODE_OPTIONS`;
     // only a boolean takes --no- (V8 checks its own flags)
     if (negated && info.type !== T.kBoolean && info.type !== T.kV8Option) return `--no-${name.slice(2)} is an invalid negation because it is not a boolean option`;
-    // options V8 reads too: V8 checks the value
-    if (info.type === T.kV8Option || name === '--stack-trace-limit') {
-      const v8 = v8Check(arg, negated ? '--no-' + name.slice(2) : name, isLastValue(names, i, value));
-      if (v8) return { v8, error: `bad option: ${arg}` };
-    }
+    // options V8 reads too (V8 checks the value)
+    if (info.type === T.kV8Option || name === '--stack-trace-limit') v8Args.push(arg);
     const isLast = i === names.length - 1;
     switch (info.type) {
       case T.kNoOp:
@@ -142,7 +141,34 @@ function apply(values: Record<string, unknown>, arg: string, next: string | unde
   return consumed;
 }
 
-const isLastValue = (names: string[], i: number, value: string | undefined) => (i === names.length - 1 ? value : undefined);
+/**
+ * The end of ProcessGlobalArgsInternal: Node adds its own V8 flags and lets
+ * V8::SetFlagsFromCommandLine take what it knows. An unknown flag stays (a bad option); a flag with
+ * a value that doesn't suit it makes V8 print why and stop, so it and everything after it stay,
+ * Node's own flags included.
+ */
+function v8Pass(v8Args: string[]): { error?: string; v8Error?: string } {
+  const all = [...v8Args];
+  if (!v8Args.includes('--no-harmony-import-attributes')) all.push('--harmony-import-attributes');
+  all.push('--no-harmony-import-assertions', '--experimental-wasm-imported-strings', '--experimental-wasm-memory64', '--experimental-wasm-exnref');
+  const bad: string[] = [];
+  let v8Error: string | undefined;
+  for (let i = 0; i < all.length; i++) {
+    const a = all[i];
+    const eq = a.indexOf('=');
+    const name = '--' + (eq > 0 ? a.slice(0, eq) : a).replace(/^--?/, '').replaceAll('_', '-');
+    const r = v8Check(a, name, eq > 0 ? a.slice(eq + 1) : undefined);
+    if (r === null) continue;
+    if (r === undefined) {
+      bad.push(a);
+      continue;
+    }
+    v8Error = r;
+    bad.push(...all.slice(i));
+    break;
+  }
+  return bad.length ? { error: bad.map((a) => `bad option: ${a}`).join('\n'), v8Error } : {};
+}
 
 function splitNodeOptions(s: string): string[] {
   const out: string[] = [];
@@ -182,11 +208,11 @@ export function parseCommandLine(argv: string[], nodeOptions = ''): ParsedComman
   const execArgv: string[] = [];
   const rest: string[] = [argv[0] ?? 'node'];
   // NODE_OPTIONS first, then the command line (which wins)
+  const v8Args: string[] = [];
   const envArgs = splitNodeOptions(nodeOptions);
   for (let i = 0; i < envArgs.length; i++) {
-    const r = apply(values, envArgs[i], envArgs[i + 1], true);
+    const r = apply(values, envArgs[i], envArgs[i + 1], true, v8Args);
     if (typeof r === 'string') return { execArgv, argv: rest, values, error: r };
-    if (typeof r === 'object') return { execArgv, argv: rest, values, error: r.error, v8Error: r.v8 };
     i += r;
   }
   let i = 1;
@@ -198,9 +224,8 @@ export function parseCommandLine(argv: string[], nodeOptions = ''): ParsedComman
     }
     if (a === '-' || !a.startsWith('-')) break;
     const next = argv[i + 1];
-    const r = apply(values, a, takesValue(a) ? next : undefined, false);
+    const r = apply(values, a, takesValue(a) ? next : undefined, false, v8Args);
     if (typeof r === 'string') return { execArgv, argv: rest, values, error: r };
-    if (typeof r === 'object') return { execArgv, argv: rest, values, error: r.error, v8Error: r.v8 };
     execArgv.push(a);
     if (r) execArgv.push(argv[i + 1]);
     i += r;
@@ -211,6 +236,8 @@ export function parseCommandLine(argv: string[], nodeOptions = ''): ParsedComman
     }
   }
   rest.push(...argv.slice(i));
+  const v8 = v8Pass(v8Args);
+  if (v8.error) return { execArgv, argv: rest, values, error: v8.error, v8Error: v8.v8Error };
   const errors = checkOptions(values, rest);
   if (errors.length) return { execArgv, argv: rest, values, error: errors.join('\n') };
   return { execArgv, argv: rest, values };
@@ -268,9 +295,11 @@ export function workerOptionErrors(args: string[] | string, fromEnv: boolean): s
     const a = list[i];
     if (!a.startsWith('-') || a === '-' || a === '--') continue;
     if (PER_PROCESS.has(a.split('=')[0])) return [a];
-    const r = apply(values, a, takesValue(a) ? list[i + 1] : undefined, fromEnv);
+    // a thread's execArgv can't set V8 flags: an option that goes to V8 is invalid there too
+    const v8Args: string[] = [];
+    const r = apply(values, a, takesValue(a) ? list[i + 1] : undefined, fromEnv, v8Args);
     if (typeof r === 'string') return [r.startsWith('bad option: ') ? a : r];
-    if (typeof r === 'object') return [a];
+    if (v8Args.length && !fromEnv) return [a];
     i += r;
   }
   return null;
