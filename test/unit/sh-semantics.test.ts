@@ -189,3 +189,9 @@ echo $(( 2 ** -1 ))`);
   assert.equal(r.stdout, '-9223372036854775808 -2446744073709551616 -9223372036854775808\n-9223372036854775808 1 1 -1 4611686018427387904 0\n255 16 8 63 2 0 6\n');
   assert.match(r.stderr, /exponent less than 0/);
 });
+
+test('"$@" with no arguments is no word, "$@x" is x', async () => {
+  const k = makeKernel();
+  const r = await run(k, 'f() { printf "[%s]" "$@"; echo; printf "[%s]" "$@x"; echo; set -- "a b"; printf "[%s]" "$@"; echo; }; f');
+  assert.equal(r.stdout, '[]\n[x]\n[a b]\n');
+});

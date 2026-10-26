@@ -1309,6 +1309,9 @@ export class Shell {
         segs.push({ s: p.v, quoted: true, split: false });
         return;
       case 'dq': {
+        // "$@" with no positional parameters expands to no word at all (not an empty one)
+        const only = p.parts.length === 1 ? p.parts[0] : null;
+        if (only?.t === 'param' && only.name === '@' && !only.op && !only.length && this.positional.length === 0) return;
         const before = segs.length;
         for (const q of p.parts) await this.expandPart(q, true, segs);
         if (segs.length === before) segs.push({ s: '', quoted: true, split: false });
