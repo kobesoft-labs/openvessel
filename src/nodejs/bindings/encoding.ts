@@ -96,6 +96,8 @@ export function punycodeDecode(input: string): number[] | null {
     out.splice(i, 0, n);
     i++;
   }
+  // ada 4 rejects a double-encoded ACE label (one decoding to "xn--…"), whatwg/url#803.
+  if (out.length >= 4 && out[0] === 0x78 && out[1] === 0x6e && out[2] === 0x2d && out[3] === 0x2d) return null;
   return out;
 }
 
@@ -108,8 +110,29 @@ function fromCodePoints(cps: number[]): string {
   return s;
 }
 
-/** ada::idna::to_unicode: decodes "xn--" labels, leaves everything else as is. */
+// ada::idna::max_domain_input_bytes: longer inputs are not processed at all.
+const MAX_DOMAIN_INPUT_BYTES = 16384;
+const utf8Length = (s: string) => (isAscii(s) ? s.length : utf8Enc.encode(s).length);
+
+/**
+ * The label an "xn--" label decodes to, when ada 4 accepts it (UTS #46 re-validation): it must
+ * not be pure ASCII (an ACE form of an ASCII label, including the empty one) and must be a valid
+ * label already in mapped and NFC form. null otherwise.
+ */
+function decodeAceLabel(label: string): string | null {
+  const decoded = punycodeDecode(label.slice(4));
+  if (decoded === null || decoded.every((c) => c < 0x80)) return null;
+  const u = fromCodePoints(decoded);
+  return validDecodedLabel(u) ? u : null;
+}
+
+/**
+ * ada::idna::to_unicode: decodes "xn--" labels, leaves everything else as is. Since ada 4 a label
+ * whose decoding fails UTS #46 validation (ASCII-only, unmapped like an uppercase letter, invalid)
+ * is kept in its original form.
+ */
 export function punycodeToUnicode(input: string): string {
+  if (utf8Length(input) > MAX_DOMAIN_INPUT_BYTES) return input;
   let out = '';
   let start = 0;
   while (start < input.length) {
@@ -117,9 +140,8 @@ export function punycodeToUnicode(input: string): string {
     const last = dot === -1;
     if (last) dot = input.length;
     const label = input.slice(start, dot);
-    let decoded: number[] | null = null;
-    if (label.startsWith('xn--') && isAscii(label)) decoded = punycodeDecode(label.slice(4));
-    out += decoded ? fromCodePoints(decoded) : label;
+    const decoded = label.startsWith('xn--') && isAscii(label) ? decodeAceLabel(label) : null;
+    out += decoded ?? label;
     if (!last) out += '.';
     start = dot + 1;
   }
@@ -155,11 +177,12 @@ const hasLtrLetter = (u: string) => Array.from(u).some((ch) => /\p{L}/u.test(ch)
 
 /**
  * UTS #46 validity of a label decoded from "xn--", as ada checks it: already in mapped form
- * ("㉓" maps to "23", so it isn't valid as is), no controls, U+FFFD or joiners, and an RTL label
- * holds no left-to-right letters (the Bidi rule).
+ * ("㉓" maps to "23", so it isn't valid as is), no leading combining mark, no controls, U+FFFD
+ * or joiners, and an RTL label holds no left-to-right letters (the Bidi rule).
  */
 function validDecodedLabel(u: string): boolean {
   if (u.normalize('NFKC').toLowerCase() !== u) return false;
+  if (/^\p{M}/u.test(u)) return false;
   if (/[\p{Cc}\ufffd\u200c\u200d]/u.test(u)) return false;
   if (RTL.test(u) && hasLtrLetter(u)) return false;
   return true;
@@ -167,23 +190,23 @@ function validDecodedLabel(u: string): boolean {
 
 /**
  * ada::idna::to_ascii: UTS #46 processing (non-transitional, no STD3 rules, no DNS length check);
- * "" on error. ASCII labels pass through lowercased; "xn--" labels must decode to a valid label.
+ * "" on error. Since ada 4 an all-ASCII input is only lowercased, never validated (the URL
+ * Standard's domain to ASCII with beStrict = false), so "xn--" or "xn--zz" come back as they are.
+ * In a non-ASCII input, ASCII labels pass through lowercased and "xn--" labels must decode to a
+ * valid non-ASCII label.
  */
 export function toASCII(input: string): string {
   input = input.toWellFormed?.() ?? input;
-  const ascii = isAscii(input);
-  const labels = (ascii ? input.toLowerCase() : input).split(ascii ? '.' : LABEL_SEPARATORS);
+  if (utf8Length(input) > MAX_DOMAIN_INPUT_BYTES) return '';
+  if (isAscii(input)) return input.toLowerCase();
   const out: string[] = [];
-  for (let label of labels) {
+  for (let label of input.split(LABEL_SEPARATORS)) {
     if (label !== '' && isAscii(label)) {
       label = label.toLowerCase();
-      if (label.startsWith('xn--')) {
-        const decoded = punycodeDecode(label.slice(4));
-        if (!decoded?.length) return '';
-        if (!validDecodedLabel(fromCodePoints(decoded))) return '';
-      }
-      if (label.startsWith('xn--') && labelViaURL(label) !== label) return '';
+      if (label.startsWith('xn--') && decodeAceLabel(label) === null) return '';
     } else if (label !== '') {
+      // ada checks the Bidi rule on every label; platform parsers (older ada among them) may not.
+      if (RTL.test(label) && hasLtrLetter(label)) return '';
       const mapped = labelViaURL(label);
       if (mapped === null) return '';
       label = mapped;
