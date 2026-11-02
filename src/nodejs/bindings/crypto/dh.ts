@@ -122,9 +122,10 @@ export class DiffieHellman extends DHBase {
       if (!isAnyBufferSource(b)) throw err('ERR_INVALID_ARG_TYPE', 'generator must be a buffer');
       g = bytesToBigInt(view(b));
       if (g < 2n) throw dhErr.badGenerator();
+      // Node 24+ (ncrypto) also refuses a generator buffer outside the group (a number one is
+      // left to DH_check, which reports it in verifyError)
+      if (g >= p) throw dhErr.badGenerator();
     }
-    // Node 24+ (ncrypto) also refuses a generator outside the group
-    if (g >= p) throw dhErr.badGenerator();
     super(p, g);
   }
 }

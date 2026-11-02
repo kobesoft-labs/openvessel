@@ -502,6 +502,8 @@ class ChaChaPolyMode implements AeadEngine {
     this.ctLen += data.length;
     return out;
   }
+  /** set when no authTagLength was given */
+  lenient = false;
   expectTag(tag: Uint8Array) {
     this.expected = tag;
   }
@@ -517,8 +519,8 @@ class ChaChaPolyMode implements AeadEngine {
     this.poly.update(lens);
     const t = this.poly.digest();
     if (this.enc) this.tagValue = t;
-    // OpenSSL 3.5 only verifies a tag that was set (Node 26 records a tagless decrypt as succeeding)
-    else if (this.expected && !equalBytes(t.subarray(0, this.expected.length), this.expected)) throw FAIL;
+    // without an authTagLength, OpenSSL 3.5 verifies only a tag that was set (a tagless decrypt succeeds)
+    else if (this.expected ? !equalBytes(t.subarray(0, this.expected.length), this.expected) : !this.lenient) throw FAIL;
     return new Uint8Array(0);
   }
   tag(len: number) {
@@ -1055,6 +1057,8 @@ export class CipherBase {
   #ccmUpdated = false;
   /** a second CCM update() failed: the context is unusable, final() fails without a tag */
   #ccmBroken = false;
+  /** ChaCha20-Poly1305 without an explicit authTagLength */
+  #lenientTag = false;
   #maxMessageSize = INT_MAX;
 
   // new CipherBase(isEncrypt, cipher, key, iv | null, authTagLength[, ctsMode, xtsStandard]): Node 24+
@@ -1069,6 +1073,7 @@ export class CipherBase {
     if (key.length !== info.keyLength) throw err('ERR_CRYPTO_INVALID_KEYLEN');
     this.#info = info;
     this.#ctx = makeEngine(info, key, iv, this.#encrypt, this.#authTagLen, cts);
+    if (this.#lenientTag) (this.#ctx as ChaChaPolyMode).lenient = true;
   }
 
   #initAuthenticated(cipherType: string, info: CipherInfo, ivLen: number, authTagLen: number): boolean {
@@ -1082,7 +1087,10 @@ export class CipherBase {
       return true;
     }
     if (authTagLen === -1) {
-      if (isChaChaPoly(info)) authTagLen = 16;
+      if (isChaChaPoly(info)) {
+        authTagLen = 16;
+        this.#lenientTag = true;
+      }
       else throw err('ERR_CRYPTO_INVALID_AUTH_TAG', `authTagLength required for ${cipherType}`);
     }
     const tagOk = info.mode === 'ccm' ? authTagLen >= 4 && authTagLen <= 16 && authTagLen % 2 === 0 : authTagLen >= 1 && authTagLen <= 16;
