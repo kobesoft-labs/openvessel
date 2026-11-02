@@ -1,6 +1,6 @@
 // Checks the ported runtime's command line and runtime bindings against real Node: --env-file, --run,
 // --stack-trace-limit and V8 flags, os/uname values, import.meta.dirname/filename, fetch to a virtual
-// https port, and async_hooks for native resources. Expected outputs are what Node v22.23.4 prints on
+// https port, and async_hooks for native resources. Expected outputs are what Node v26.13.0 prints on
 // Linux (OpenVessel's own values where the machine shows through: uname, paths under /tmp/rt).
 //   OV_PORT_BASE=5270 node test/e2e/port-runtime.mjs [name…]     (needs a build: node scripts/build.mjs)
 //   PRINT=1 … prints the actual output of each scenario
@@ -56,12 +56,12 @@ const scenarios = [
       `node --foo_bar -p 1; echo "exit $?"`,
       `node --no-max-http-header-size -p 1; echo "exit $?"`,
       `NODE_OPTIONS=--use-strict node -p 1; echo "exit $?"`,
-      `node --watch; echo "exit $?"`,
+      `node --watch </dev/null; echo "exit $?"`,
       `node --prof-process; echo "exit $?"`,
       `node --v8-options | sed -n 2p`,
     ].join('; '),
     expected:
-      '3 --stack_trace_limit=3\n4\n1\nError: illegal value for flag --stack-trace-limit of type int\nTry --help for options\nnode: bad option: --stack-trace-limit\nnode: bad option: --harmony-import-attributes\nnode: bad option: --no-harmony-import-assertions\nnode: bad option: --experimental-wasm-imported-strings\nnode: bad option: --experimental-wasm-memory64\nnode: bad option: --experimental-wasm-exnref\nexit 9\nError: illegal value for flag --expose-gc=1 of type bool\nTo set or unset a boolean flag, use --flag or --no-flag.\nTry --help for options\nnode: bad option: --expose-gc=1\nnode: bad option: --harmony-import-attributes\nnode: bad option: --no-harmony-import-assertions\nnode: bad option: --experimental-wasm-imported-strings\nnode: bad option: --experimental-wasm-memory64\nnode: bad option: --experimental-wasm-exnref\nexit 9\nnode: bad option: --foo_bar\nexit 9\nnode: --no-max-http-header-size is an invalid negation because it is not a boolean option\nexit 9\nnode: --use-strict is not allowed in NODE_OPTIONS\nexit 9\nnode: --watch requires specifying a file\nexit 9\nPlease provide a valid isolate file as the final argument.\nexit 1\nThe following syntax for options is accepted (both \'-\' and \'--\' are ok):\n',
+      "3 --stack_trace_limit=3\n4\n1\nError: illegal value for flag --stack-trace-limit of type int\nTry --help for options\nnode: bad option: --stack-trace-limit\nnode: bad option: --harmony-import-attributes\nnode: bad option: --js-source-phase-imports\nnode: bad option: --external-memory-max-reasonable-size=0\nexit 9\nError: illegal value for flag --expose-gc=1 of type bool\nTo set or unset a boolean flag, use --flag or --no-flag.\nTry --help for options\nnode: bad option: --expose-gc=1\nnode: bad option: --harmony-import-attributes\nnode: bad option: --js-source-phase-imports\nnode: bad option: --external-memory-max-reasonable-size=0\nexit 9\nnode: bad option: --foo_bar\nexit 9\nnode: --no-max-http-header-size is an invalid negation because it is not a boolean option\nexit 9\nnode: --use-strict is not allowed in NODE_OPTIONS\nexit 9\nCompleted running ''. Waiting for file changes before restarting...\nexit 0\nUnable to read v8-version from log file.\nStatistical profiling result from v8.log, (0 ticks, 0 unaccounted, 0 excluded).\nexit 0\nThe following syntax for options is accepted (both '-' and '--' are ok):\n",
   },
   {
     name: 'fetch-https',

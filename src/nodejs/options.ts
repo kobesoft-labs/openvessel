@@ -154,8 +154,10 @@ function apply(values: Record<string, unknown>, arg: string, next: string | unde
  */
 function v8Pass(v8Args: string[]): { error?: string; v8Error?: string } {
   const all = [...v8Args];
+  // node.cc (Node 26): what Node adds unless the command line says otherwise
   if (!v8Args.includes('--no-harmony-import-attributes')) all.push('--harmony-import-attributes');
-  all.push('--no-harmony-import-assertions', '--experimental-wasm-imported-strings', '--experimental-wasm-memory64', '--experimental-wasm-exnref');
+  if (!v8Args.includes('--no-js-source-phase-imports')) all.push('--js-source-phase-imports');
+  if (!v8Args.some((a) => /^--?external[-_]memory[-_]max[-_]reasonable[-_]size/.test(a))) all.push('--external-memory-max-reasonable-size=0');
   const bad: string[] = [];
   let v8Error: string | undefined;
   for (let i = 0; i < all.length; i++) {
@@ -278,7 +280,8 @@ function checkOptions(values: Record<string, unknown>, argv: string[]): string[]
     else if (values['[has_eval_string]']) errors.push('either --watch or --eval can be used, not both');
     else if (values['--interactive']) errors.push('either --watch or --interactive can be used, not both');
     else if (values['--test-force-exit']) errors.push('either --watch or --test-force-exit can be used, not both');
-    else if (!values['--test'] && !argv[1]) errors.push('--watch requires specifying a file');
+    // Node 26 counts the arguments after the executable's own (argv[0] stays), so `node --watch` passes
+    else if (!values['--test'] && !(values['--watch-path'] as string[] | undefined)?.length && argv.length < 1) errors.push('--watch requires specifying a file');
   }
   const heap = Number(values['--secure-heap'] ?? 0);
   const heapMin = Number(values['--secure-heap-min'] ?? 2);

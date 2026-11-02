@@ -63,7 +63,9 @@ function astroExamples(tag, key) {
   if (!existsSync(tmp)) {
     mkdirSync(tmp, { recursive: true });
     writeFileSync(join(tmp, 'src.tgz'), execFileSync('gh', ['api', `repos/withastro/astro/tarball/${tag}`], { maxBuffer: 1 << 30 }));
-    execFileSync('tar', ['xzf', join(tmp, 'src.tgz'), '-C', tmp, '*/examples/*']);
+    // GNU tar takes the pattern only with --wildcards (bsdtar always does)
+    const gnu = /GNU tar/.test(execFileSync('tar', ['--version'], { encoding: 'utf8' }));
+    execFileSync('tar', ['xzf', join(tmp, 'src.tgz'), '-C', tmp, ...(gnu ? ['--wildcards'] : []), '*/examples/*']);
   }
   const top = readdirSync(tmp).find((n) => n !== 'src.tgz');
   return { tmp, examples: join(tmp, top, 'examples') };
