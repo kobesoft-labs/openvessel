@@ -176,7 +176,8 @@ function storeKey(data: { uri: string; properties: string | null }, pass: Uint8A
       } catch {}
     }
   } catch (e) {
-    // a missing or wrong passphrase reports as such
+    // a missing or wrong passphrase reports as such (the STORE loader has no prompt to cancel)
+    if (!pass && (e as any)?.code === 'ERR_OSSL_CRYPTO_INTERRUPTED_OR_CANCELLED') throw err('ERR_MISSING_PASSPHRASE');
     if ((e as any)?.code === 'ERR_MISSING_PASSPHRASE' || (e as any)?.library) throw e;
   }
   throw err('ERR_CRYPTO_OPERATION_FAILED', 'Failed to load private key from store');

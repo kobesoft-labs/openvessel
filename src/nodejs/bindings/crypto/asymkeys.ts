@@ -476,7 +476,7 @@ function runCipher(name: string, encrypt: boolean, key: Uint8Array, iv: Uint8Arr
   return concat([c.update(data), c.final()]);
 }
 
-function decryptPkcs8(b: Uint8Array, pass: Uint8Array): Uint8Array {
+export function decryptPkcs8(b: Uint8Array, pass: Uint8Array): Uint8Array {
   const [alg, data] = der.children(der.expect(der.parse(b), 0x30));
   const { oid, params } = algorithm(alg);
   if (oid !== OID.pbes2 || !params) throw keyErr.unsupported();

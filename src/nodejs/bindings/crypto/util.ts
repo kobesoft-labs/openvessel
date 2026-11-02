@@ -303,7 +303,7 @@ export function jobClass(name: string, configure: (async: boolean, ...args: any[
       const prev = configuringMode;
       configuringMode = mode;
       try {
-        this.#work = configure(mode !== kCryptoJobSync, ...args);
+        this.#work = nativeRealm(() => configure(mode !== kCryptoJobSync, ...args));
       } finally {
         configuringMode = prev;
       }

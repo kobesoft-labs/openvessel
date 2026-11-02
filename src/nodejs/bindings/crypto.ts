@@ -25,9 +25,10 @@ import { CheckPrimeJob, RandomBytesJob, RandomPrimeJob, randomFillSync, secureBu
 import { asymmetric } from './crypto/asym.ts';
 import { DiffieHellman, DiffieHellmanGroup } from './crypto/dh.ts';
 import { AESCipherJob, ChaCha20Poly1305CipherJob, RSACipherJob } from './crypto/webcrypto.ts';
-import { err, isAnyBufferSource, view } from './crypto/util.ts';
+import { err, isAnyBufferSource, nativeRealm, view } from './crypto/util.ts';
 import { certExportChallenge, certExportPublicKey, certVerifySpkac } from './crypto/spkac.ts';
 import { createX509CertificateClass, isX509Certificate } from './crypto/x509.ts';
+import { parsePKCS12 } from './crypto/pkcs12.ts';
 
 export { setBufferPrototype as setCryptoBufferPrototype } from './crypto/util.ts';
 
@@ -110,6 +111,7 @@ export function createCrypto() {
     // X509Certificate
     createX509CertificateClass,
     isX509Certificate,
+    parsePKCS12,
     // SPKAC (crypto.Certificate)
     certVerifySpkac,
     certExportPublicKey,
@@ -125,7 +127,22 @@ export function createCrypto() {
     getOpenSSLSecLevelCrypto: () => 1,
     setEngine: () => false,
   });
-  // ML-KEM (and the hybrid KEMs on top of it) has no implementation here. lib reaches the KEM jobs
-  // only for key types isKeyAlgorithmAvailable() reports, so their stubs stay unreachable.
+  // C++ never sees a script's Uint8Array[Symbol.species]: keep it away from the binding's functions
+  // and its classes' methods (jobs and KeyObjectHandle do the same themselves)
+  for (const [k, v] of Object.entries(binding)) {
+    if (typeof v !== 'function' || /^[A-Z]/.test(k) || /^create|Job$/.test(k)) continue;
+    binding[k] = Object.defineProperty((...args: unknown[]) => nativeRealm(() => (v as Function)(...args)), 'name', { value: k });
+  }
+  for (const C of [Hash, Hmac, CipherBase, Mac, DiffieHellman, DiffieHellmanGroup, asymmetric.Sign, asymmetric.Verify, asymmetric.ECDH] as any[]) {
+    for (const m of Object.getOwnPropertyNames(C.prototype)) {
+      const fn = Object.getOwnPropertyDescriptor(C.prototype, m)?.value;
+      if (m === 'constructor' || typeof fn !== 'function' || fn.__nativeRealm) continue;
+      const wrapped = function (this: unknown, ...args: unknown[]) {
+        return nativeRealm(() => fn.apply(this, args));
+      };
+      (wrapped as any).__nativeRealm = true;
+      Object.defineProperty(C.prototype, m, { value: wrapped, writable: true, configurable: true });
+    }
+  }
   return binding;
 }

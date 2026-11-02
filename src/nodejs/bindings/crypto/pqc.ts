@@ -151,8 +151,10 @@ export function pqExportJwk(k: PqKey, isPrivate: boolean, target: any, b64url: (
 
 export function pqImportJwk(jwk: any, wantPrivate: boolean, unb64: (s: string) => Uint8Array): { type: 1 | 2; key: PqKey } {
   const bad = () => err('ERR_CRYPTO_INVALID_JWK', 'Invalid JWK AKP key');
-  const info = typeof jwk.alg === 'string' ? pqByAlg(jwk.alg) : undefined;
-  if (!info || typeof jwk.pub !== 'string') throw bad();
+  const alg = jwk.alg;
+  const info = typeof alg === 'string' ? pqByAlg(alg) : undefined;
+  if (!info) throw err('ERR_CRYPTO_INVALID_JWK', 'Unsupported JWK AKP "alg"');
+  if (typeof jwk.pub !== 'string') throw bad();
   const pub = unb64(jwk.pub);
   if (pub.length !== info.pubLen) throw bad();
   if (jwk.priv === undefined) {

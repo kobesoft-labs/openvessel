@@ -8,7 +8,7 @@
 import { Enc, decode } from '../buffer.ts';
 import { S } from '../../state.ts';
 import type { Asym } from './asymkeys.ts';
-import { copy, err, fillRandom, isAnyBufferSource, isWebCryptoJob, jobClass, stringOrBuffer, toBuffer, view } from './util.ts';
+import { copy, err, fillRandom, nativeRealm, isAnyBufferSource, isWebCryptoJob, jobClass, stringOrBuffer, toBuffer, view } from './util.ts';
 
 export const kKeyTypeSecret = 0;
 export const kKeyTypePublic = 1;
@@ -172,6 +172,19 @@ export class KeyObjectHandle {
     if (a.type === 0 || b.type === 0) return false;
     return asym().equals(a, b);
   }
+}
+
+// Like C++, the handle's methods do not see a script's Uint8Array[Symbol.species]
+for (const m of Object.getOwnPropertyNames(KeyObjectHandle.prototype)) {
+  const fn = (KeyObjectHandle.prototype as any)[m];
+  if (m === 'constructor' || typeof fn !== 'function') continue;
+  Object.defineProperty(KeyObjectHandle.prototype, m, {
+    value: function (this: KeyObjectHandle, ...args: unknown[]) {
+      return nativeRealm(() => fn.apply(this, args));
+    },
+    writable: true,
+    configurable: true,
+  });
 }
 
 /** A KeyObjectHandle wrapping these bytes as a secret key. */
