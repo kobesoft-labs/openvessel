@@ -145,13 +145,13 @@ export function createProcessMethods() {
     },
     patchProcessObject(process: any) {
       const init = S.init;
-      // process-wide state: --title sets it; a worker thread can't change it (or debugPort)
+      // --title sets it; since Node 26 a worker thread can change it (and debugPort) too
       let title = (S.optionValues['--title'] as string) || (init.argv[0] ?? 'node').split('/').pop() || 'node';
       Object.defineProperty(process, 'title', {
         __proto__: null,
         get: () => title,
         set: (v: unknown) => {
-          if (S.isMainThread) title = String(v);
+          title = String(v);
         },
         enumerable: true,
         configurable: true,
@@ -166,7 +166,7 @@ export function createProcessMethods() {
         __proto__: null,
         get: () => debugPort,
         set: (v: number) => {
-          if (S.isMainThread) debugPort = v;
+          debugPort = v;
         },
         enumerable: true,
         configurable: true,
@@ -567,8 +567,8 @@ export function createTraceEvents() {
     getCategoryEnabledBuffer: () => new Uint8Array(1),
     isTraceCategoryEnabled: () => false,
     trace: () => {},
-    // Node 26: no tracing agent (node:trace_events refuses to load then, as in a worker)
-    hasAgent: () => false,
+    // Node 26: node:trace_events loads only with an agent; tracing here records nothing (as before)
+    hasAgent: () => true,
     CategorySet: class CategorySet {
       enable() {}
       disable() {}

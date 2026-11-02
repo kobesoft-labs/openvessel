@@ -1,3 +1,4 @@
 {
-  "test-async-local-storage-contexts.js": "Reads the store after `await` inside AsyncLocalStorage.run(); that needs V8 promise hooks (or continuation-preserved embedder data), which a browser doesn't expose to JavaScript."
+  "test-async-local-storage-contexts.js": "Reads the store after `await` inside AsyncLocalStorage.run(); that needs V8 promise hooks (or continuation-preserved embedder data), which a browser doesn't expose to JavaScript.",
+  "test-async-local-storage-enter-with.js": "Expects enterWith() inside a promise reaction to stay in that reaction's context; each promise job having its own context needs V8 promise hooks (or continuation-preserved embedder data), which a browser doesn't expose to JavaScript."
 }

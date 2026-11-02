@@ -62,7 +62,7 @@ class WorkerImpl extends HandleWrap {
   /** closed after 'exit': hasRef() answers undefined */
   #gone = false;
   #refAtClose = false;
-  #profiles = new Set<string>();
+  #profiles = new Set<number>();
 
   constructor(url: string | null, env: Record<string, string> | null, execArgv: string[] | undefined, resourceLimits: Float64Array, trackFds: boolean, _isInternal: boolean, name?: string) {
     // AsyncWrap first (HandleWrap's), then the parent port (MessagePort::New inside the Worker constructor)
@@ -195,18 +195,35 @@ class WorkerImpl extends HandleWrap {
     // the thread's own CPU time isn't visible from here: wall time since it started
     return taker(() => [null, { user: Math.max(0, Date.now() - this.#started) * 1000, system: 0 }]);
   }
-  startCpuProfile(name: string) {
+  // Node 26: startCpuProfile(samplingIntervalMicros, maxSamples) → ondone(err, id); stopCpuProfile(id)
+  #nextProfile = 1;
+  startCpuProfile(_interval?: number, _maxSamples?: number) {
     if (!this.#running) return undefined;
-    const already = this.#profiles.has(name);
-    this.#profiles.add(name);
-    return taker(() => [already ? nodeError(Error, 'ERR_CPU_PROFILE_ALREADY_STARTED', 'CPU profile already started') : null]);
+    const id = this.#nextProfile++;
+    this.#profiles.add(id);
+    return taker(() => [null, id]);
   }
-  stopCpuProfile(name: string) {
+  stopCpuProfile(id: number) {
     if (!this.#running) return undefined;
-    const found = this.#profiles.delete(name);
+    const found = this.#profiles.delete(id);
     // no sampling profiler in the browser: an empty profile in V8's format
     const profile = JSON.stringify({ nodes: [{ id: 1, callFrame: { functionName: '(root)', scriptId: '0', url: '', lineNumber: -1, columnNumber: -1 }, hitCount: 0, children: [] }], startTime: 0, endTime: 0, samples: [], timeDeltas: [] });
     return taker(() => (found ? [null, profile] : [nodeError(Error, 'ERR_CPU_PROFILE_NOT_STARTED', 'CPU profile not started'), undefined]));
+  }
+  #heapProfiling = false;
+  startHeapProfile(_interval?: number, _depth?: number, _flags?: number) {
+    if (!this.#running) return undefined;
+    const already = this.#heapProfiling;
+    this.#heapProfiling = true;
+    return taker(() => [already ? nodeError(Error, 'ERR_HEAP_PROFILE_HAVE_BEEN_STARTED', 'heap profiler have been started') : null]);
+  }
+  stopHeapProfile() {
+    if (!this.#running) return undefined;
+    const was = this.#heapProfiling;
+    this.#heapProfiling = false;
+    // no sampling heap profiler either: an empty one in V8's format
+    const profile = JSON.stringify({ head: { callFrame: { functionName: '(root)', scriptId: '0', url: '', lineNumber: -1, columnNumber: -1 }, selfSize: 0, id: 1, children: [] }, samples: [] });
+    return taker(() => (was ? [null, profile] : [nodeError(Error, 'ERR_HEAP_PROFILE_NOT_STARTED', 'heap profile not started'), undefined]));
   }
 }
 
