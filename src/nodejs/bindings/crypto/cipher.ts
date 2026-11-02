@@ -517,7 +517,8 @@ class ChaChaPolyMode implements AeadEngine {
     this.poly.update(lens);
     const t = this.poly.digest();
     if (this.enc) this.tagValue = t;
-    else if (!this.expected || !equalBytes(t.subarray(0, this.expected.length), this.expected)) throw FAIL;
+    // OpenSSL 3.5 only verifies a tag that was set (Node 26 records a tagless decrypt as succeeding)
+    else if (this.expected && !equalBytes(t.subarray(0, this.expected.length), this.expected)) throw FAIL;
     return new Uint8Array(0);
   }
   tag(len: number) {
@@ -918,8 +919,15 @@ class Des3WrapMode implements Engine {
     private c: BlockCipher,
     private enc: boolean,
   ) {}
+  /** a failed unwrap or wrap leaves final() failing, as OpenSSL's wrap ciphers do */
+  private failed = false;
   update(data: Uint8Array): Uint8Array | null {
     if (data.length === 0) return new Uint8Array(0);
+    const out = this.run(data);
+    if (!out) this.failed = true;
+    return out;
+  }
+  private run(data: Uint8Array): Uint8Array | null {
     if (data.length % 8) return null;
     if (this.enc) {
       const iv = new Uint8Array(8);
@@ -932,9 +940,11 @@ class Des3WrapMode implements Engine {
     const t = cbc(this.c, false, WRAP_IV, data).reverse();
     const plain = cbc(this.c, false, t.subarray(0, 8), t.subarray(8));
     const msg = plain.subarray(0, plain.length - 8);
-    return equalBytes(sha1(msg).subarray(0, 8), plain.subarray(plain.length - 8)) ? msg.slice() : null;
+    if (!equalBytes(sha1(msg).subarray(0, 8), plain.subarray(plain.length - 8))) return null;
+    return msg.slice();
   }
   final() {
+    if (this.failed) throw FAIL;
     return new Uint8Array(0);
   }
 }
