@@ -10,7 +10,7 @@ import { registerHostObject } from './messaging.ts';
 import { fromShape } from './shape.ts';
 import { readOnce } from './stream.ts';
 import { HandleWrap } from './stream.ts';
-import { asyncIdOf, completeReq, emitAsyncInit } from './process.ts';
+import { asyncDestroy, asyncIdOf, completeReq, emitAsyncInit } from './process.ts';
 
 const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
 const nativeClearTimeout = globalThis.clearTimeout.bind(globalThis);
@@ -128,6 +128,9 @@ export function createFs() {
   const statValues: Float64Array = b.statValues;
   const bigintStatValues: BigInt64Array = b.bigintStatValues;
 
+  // requests whose cancel() came before their work started (uv_cancel succeeded)
+  const cancelled = new WeakSet<object>();
+
   class FSReqCallback {
     oncomplete: ((...a: unknown[]) => void) | null = null;
     context: unknown = null;
@@ -136,6 +139,14 @@ export function createFs() {
     }
     getAsyncId() {
       return asyncIdOf(this);
+    }
+    /**
+     * uv_cancel: the work of a request still queued is skipped and oncomplete gets ECANCELED (with the
+     * syscall and path the request would have reported). fs.readFile/writeFile use it on abort. A
+     * request whose work already runs (an async read on a pipe) completes normally, as in libuv.
+     */
+    cancel() {
+      cancelled.add(this);
     }
   }
 
@@ -174,6 +185,7 @@ export function createFs() {
       let err: Error | null = null;
       let result: T | undefined;
       try {
+        if (cancelled.has(r)) throw new SysError('ECANCELED', 'operation canceled');
         result = fn();
       } catch (e) {
         err = uvError(e, syscall, path, dest);
@@ -234,6 +246,17 @@ export function createFs() {
   function statResult(data: StatData, bigint: boolean, sync: boolean) {
     if (sync) return fillStats(bigint ? bigintStatValues : statValues, 0, data);
     return fillStats(bigint ? new BigInt64Array(18) : new Float64Array(18), 0, data);
+  }
+
+  function statOrMissing(path: unknown, l: boolean, bigint: boolean, shared: boolean, throwIfNoEntry: unknown) {
+    let data: StatData;
+    try {
+      data = st(path, l);
+    } catch (e) {
+      if (!throwIfNoEntry && e instanceof SysError && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) return undefined;
+      throw e;
+    }
+    return statResult(data, bigint, shared);
   }
 
   function writeBytes(fd: number, bytes: Uint8Array, position: unknown): number {
@@ -366,6 +389,18 @@ export function createFs() {
         });
       });
     }
+    /** FileHandle::CloseSync (filehandle[Symbol.dispose]): closes the fd now, throwing a UVException. */
+    closeSync() {
+      const fd = this.#fd;
+      if (fd < 0) return;
+      this.#closing = true;
+      this.#fd = -1;
+      try {
+        sys('close', { fd });
+      } catch (e) {
+        throw uvError(e, 'close');
+      }
+    }
     releaseFD() {
       const fd = this.#fd;
       this.#fd = -1;
@@ -405,6 +440,295 @@ export function createFs() {
         })()
       : null;
 
+  /**
+   * The jobs that do a whole operation in one thread pool round trip (ReadFileJob, WriteFileJob,
+   * CpDirJob): AsyncWraps of provider FSREQCALLBACK, made with the job. run() queues the work and
+   * returns the permission model's error (there is none here: undefined); job.ondone(...) gets the
+   * outcome on a later turn, in the job's async context.
+   */
+  abstract class FsJob {
+    ondone: ((...a: unknown[]) => void) | null = null;
+    context: unknown = null;
+    constructor() {
+      emitAsyncInit(this, 'FSREQCALLBACK', { req: true });
+    }
+    getAsyncId() {
+      return asyncIdOf(this);
+    }
+    /** The arguments of ondone. */
+    protected abstract work(): unknown[];
+    run(): undefined {
+      const done = loop.startReq('FSReqCallback');
+      loop.macrotask(() => {
+        let args: unknown[];
+        try {
+          args = this.work();
+        } catch (e) {
+          args = [uvError(e, 'open')];
+        }
+        done();
+        if (typeof this.ondone === 'function') loop.scope(this.ondone, this, ...args);
+        asyncDestroy(this);
+      });
+      return undefined;
+    }
+  }
+
+  const toBuffer = (u8: Uint8Array) => lib('buffer').Buffer.from(u8.buffer, u8.byteOffset, u8.length);
+
+  /**
+   * fs.readFile / fsPromises.readFile without a user buffer: open + fstat + read + close in one job.
+   * ondone(err, buffer, fd, size, closeErr): the contents and fd -1 for a file of up to one chunk;
+   * otherwise (larger, or not a regular file: a pipe, a tty, a device) no buffer and the open fd with
+   * the fstat size, which lib reads in chunks and closes (tracked as unmanaged when trackFd is set,
+   * as fs.open's fds are). A failure is (err, undefined, -1).
+   */
+  class ReadFileJob extends FsJob {
+    #path: unknown;
+    #flags: number;
+    #chunk: number;
+    #trackFd: boolean;
+    constructor(path: unknown, flags: number, chunk: number, trackFd?: boolean) {
+      super();
+      this.#path = path;
+      this.#flags = flags | 0;
+      this.#chunk = chunk > 0 ? chunk : 512 * 1024;
+      this.#trackFd = !!trackFd;
+    }
+    protected work(): unknown[] {
+      const path = this.#path;
+      const p = pathString(path);
+      const fail = (e: unknown, syscall: string) => [uvError(e, syscall, path), undefined, -1, undefined, undefined];
+      const isDirError = () => new SysError('EISDIR', 'illegal operation on a directory');
+      if (this.#flags === 0) {
+        // the usual case (flag 'r') in two syscalls: stat, then the kernel's readFile
+        let s: StatData;
+        try {
+          s = st(p, false);
+        } catch (e) {
+          return fail(e, 'open');
+        }
+        const type = s.mode & S_IFMT;
+        if (type === S_IFDIR) return fail(isDirError(), 'read');
+        if (type === S_IFREG && s.size <= this.#chunk) {
+          try {
+            return [null, toBuffer(sys<Uint8Array>('readFile', { p })), -1, undefined, undefined];
+          } catch (e) {
+            return fail(e, e instanceof SysError && e.code === 'EISDIR' ? 'read' : 'open');
+          }
+        }
+      }
+      let fd: number;
+      try {
+        fd = sys<number>('open', { p, flags: this.#flags, mode: 0o666 });
+      } catch (e) {
+        return fail(e, 'open');
+      }
+      const closeQuietly = () => {
+        try {
+          sys('close', { fd });
+        } catch {}
+      };
+      let s: StatData;
+      try {
+        s = fst(fd);
+      } catch (e) {
+        closeQuietly();
+        return fail(e, 'fstat');
+      }
+      const type = s.mode & S_IFMT;
+      if (type === S_IFDIR) {
+        closeQuietly();
+        return fail(isDirError(), 'read');
+      }
+      if (type === S_IFREG && s.size <= this.#chunk) {
+        let data: Uint8Array | null;
+        try {
+          data = this.#readAll(fd);
+        } catch (e) {
+          closeQuietly();
+          return fail(e, 'read');
+        }
+        if (data) {
+          let closeErr: Error | undefined;
+          try {
+            sys('close', { fd });
+          } catch (e) {
+            closeErr = uvError(e, 'close');
+          }
+          return [null, toBuffer(data), -1, undefined, closeErr];
+        }
+      }
+      if (this.#trackFd) unmanaged?.add(fd);
+      return [null, undefined, fd, s.size, undefined];
+    }
+    /**
+     * The whole file with positional reads from 0, or null when it is longer than one chunk (it grew
+     * since fstat): the fd's position is still 0 then, so lib's chunked reader starts at the beginning.
+     */
+    #readAll(fd: number): Uint8Array | null {
+      const parts: Uint8Array[] = [];
+      let total = 0;
+      for (;;) {
+        const d = readBytes(fd, Math.min(this.#chunk + 1 - total, 1 << 20), total);
+        if (!d.length) break;
+        parts.push(d.slice());
+        total += d.length;
+        if (total > this.#chunk) return null;
+      }
+      if (parts.length === 1) return parts[0];
+      const all = new Uint8Array(total);
+      let off = 0;
+      for (const x of parts) {
+        all.set(x, off);
+        off += x.length;
+      }
+      return all;
+    }
+  }
+
+  const O_CREAT = 0o100;
+  const O_TRUNC = 0o1000;
+  const O_APPEND = 0o2000;
+
+  /** fs.writeFile / fsPromises.writeFile of a buffer: open + write + close in one job; ondone(err | null). */
+  class WriteFileJob extends FsJob {
+    #path: unknown;
+    #flags: number;
+    #mode: number;
+    #data: ArrayBufferView;
+    constructor(path: unknown, flags: number, mode: number, data: ArrayBufferView) {
+      super();
+      this.#path = path;
+      this.#flags = flags | 0;
+      this.#mode = mode;
+      this.#data = data;
+    }
+    protected work(): unknown[] {
+      const path = this.#path;
+      const p = pathString(path);
+      const flags = this.#flags;
+      const d = this.#data;
+      const bytes = new Uint8Array(d.buffer, d.byteOffset, d.byteLength);
+      // write-only with create and truncate or append ('w', 'a', 'wx'…): the kernel's writeFile, one
+      // syscall; other flags ('r+', 'w+'…) write from the start of the opened file
+      if ((flags & 3) === 1 && flags & O_CREAT && flags & (O_TRUNC | O_APPEND)) {
+        try {
+          sys('writeFile', { p, flags, mode: this.#mode }, bytes);
+          return [null];
+        } catch (e) {
+          return [uvError(e, 'open', path)];
+        }
+      }
+      let fd: number;
+      try {
+        fd = sys<number>('open', { p, flags, mode: this.#mode });
+      } catch (e) {
+        return [uvError(e, 'open', path)];
+      }
+      try {
+        let off = 0;
+        while (off < bytes.length) off += writeBytes(fd, bytes.subarray(off), null);
+      } catch (e) {
+        try {
+          sys('close', { fd });
+        } catch {}
+        return [uvError(e, 'write')];
+      }
+      try {
+        sys('close', { fd });
+      } catch (e) {
+        return [uvError(e, 'close')];
+      }
+      return [null];
+    }
+  }
+
+  /**
+   * fs.cp / fsPromises.cp of a directory to a dest that does not exist yet (no filter, no
+   * dereference): creates dest with the mode of src and copies the tree as fs.cpSync does.
+   * ondone(err) or, for a socket, FIFO or other special file in the tree, ondone(null, kind, destPath)
+   * (lib turns that into ERR_FS_CP_SOCKET / ERR_FS_CP_FIFO_PIPE / ERR_FS_CP_UNKNOWN).
+   */
+  class CpDirJob extends FsJob {
+    #args: [unknown, unknown, CopyOptions];
+    constructor(src: unknown, dest: unknown, force: boolean, dereference: boolean, errorOnExist: boolean, verbatimSymlinks: boolean, preserveTimestamps: boolean, mode: number) {
+      super();
+      this.#args = [src, dest, { force: !!force, dereference: !!dereference, errorOnExist: !!errorOnExist, verbatimSymlinks: !!verbatimSymlinks, preserveTimestamps: !!preserveTimestamps, mode: mode | 0 }];
+    }
+    protected work(): unknown[] {
+      const [src, dest, o] = this.#args;
+      const from = pathString(src);
+      const to = pathString(dest);
+      let s: StatData;
+      try {
+        s = st(from, false);
+      } catch (e) {
+        return [stdfsError(e, 'cp', from, false)];
+      }
+      const mode = s.mode & 0o7777;
+      try {
+        // owner-writable while it is filled (a read-only source dir), the exact mode at the end
+        sys('mkdir', { p: to, mode: mode | 0o700 });
+      } catch (e) {
+        return [uvError(e, 'mkdir', to)];
+      }
+      try {
+        const special = copyTree(from, to, o, true);
+        if (special) return [null, special[0], special[1]];
+        sys('chmod', { p: to, mode });
+      } catch (e) {
+        return [uvError(e, 'cp', from, to)];
+      }
+      return [null];
+    }
+  }
+
+  /**
+   * readdir(path, { recursive: true }) in one request (node_file.cc ReadDirRecursive): breadth first,
+   * following links to directories (a link loop ends at ELOOP, which counts as not a directory).
+   * Without types: the paths relative to path (joined with '/'). With types: [names, types (Uint8Array),
+   * counts (Uint32Array), dirs] where counts[i] entries belong to dirs[i] (relative, '' for path itself).
+   */
+  function readdirTree(path: unknown, encoding: unknown, withTypes: boolean) {
+    const base = pathString(path);
+    const prefix = base.endsWith('/') ? base : base + '/';
+    const names: unknown[] = [];
+    const types: number[] = [];
+    const counts: number[] = [];
+    const dirs: string[] = [''];
+    for (let d = 0; d < dirs.length; d++) {
+      const rel = dirs[d];
+      const full = rel === '' ? base : prefix + rel;
+      let entries: [string, number][];
+      try {
+        entries = sys<[string, number][]>('readdir', { p: full, types: true });
+      } catch (e) {
+        throw uvError(e, 'scandir', full);
+      }
+      counts.push(entries.length);
+      for (const [name, mode] of entries) {
+        const type = DIRENT[mode & S_IFMT] ?? 0;
+        const relName = rel === '' ? name : `${rel}/${name}`;
+        if (withTypes) {
+          names.push(encodeOut(name, encoding));
+          types.push(type);
+        } else {
+          names.push(encodeOut(relName, encoding));
+        }
+        let isDir = type === 2;
+        if (type === 3 || type === 0) {
+          try {
+            isDir = (st(prefix + relName, false).mode & S_IFMT) === S_IFDIR;
+          } catch {}
+        }
+        if (isDir) dirs.push(relName);
+      }
+    }
+    if (!withTypes) return names;
+    return [names, Uint8Array.from(types), Uint32Array.from(counts), dirs.map((x) => encodeOut(x, encoding))];
+  }
+
   // a FileHandle moves to another thread of the process as its fd (the fd table is per process)
   registerHostObject(FileHandle.prototype, {
     name: 'fs:FileHandle',
@@ -417,6 +741,12 @@ export function createFs() {
     FSReqCallback,
     FileHandle,
     StatWatcher,
+    ReadFileJob,
+    WriteFileJob,
+    CpDirJob,
+    readdirRecursive: (path: unknown, encoding: unknown, withTypes: boolean, req?: unknown) =>
+      run(req, 'scandir', path, undefined, () => readdirTree(path, encoding, !!withTypes)),
+    rmSync,
     access(path: unknown, mode: unknown, req?: unknown) {
       const m = validatedMode(mode);
       return run(req, 'access', path, undefined, () => void sys('access', { p: pathString(path), mode: m }));
@@ -547,7 +877,22 @@ export function createFs() {
     rmdir: (path: unknown, req?: unknown) => run(req, 'rmdir', path, undefined, () => void sys('rmdir', { p: pathString(path) })),
     mkdir: (path: unknown, mode: number, recursive: boolean, req?: unknown) =>
       run(req, 'mkdir', path, undefined, () => {
-        const r = sys<string | null>('mkdir', { p: pathString(path), mode, recursive });
+        let r: string | null;
+        try {
+          r = sys<string | null>('mkdir', { p: pathString(path), mode, recursive });
+        } catch (e) {
+          // MKDirpSync: the path itself being a file is EEXIST, a file higher up ENOTDIR (the
+          // kernel's permission check of the first missing directory's parent says EACCES then)
+          if (recursive && e instanceof SysError && (e.code === 'ENOTDIR' || e.code === 'EACCES')) {
+            const p = pathString(path);
+            if (isExistingNonDir(p)) throw new SysError('EEXIST', 'file already exists');
+            const pathMod = lib('path');
+            for (let up = pathMod.dirname(p); up !== pathMod.dirname(up); up = pathMod.dirname(up)) {
+              if (isExistingNonDir(up)) throw new SysError('ENOTDIR', 'not a directory');
+            }
+          }
+          throw e;
+        }
         return recursive ? (r ?? undefined) : undefined;
       }),
     readdir: (path: unknown, encoding: unknown, withTypes: boolean, req?: unknown) =>
@@ -566,28 +911,12 @@ export function createFs() {
         return -2;
       }
     },
-    stat(path: unknown, bigint: boolean, req?: unknown, throwIfNoEntry = true) {
-      if (req === undefined && !throwIfNoEntry) {
-        try {
-          return statResult(st(path, false), bigint, true);
-        } catch (e) {
-          if (e instanceof SysError && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) return undefined;
-          throw uvError(e, 'stat', path);
-        }
-      }
-      return run(req, 'stat', path, undefined, () => statResult(st(path, false), bigint, req !== kUsePromises));
-    },
-    lstat(path: unknown, bigint: boolean, req?: unknown, throwIfNoEntry = true) {
-      if (req === undefined && !throwIfNoEntry) {
-        try {
-          return statResult(st(path, true), bigint, true);
-        } catch (e) {
-          if (e instanceof SysError && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) return undefined;
-          throw uvError(e, 'lstat', path);
-        }
-      }
-      return run(req, 'lstat', path, undefined, () => statResult(st(path, true), bigint, req !== kUsePromises));
-    },
+    // throwIfNoEntry = false: a missing entry (ENOENT, ENOTDIR) gives undefined instead of an error,
+    // in every mode (Node 26 passes it for callbacks and promises too)
+    stat: (path: unknown, bigint: boolean, req?: unknown, throwIfNoEntry = true) =>
+      run(req, 'stat', path, undefined, () => statOrMissing(path, false, bigint, req !== kUsePromises, throwIfNoEntry)),
+    lstat: (path: unknown, bigint: boolean, req?: unknown, throwIfNoEntry = true) =>
+      run(req, 'lstat', path, undefined, () => statOrMissing(path, true, bigint, req !== kUsePromises, throwIfNoEntry)),
     fstat(fd: number, bigint: boolean, req?: unknown, shouldNotThrow = false) {
       validatedFd(fd);
       if (req === undefined && shouldNotThrow) {
@@ -602,7 +931,8 @@ export function createFs() {
     statfs(path: unknown, bigint: boolean, req?: unknown) {
       return run(req, 'statfs', path, undefined, () => {
         st(path, false);
-        const v = [0xef53, 4096, 1 << 20, 1 << 19, 1 << 19, 1 << 20, 1 << 19];
+        // [type, bsize, frsize, blocks, bfree, bavail, files, ffree] (StatFs in internal/fs/utils.js)
+        const v = [0xef53, 4096, 4096, 1 << 20, 1 << 19, 1 << 19, 1 << 20, 1 << 19];
         if (bigint) return BigInt64Array.from(v.map(BigInt));
         return Float64Array.from(v);
       });
@@ -626,7 +956,10 @@ export function createFs() {
     futimes: (fd: number, atime: number, mtime: number, req?: unknown) => (validatedFd(fd), run(req, 'futime', undefined, undefined, () => void sys('futimes', { fd, atime: atime * 1000, mtime: mtime * 1000 }))),
     lutimes: (path: unknown, atime: number, mtime: number, req?: unknown) =>
       run(req, 'lutime', path, undefined, () => void sys('utimes', { p: pathString(path), atime: atime * 1000, mtime: mtime * 1000, l: true })),
-    mkdtemp: (prefix: unknown, encoding: unknown, req?: unknown) => run(req, 'mkdtemp', `${pathString(prefix)}XXXXXX`, undefined, () => encodeOut(sys<string>('mkdtemp', { prefix: pathString(prefix) }), encoding)),
+    // the result is the prefix as given plus the 6 random characters (a relative prefix stays
+    // relative), as mkdtemp(3) fills in the template; the kernel returns the absolute path
+    mkdtemp: (prefix: unknown, encoding: unknown, req?: unknown) =>
+      run(req, 'mkdtemp', `${pathString(prefix)}XXXXXX`, undefined, () => encodeOut(pathString(prefix) + sys<string>('mkdtemp', { prefix: pathString(prefix) }).slice(-6), encoding)),
     /** ESM resolution of a package's "main" (node_file.cc LegacyMainResolve): the index of the first candidate that is a file. */
     legacyMainResolve(pkgPath: string, main: string | undefined, base: string | undefined) {
       const isFile = (p: string) => {
@@ -724,92 +1057,19 @@ export function createFs() {
       if (preserveTimestamps) copyUtimes(from, to);
     },
     cpSyncCopyDir(src: unknown, dest: unknown, force: boolean, dereference: boolean, errorOnExist: boolean, verbatimSymlinks: boolean, preserveTimestamps: boolean) {
-      const pathMod = lib('path');
       const srcRoot = pathString(src);
       const destRoot = pathString(dest);
+      // a dest it creates gets the mode of src (set once filled), an existing one keeps its own
+      let srcMode = -1;
       try {
-        sys('mkdir', { p: destRoot, mode: 0o777, recursive: true });
+        if (sys<string | null>('mkdir', { p: destRoot, mode: 0o777, recursive: true })) srcMode = st(srcRoot, false).mode & 0o7777;
+        if (srcMode >= 0) sys('chmod', { p: destRoot, mode: srcMode | 0o700 });
       } catch (e) {
         throw uvError(e, 'cp', destRoot);
       }
-      const isSubPath = (child: string, parent: string) => child === parent || child.startsWith(parent.endsWith('/') ? parent : parent + '/');
-      const copyDir = (from: string, to: string) => {
-        let entries: [string, number][];
-        try {
-          entries = sys<[string, number][]>('readdir', { p: from, types: true });
-        } catch (e) {
-          throw uvError(e, 'cp', from);
-        }
-        for (const [name, mode] of entries) {
-          const srcItem = pathMod.join(from, name);
-          const destItem = pathMod.join(to, name);
-          const type = mode & S_IFMT;
-          if (type === S_IFLNK) {
-            try {
-              if (verbatimSymlinks) {
-                sys('symlink', { target: sys<string>('readlink', { p: srcItem }), p: destItem });
-                continue;
-              }
-              const target = sys<string>('readlink', { p: srcItem });
-              let destLink: StatData | null = null;
-              try {
-                destLink = st(destItem, true);
-              } catch {}
-              if (destLink && (destLink.mode & S_IFMT) === S_IFLNK) {
-                const current = sys<string>('readlink', { p: destItem });
-                let targetIsDir = false;
-                try {
-                  targetIsDir = (st(srcItem, false).mode & S_IFMT) === S_IFDIR;
-                } catch {}
-                if (!dereference && targetIsDir && isSubPath(target, current)) throw cpError('ERR_FS_CP_EINVAL', `Cannot copy ${target} to a subdirectory of self ${current}`);
-                let destIsDir = false;
-                try {
-                  destIsDir = (st(destItem, false).mode & S_IFMT) === S_IFDIR;
-                } catch {}
-                if (destIsDir && isSubPath(current, target)) throw cpError('ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY', `cannot overwrite ${current} with ${target}`);
-                // the existing link is replaced even without force (as node_file.cc does)
-                sys('unlink', { p: destItem });
-              } else if (destLink && (destLink.mode & S_IFMT) === S_IFREG && (!dereference || (!force && errorOnExist))) {
-                throw new SysError('EEXIST', 'file already exists');
-              }
-              // weakly_canonical(absolute(src / target))
-              const resolved = pathMod.resolve(from, target);
-              let canonical = resolved;
-              try {
-                canonical = sys<string>('realpath', { p: resolved });
-              } catch {}
-              sys('symlink', { target: canonical, p: destItem });
-            } catch (e) {
-              throw uvError(e, 'cp', srcItem, destItem);
-            }
-          } else if (type === S_IFDIR) {
-            try {
-              sys('mkdir', { p: destItem, mode: 0o777 });
-            } catch (e) {
-              if (!(e instanceof SysError && e.code === 'EEXIST')) throw uvError(e, 'cp', srcItem, destItem);
-            }
-            copyDir(srcItem, destItem);
-          } else if (type === S_IFREG) {
-            let exists = false;
-            try {
-              st(destItem, false);
-              exists = true;
-            } catch {}
-            if (!exists || force) {
-              try {
-                if (exists) sys('unlink', { p: destItem });
-                sys('copyFile', { from: srcItem, to: destItem, excl: false });
-              } catch (e) {
-                throw uvError(e, 'cp', srcItem, destItem);
-              }
-            } else if (errorOnExist) {
-              throw cpError('ERR_FS_CP_EEXIST', `[ERR_FS_CP_EEXIST]: Target already exists: cp returned EEXIST (${destItem} already exists)`);
-            }
-            if (preserveTimestamps) copyUtimes(srcItem, destItem);
-          }
-        }
-      };
-      copyDir(srcRoot, destRoot);
+      // cpSync skips sockets and FIFOs inside the tree
+      copyTree(srcRoot, destRoot, { force, dereference, errorOnExist, verbatimSymlinks, preserveTimestamps, mode: 0 }, false);
+      if (srcMode >= 0) setMode(destRoot, srcMode);
     },
   });
   return b;
@@ -843,5 +1103,254 @@ function copyUtimes(src: string, dest: string) {
     sys('utimes', { p: dest, atime: s.atimeMs, mtime: s.mtimeMs });
   } catch (e) {
     throw uvError(e, 'utime', dest);
+  }
+}
+
+interface CopyOptions {
+  force: boolean;
+  dereference: boolean;
+  errorOnExist: boolean;
+  verbatimSymlinks: boolean;
+  preserveTimestamps: boolean;
+  /** copyFile's mode (COPYFILE_EXCL = 1) */
+  mode: number;
+}
+
+/** A socket, FIFO or other special file met in the tree: its kind and its path under dest. */
+type SpecialFile = [kind: 'socket' | 'fifo' | 'unknown', destPath: string];
+
+/**
+ * The walk under node_file.cc's CpSyncCopyDir and CpDirJob: copies the entries of the directory
+ * srcRoot into the existing destRoot, including their quirks: errors are UVExceptions with syscall
+ * 'cp', copied symlinks get absolute, resolved targets (unless verbatimSymlinks), an existing link is
+ * replaced even without force. With preserveTimestamps, files and directories (destRoot too) get the
+ * source's times, a directory's once its contents are in. A special file (socket, FIFO…) stops the
+ * walk and is returned when reportSpecial is set (CpDirJob: fs.cp rejects), and is skipped otherwise
+ * (fs.cpSync).
+ */
+function copyTree(srcRoot: string, destRoot: string, o: CopyOptions, reportSpecial: boolean): SpecialFile | null {
+  const pathMod = lib('path');
+  const isSubPath = (child: string, parent: string) => child === parent || child.startsWith(parent.endsWith('/') ? parent : parent + '/');
+  const copyDir = (from: string, to: string): SpecialFile | null => {
+    let entries: [string, number][];
+    try {
+      entries = sys<[string, number][]>('readdir', { p: from, types: true });
+    } catch (e) {
+      throw uvError(e, 'cp', from);
+    }
+    for (const [name, mode] of entries) {
+      const srcItem = pathMod.join(from, name);
+      const destItem = pathMod.join(to, name);
+      let type = mode & S_IFMT;
+      if (type === S_IFLNK && o.dereference) {
+        // dereference: a link is copied as what it points to (a directory as a directory)
+        try {
+          type = sys<StatData>('stat', { p: srcItem, l: false }).mode & S_IFMT;
+        } catch (e) {
+          throw uvError(e, 'cp', srcItem, destItem);
+        }
+      }
+      if (type === S_IFLNK) {
+        try {
+          if (o.verbatimSymlinks) {
+            sys('symlink', { target: sys<string>('readlink', { p: srcItem }), p: destItem });
+            continue;
+          }
+          const target = sys<string>('readlink', { p: srcItem });
+          let destLink: StatData | null = null;
+          try {
+            destLink = sys<StatData>('stat', { p: destItem, l: true });
+          } catch {}
+          if (destLink && (destLink.mode & S_IFMT) === S_IFLNK) {
+            const current = sys<string>('readlink', { p: destItem });
+            // as cp-sync.js onLink: the existing link may not point inside the source link's
+            // directory, nor the source link inside what the existing one points to
+            if (!o.dereference && isDirPath(srcItem) && isSubPath(current, target)) throw cpError('ERR_FS_CP_EINVAL', `Cannot copy ${target} to a subdirectory of self ${current}`);
+            if (isDirPath(destItem) && isSubPath(target, current)) throw cpError('ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY', `cannot overwrite ${current} with ${target}`);
+            // the existing link is replaced even without force (as node_file.cc does)
+            sys('unlink', { p: destItem });
+          } else if (destLink && (destLink.mode & S_IFMT) === S_IFREG && (!o.dereference || (!o.force && o.errorOnExist))) {
+            throw new SysError('EEXIST', 'file already exists');
+          }
+          // weakly_canonical(absolute(src / target))
+          const resolved = pathMod.resolve(from, target);
+          let canonical = resolved;
+          try {
+            canonical = sys<string>('realpath', { p: resolved });
+          } catch {}
+          sys('symlink', { target: canonical, p: destItem });
+        } catch (e) {
+          throw uvError(e, 'cp', srcItem, destItem);
+        }
+      } else if (type === S_IFDIR) {
+        // a directory it creates gets the source's mode (owner-writable while it is filled, for a
+        // read-only source); an existing one keeps its own
+        let srcMode = -1;
+        try {
+          srcMode = sys<StatData>('stat', { p: srcItem, l: false }).mode & 0o7777;
+          sys('mkdir', { p: destItem, mode: srcMode | 0o700 });
+        } catch (e) {
+          srcMode = -1;
+          if (!(e instanceof SysError && e.code === 'EEXIST')) throw uvError(e, 'cp', srcItem, destItem);
+        }
+        const special = copyDir(srcItem, destItem);
+        if (special) return special;
+        if (srcMode >= 0) setMode(destItem, srcMode);
+        if (o.preserveTimestamps) copyUtimes(srcItem, destItem);
+      } else if (type === S_IFREG) {
+        let exists = false;
+        try {
+          sys('stat', { p: destItem, l: false });
+          exists = true;
+        } catch {}
+        if (!exists || o.force) {
+          try {
+            if (exists) sys('unlink', { p: destItem });
+            sys('copyFile', { from: srcItem, to: destItem, excl: !!(o.mode & 1) });
+          } catch (e) {
+            throw uvError(e, 'cp', srcItem, destItem);
+          }
+        } else if (o.errorOnExist) {
+          throw cpError('ERR_FS_CP_EEXIST', `[ERR_FS_CP_EEXIST]: Target already exists: cp returned EEXIST (${destItem} already exists)`);
+        }
+        if (o.preserveTimestamps) copyUtimes(srcItem, destItem);
+      } else if (reportSpecial) {
+        return [type === S_IFSOCK ? 'socket' : type === S_IFIFO ? 'fifo' : 'unknown', destItem];
+      }
+    }
+    return null;
+  };
+  const special = copyDir(srcRoot, destRoot);
+  if (!special && o.preserveTimestamps) copyUtimes(srcRoot, destRoot);
+  return special;
+}
+
+/** chmod for the walk: errors are cp's UVExceptions. */
+function setMode(p: string, mode: number) {
+  try {
+    sys('chmod', { p, mode });
+  } catch (e) {
+    throw uvError(e, 'cp', p);
+  }
+}
+
+function isExistingNonDir(p: string): boolean {
+  try {
+    return (sys<StatData>('stat', { p, l: false }).mode & S_IFMT) !== S_IFDIR;
+  } catch {
+    return false;
+  }
+}
+
+function isDirPath(p: string): boolean {
+  try {
+    return (sys<StatData>('stat', { p, l: false }).mode & S_IFMT) === S_IFDIR;
+  } catch {
+    return false;
+  }
+}
+
+// strerror(3) of the errors std::filesystem reports (its messages are built from it)
+const STRERROR: Record<string, string> = {
+  EACCES: 'Permission denied',
+  EPERM: 'Operation not permitted',
+  ENOENT: 'No such file or directory',
+  ENOTDIR: 'Not a directory',
+  EISDIR: 'Is a directory',
+  ENOTEMPTY: 'Directory not empty',
+  EEXIST: 'File exists',
+  EBUSY: 'Device or resource busy',
+  EROFS: 'Read-only file system',
+  ELOOP: 'Too many levels of symbolic links',
+  ENAMETOOLONG: 'File name too long',
+  EMFILE: 'Too many open files',
+  ENFILE: 'Too many open files in system',
+  EINVAL: 'Invalid argument',
+  EIO: 'Input/output error',
+  ENOSPC: 'No space left on device',
+};
+
+/**
+ * The error node_file.cc builds from a std::filesystem error (rmSync, CpDirJob): a plain Error with
+ * a positive errno, the code, the path and the syscall, and the message "CODE, Strerror: 'path'"
+ * (CpDirJob's "CODE, Strerror 'path'" has no colon).
+ */
+function stdfsError(e: unknown, syscall: string, path: string, colon = true): Error {
+  if (!(e instanceof SysError) || !e.code.startsWith('E')) return e as Error;
+  const text = STRERROR[e.code] ?? e.message;
+  const err = new Error(`${e.code}, ${text}${colon ? ':' : ''} '${path}'`) as Error & Record<string, unknown>;
+  err.errno = -errnoOf(e.code);
+  err.code = e.code;
+  err.path = path;
+  err.syscall = syscall;
+  return err;
+}
+
+/** Blocks the thread for ms (the runtime is a worker, which may): rmSync's delay between retries. */
+function sleepSync(ms: number) {
+  if (ms > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * std::filesystem::remove_all, not following links: a directory's entries first, then the directory.
+ * An entry that is already gone is not an error. Done with unlink/rmdir (not the kernel's rm) so that
+ * permissions are checked on each entry as on Linux.
+ */
+function removeTree(p: string, isDir: boolean) {
+  const gone = (e: unknown) => e instanceof SysError && e.code === 'ENOENT';
+  if (!isDir) {
+    try {
+      sys('unlink', { p });
+    } catch (e) {
+      if (!gone(e)) throw e;
+    }
+    return;
+  }
+  let entries: [string, number][];
+  try {
+    entries = sys<[string, number][]>('readdir', { p, types: true });
+  } catch (e) {
+    if (gone(e)) return;
+    throw e;
+  }
+  const base = p.endsWith('/') ? p : p + '/';
+  for (const [name, mode] of entries) removeTree(base + name, (mode & S_IFMT) === S_IFDIR);
+  try {
+    sys('rmdir', { p });
+  } catch (e) {
+    if (!gone(e)) throw e;
+  }
+}
+
+// the errors node_file.cc's RmSync retries (Windows sharing violations, a writer racing the removal)
+const RM_RETRY = new Set(['EBUSY', 'EMFILE', 'ENFILE', 'ENOTEMPTY', 'EPERM']);
+
+/**
+ * node_file.cc RmSync (fs.rmSync after lib validated the options, and mkdtempDisposableSync): a
+ * missing path is not an error, a directory needs recursive (a plain ERR_FS_EISDIR Error), other
+ * failures are std::filesystem errors for the given path, retried maxRetries times with a sleep of
+ * i * retryDelay ms before retry i.
+ */
+function rmSync(path: unknown, maxRetries: unknown, recursive: unknown, retryDelay: unknown) {
+  const p = pathString(path);
+  let s: StatData;
+  try {
+    s = sys<StatData>('stat', { p, l: true });
+  } catch (e) {
+    if (e instanceof SysError && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) return;
+    throw stdfsError(e, 'rm', p);
+  }
+  const isDir = (s.mode & S_IFMT) === S_IFDIR;
+  if (isDir && !recursive) throw cpError('ERR_FS_EISDIR', `Path is a directory: ${p}`);
+  const retries = Math.max(0, Number(maxRetries) | 0);
+  const delay = Math.max(0, Number(retryDelay) || 0);
+  for (let i = 1; ; i++) {
+    try {
+      removeTree(p, isDir);
+      return;
+    } catch (e) {
+      if (i > retries || !(e instanceof SysError && RM_RETRY.has(e.code))) throw stdfsError(e, 'rm', p);
+      sleepSync(i * delay);
+    }
   }
 }
