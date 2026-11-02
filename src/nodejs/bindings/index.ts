@@ -49,21 +49,25 @@ import { createHeapUtils } from './heap_utils.ts';
 import { createWasiBinding } from './wasi.ts';
 import { createTlsWrap } from './tls_wrap.ts';
 import { createInspector, createProfiler } from './inspector.ts';
+import { createAsyncContextFrame, createCjsLexer, createDiagnosticsChannel, createIpcSerdes, createLocks, createUrlPattern, createWebstorage } from './node26.ts';
 
 export type BindingFactory = () => any;
 
 /** Name → factory. Other modules (and the parallel binding work) register here. */
 export const factories: Record<string, BindingFactory> = {
+  async_context_frame: createAsyncContextFrame,
   async_wrap: createAsyncWrap,
   blob: createBlob,
   buffer: createBuffer,
   builtins: () => S.builtinsBinding,
   cares_wrap: createCaresWrap,
+  cjs_lexer: createCjsLexer,
   config: createConfig,
   constants: createConstants,
   contextify: createContextify,
   credentials: createCredentials,
   crypto: createCrypto,
+  diagnostics_channel: createDiagnosticsChannel,
   encoding_binding: createEncodingBinding,
   errors: createErrors,
   fs: createFs,
@@ -72,6 +76,8 @@ export const factories: Record<string, BindingFactory> = {
   heap_utils: createHeapUtils,
   http_parser: createHttpParser,
   icu: createIcu,
+  ipc_serdes: createIpcSerdes,
+  locks: createLocks,
   messaging: createMessaging,
   mksnapshot: createMksnapshot,
   module_wrap: createModuleWrap,
@@ -100,11 +106,13 @@ export const factories: Record<string, BindingFactory> = {
   udp_wrap: createUdpWrap,
   types: createTypes,
   url: createUrl,
+  url_pattern: createUrlPattern,
   util: createUtil,
   uv: createUv,
   worker: createWorkerBinding,
   zlib: createZlib,
   v8: createV8,
+  webstorage: createWebstorage,
   wasi: createWasiBinding,
   // HTTP/2 (node_http2.cc over nghttp2) is not ported; the module still has to load
   http2: () =>

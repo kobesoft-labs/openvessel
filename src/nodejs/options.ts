@@ -57,7 +57,12 @@ function v8Check(arg: string, name: string, value: string | undefined): string |
 }
 
 export function defaultOptionValues(): Record<string, unknown> {
-  return structuredClone(proc.optionValues as Record<string, unknown>);
+  const v = structuredClone(proc.optionValues as Record<string, unknown>);
+  // Node 24+ runs AsyncLocalStorage on V8's continuation-preserved embedder data, which a browser
+  // doesn't expose (see bindings/node26.ts): async_hooks carries the store instead, as in Node 22.
+  v['--async-context-frame'] = false;
+  if ('--no-async-context-frame' in v) v['--no-async-context-frame'] = true;
+  return v;
 }
 
 function expand(arg: string, next: string | undefined): { names: string[]; value?: string; consumedNext: boolean } {

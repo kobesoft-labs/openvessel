@@ -19,7 +19,7 @@
     "playground"
   ],
   "openvessel": {
-    "node": "22.23.4"
+    "node": "26.13.0"
   },
   "license": "Apache-2.0",
   "type": "module",
@@ -44,7 +44,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
-    "amaro": "1.1.8",
+    "amaro": "1.1.11",
     "esbuild": "^0.28.2",
     "playwright-core": "^1.64.1",
     "typescript": "^5.9.3"

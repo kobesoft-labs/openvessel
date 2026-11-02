@@ -479,6 +479,36 @@ export function createBuffer() {
     getZeroFillToggle: () => new Uint32Array(1),
     // memory from ArrayBuffer is always zeroed in JS; "unsafe" only skips that in C++
     createUnsafeArrayBuffer: (size: number) => new ArrayBuffer(size),
+    // Node 24+: the offset of the first `alignment`-aligned byte. A JS ArrayBuffer's start can't be
+    // seen, but V8 allocates backing stores at least 16-byte aligned, as malloc does; above that, the
+    // padding lib allocates keeps any offset inside the buffer.
+    arrayBufferAlignedOffset: () => 0,
+    // ArrayBuffer#detach keys don't exist in JS; untransferability is the private symbol lib also sets
+    setDetachKey: () => {},
+    isLatin1(input: string) {
+      for (let i = 0; i < input.length; i++) if (input.charCodeAt(i) > 0xff) return false;
+      return true;
+    },
+    // UTF-16 code units of the decoded text (simdutf utf16_length_from_utf8): one per lead byte, two
+    // for a 4-byte sequence
+    stringLengthUtf8(v: ArrayBufferView | ArrayBuffer) {
+      const x = bytesOf(v);
+      let n = 0;
+      for (let i = 0; i < x.length; i++) {
+        const b = x[i];
+        if ((b & 0xc0) !== 0x80) n++;
+        if (b >= 0xf0) n++;
+      }
+      return n;
+    },
+    // RFC 6455 masking: output[offset + i] = source[i] ^ key byte (i % 4); false for an immutable buffer
+    mask(source: ArrayBufferView, output: ArrayBufferView, offset: number, length: number, key: number) {
+      const s = new Uint8Array(source.buffer, source.byteOffset, source.byteLength);
+      const o = new Uint8Array(output.buffer, output.byteOffset, output.byteLength);
+      if ((o.buffer as any).immutable) return false;
+      for (let i = 0; i < length; i++) o[offset + i] = s[i] ^ ((key >>> ((i & 3) * 8)) & 0xff);
+      return true;
+    },
     // removed by bootstrap/node.js right after the call (so it is not in the recorded shape)
     setBufferPrototype(proto: object) {
       bufferPrototype = proto;

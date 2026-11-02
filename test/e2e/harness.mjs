@@ -3,7 +3,7 @@
 // OV_BROWSER=firefox uses Playwright's Firefox instead (`npx playwright-core install firefox` once).
 import { chromium, firefox } from 'playwright-core';
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 
 const root = new URL('../..', import.meta.url).pathname;
 
@@ -17,12 +17,28 @@ export async function startServer() {
 const PORT_BASE = Number(process.env.OV_PORT_BASE ?? 5170);
 const FIREFOX = process.env.OV_BROWSER === 'firefox';
 
+// The system Chrome by default; OV_CHROME=chromium (or no Chrome installed) uses Playwright's Chromium
+// (`npx playwright-core install chromium` once), which needs no system-wide install.
+function chromeChannel() {
+  const want = process.env.OV_CHROME;
+  if (want === 'chromium') return {};
+  if (want) return { channel: want };
+  return existsSync(systemChromePath()) ? { channel: 'chrome' } : {};
+}
+function systemChromePath() {
+  return process.platform === 'darwin'
+    ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+    : process.platform === 'win32'
+      ? `${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`
+      : '/opt/google/chrome/chrome';
+}
+
 export async function openBrowser({ headless = true, profile = root + 'node_modules/.cache/ov-' + (FIREFOX ? 'firefox' : 'chrome') + (PORT_BASE === 5170 ? '' : `-${PORT_BASE}`) } = {}) {
   if (FIREFOX) mkdirSync(profile + '/appdata', { recursive: true }); // Firefox won't create the profile folder
   const ctx = FIREFOX
     ? // MOZ_APP_DATA: keeps Firefox out of ~/Library/Application Support/Firefox (a sandbox may not allow it)
       await firefox.launchPersistentContext(profile, { headless, env: { ...process.env, MOZ_APP_DATA: profile + '/appdata', MOZ_LOCAL_APP_DATA: profile + '/appdata' } })
-    : await chromium.launchPersistentContext(profile, { channel: 'chrome', headless, args: ['--js-flags=--stack-size=4000'] });
+    : await chromium.launchPersistentContext(profile, { ...chromeChannel(), headless, args: ['--js-flags=--stack-size=4000'] });
   const browser = { close: () => ctx.close() };
   const page = ctx.pages()[0] ?? (await ctx.newPage());
   page.on('console', (m) => {

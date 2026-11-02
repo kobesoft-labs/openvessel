@@ -20,7 +20,7 @@ const names = ${JSON.stringify([
   'mksnapshot', 'module_wrap', 'modules', 'options', 'os', 'performance', 'permission', 'pipe_wrap', 'process_methods', 'process_wrap', 'report',
   'serdes', 'signal_wrap', 'spawn_sync', 'stream_pipe', 'stream_wrap', 'string_decoder', 'symbols', 'task_queue', 'tcp_wrap', 'timers', 'tls_wrap',
   'trace_events', 'tty_wrap', 'types', 'udp_wrap', 'url', 'url_pattern', 'util', 'uv', 'v8', 'wasi', 'wasm_web_api', 'watchdog', 'worker', 'zlib',
-  'sea', 'profiler', 'internal_only_v8', 'async_context_frame', 'webstorage', 'locks', 'http2', 'quic', 'sqlite', 'fs_event_wrap', 'signal_wrap',
+  'sea', 'profiler', 'internal_only_v8', 'cjs_lexer', 'diagnostics_channel', 'ipc_serdes', 'dtls', 'ffi', 'async_context_frame', 'webstorage', 'locks', 'http2', 'quic', 'sqlite', 'fs_event_wrap', 'signal_wrap',
 ])};
 function shape(v, depth, seen) {
   if (v === null || v === undefined || typeof v === 'boolean' || typeof v === 'string') return v;
