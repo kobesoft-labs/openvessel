@@ -47,6 +47,7 @@ import {
   type KeyData,
 } from './keys.ts';
 import * as rsa from './rsa.ts';
+import { S } from '../../state.ts';
 import { bigIntToBytes, bitLength, bytesToBigInt } from './random.ts';
 import { decodeInput, err, fillRandom, isAnyBufferSource, isWebCryptoJob, jobClass, osslError, stringOrBuffer, toArrayBuffer, toBuffer, view } from './util.ts';
 import * as der from './asn1.ts';
@@ -139,6 +140,42 @@ function rawKey(bytes: Uint8Array, format: number, typeName: unknown, namedCurve
   throw err('ERR_INVALID_ARG_VALUE', `Invalid asymmetricKeyType: ${name.split('\0')[0]}`);
 }
 
+/**
+ * A private key referenced by URI (OpenSSL's STORE, Node 26): only OpenSSL's `file` loader has a
+ * counterpart here, reading the file (a path once lib has converted a file: URL) from the VFS.
+ */
+function storeKey(data: { uri: string; properties: string | null }, pass: Uint8Array | undefined): Asym {
+  const uri = String(data?.uri);
+  if (!uri.startsWith('/')) throw osslError('1600009A', 'STORE routines', 'unsupported', 'ERR_OSSL_OSSL_STORE_UNSUPPORTED');
+  let bytes: Uint8Array;
+  try {
+    bytes = view(S.requireBuiltin!('fs').readFileSync(uri));
+  } catch (e) {
+    const reason = (e as any)?.code === 'ENOENT' ? 'No such file or directory' : String((e as any)?.message ?? e);
+    throw Object.assign(new Error(`error:80000002:system library::${reason}`), { library: 'system library', opensslErrorStack: [`error:80000002:system library::${reason}`] });
+  }
+  const text = decodeLatin1(bytes);
+  const pem = /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(text);
+  try {
+    if (pem) return parsePrivate(bytes, 1, undefined, pass);
+    for (const type of [1, 0, 3]) {
+      try {
+        return parsePrivate(bytes, 0, type, pass);
+      } catch {}
+    }
+  } catch (e) {
+    // a missing or wrong passphrase reports as such
+    if ((e as any)?.code === 'ERR_MISSING_PASSPHRASE' || (e as any)?.library) throw e;
+  }
+  throw err('ERR_CRYPTO_OPERATION_FAILED', 'Failed to load private key from store');
+}
+
+const decodeLatin1 = (b: Uint8Array) => {
+  let s = '';
+  for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+  return s;
+};
+
 /** KeyObjectData::GetPrivateKeyFromJs / GetPublicOrPrivateKeyFromJs */
 function keyArg(args: any[], i: number, wantPrivate: boolean): KeyData {
   const d = keyDataOf(args[i]);
@@ -150,10 +187,8 @@ function keyArg(args: any[], i: number, wantPrivate: boolean): KeyData {
     if (wantPrivate && k.type !== 2) throw incompatible();
     return k;
   }
-  if (format === kKeyFormatStore) {
-    // keys referenced by URI through an OpenSSL STORE loader: there is no OpenSSL here
-    throw osslError('1600008A', 'STORE routines', 'unregistered scheme', 'ERR_OSSL_OSSL_STORE_UNREGISTERED_SCHEME');
-  }
+  if (format === kKeyFormatStore) return { type: 2, asym: storeKey(args[i], passphraseOf(args[i + 3])) };
+  if (typeof args[i] !== 'string' && !isAnyBufferSource(args[i])) throw err('ERR_INVALID_ARG_TYPE', 'Invalid key data');
   if (wantPrivate) return { type: 2, asym: parsePrivate(stringOrBuffer(args[i]), format, args[i + 2], passphraseOf(args[i + 3])) };
   const [asym, isPrivate] = parsePublicOrPrivate(stringOrBuffer(args[i]), format, args[i + 2], passphraseOf(args[i + 3]));
   return { type: isPrivate ? 2 : 1, asym };
@@ -840,6 +875,22 @@ function publicDecrypt(...args: any[]) {
   throw osslError('1C8000A5', 'Provider routines', 'illegal or unsupported padding mode', 'ERR_OSSL_ILLEGAL_OR_UNSUPPORTED_PADDING_MODE');
 }
 
+// new KEMEncapsulateJob(mode, key ×5) / new KEMDecapsulateJob(mode, key ×5, ciphertext): the key
+// types with a KEM (ML-KEM, and RSA/EC/X25519 through OpenSSL's RSASVE/DHKEM) are not implemented,
+// so a valid key is an unsupported one
+export const KEMEncapsulateJob = jobClass('KEMEncapsulateJob', (_async, ...args: any[]) => {
+  anyKeyArg(args, 0);
+  return () => {
+    throw notSupportedForKeyType();
+  };
+});
+export const KEMDecapsulateJob = jobClass('KEMDecapsulateJob', (_async, ...args: any[]) => {
+  privateKeyArg(args, 0);
+  return () => {
+    throw notSupportedForKeyType();
+  };
+});
+
 /** isKeyAlgorithmAvailable(name): the key types this binding can create (no ML-DSA / ML-KEM). */
 function isKeyAlgorithmAvailable(name: unknown): boolean {
   return typeof name === 'string' && Object.prototype.hasOwnProperty.call(OKP, name.toLowerCase());
@@ -857,6 +908,8 @@ export const asymmetric: Record<string, unknown> = {
   DsaKeyPairGenJob,
   DhKeyPairGenJob,
   DHBitsJob,
+  KEMEncapsulateJob,
+  KEMDecapsulateJob,
   ECDH,
   ECDHConvertKey,
   publicEncrypt,
