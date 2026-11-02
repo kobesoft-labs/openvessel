@@ -233,7 +233,43 @@ const RING_INIT = 1 << 14;
 const RING_MAX = 1 << 20; // reserved address space per ring: keep it small, programs make thousands
 const RING_FIXED = 1 << 20; // without growable SharedArrayBuffers
 const GAP = 0xffffffff;
+// A payload that can't fit a ring is written to a kernel file (threads share the kernel) and the
+// record carries 0x00 + its path instead; v8.serialize output always starts with 0xff.
 const HDR = 16;
+let spillSeq = 0;
+
+function spill(payload: Uint8Array): Uint8Array | null {
+  const p = `/tmp/.openvessel-msg-${S.init.pid}-${++spillSeq}-${Math.random().toString(36).slice(2)}`;
+  try {
+    sys('writeFile', { p, flags: 0o1101, mode: 0o600 }, payload);
+  } catch {
+    return null;
+  }
+  const path = new TextEncoder().encode(p);
+  const rec = new Uint8Array(1 + path.length);
+  rec.set(path, 1);
+  return rec;
+}
+function spilledPath(payload: Uint8Array | null): string | null {
+  return payload && payload.length && payload[0] === 0 ? new TextDecoder().decode(payload.subarray(1)) : null;
+}
+/** The payload a record stands for: a spilled one is read back (and its file removed). */
+function unspill(payload: Uint8Array | null): Uint8Array | null {
+  const p = spilledPath(payload);
+  if (p === null) return payload;
+  try {
+    return sys<Uint8Array>('readFile', { p });
+  } finally {
+    dropSpill(payload);
+  }
+}
+function dropSpill(payload: Uint8Array | null) {
+  const p = spilledPath(payload);
+  if (p === null) return;
+  try {
+    sys('unlink', { p });
+  } catch {}
+}
 
 class Ring {
   readonly head: Int32Array; // [0] write position, [1] read position (wrapping int32), [2] size
@@ -267,8 +303,13 @@ class Ring {
     if (first < len) out.set(this.data.subarray(0, len - first), first);
     return out;
   }
-  /** Appends a record; payload null writes a gap. */
+  /**
+   * Appends a record; payload null writes a gap. A payload larger than the ring can ever hold (a
+   * 12 MB module source a loader hook returns) goes to a kernel file, so receiveMessageOnPort still
+   * gets it synchronously.
+   */
   push(seq: number, payload: Uint8Array | null) {
+    if (payload && 8 + payload.length + 8 > Math.max(Atomics.load(this.head, 2), (this.sab as any).growable ? RING_MAX : 0)) payload = spill(payload);
     const len = payload ? payload.length : 0;
     const head = Atomics.load(this.head, 0);
     const tail = Atomics.load(this.head, 1);
@@ -798,6 +839,7 @@ export class NodeMessagePort {
       const r = ring.peek();
       if (!r || r.seq > seq) return;
       ring.skip(r.size);
+      dropSpill(r.payload);
     }
   }
 
@@ -814,7 +856,7 @@ export class NodeMessagePort {
     if (!r || !r.payload) return S.perIsolateSymbols.no_message_symbol; // nothing, or a message only the normal path can carry
     ring.skip(r.size);
     p.#consumed.add(r.seq);
-    return S.requireBuiltin('v8').deserialize(r.payload);
+    return S.requireBuiltin('v8').deserialize(unspill(r.payload));
   }
 
   postMessage(value: unknown, transfer?: unknown) {
@@ -897,7 +939,7 @@ export class NodeMessagePort {
       p.#consumed.add(r.seq);
       let data: unknown;
       try {
-        data = S.requireBuiltin('v8').deserialize(r.payload);
+        data = S.requireBuiltin('v8').deserialize(unspill(r.payload));
       } catch (e) {
         p.#emitError(e);
         continue;
