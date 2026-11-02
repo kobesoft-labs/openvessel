@@ -324,17 +324,16 @@ export function asBuffer(bytes: Uint8Array): Uint8Array {
 
 export function createBuffer() {
   const b = fromShape('buffer');
-  const slice = (enc: Enc) =>
-    function (this: Uint8Array, start?: number, end?: number) {
-      const [s, e] = sliceArgs(this, start, end);
-      return decode(this, enc, s, e);
-    };
-  const write = (enc: Enc) =>
-    function (this: Uint8Array, str: string, offset?: number, length?: number) {
-      const [off, len] = writeArgs(this, offset, length);
-      if (enc === Enc.UCS2) return writeInto(this, encode(str, enc), off, len - (len % 2));
-      return writeInto(this, encode(str, enc), off, len);
-    };
+  // Node 26: the buffer is the first argument (lib's Buffer.prototype methods pass `this`)
+  const slice = (enc: Enc) => (buf: Uint8Array, start?: number, end?: number) => {
+    const [s, e] = sliceArgs(buf, start, end);
+    return decode(buf, enc, s, e);
+  };
+  const write = (enc: Enc) => (buf: Uint8Array, str: string, offset?: number, length?: number) => {
+    const [off, len] = writeArgs(buf, offset, length);
+    if (enc === Enc.UCS2) return writeInto(buf, encode(str, enc), off, len - (len % 2));
+    return writeInto(buf, encode(str, enc), off, len);
+  };
   const writeStatic = (enc: Enc) => (buf: Uint8Array, str: string, offset: number, length: number) => {
     const [off, len] = writeArgs(buf, offset, length);
     if (enc === Enc.UTF8) {

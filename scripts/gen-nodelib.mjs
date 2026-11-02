@@ -19,8 +19,8 @@ export function genNodeLib(outFile = join(root, 'dist/runtime/nodelib.js')) {
     }
   };
   walk(overridesDir);
-  // not shipped: V8's profiler tools (no --prof in a browser); amaro is replaced by an override
-  const skip = (id) => id.startsWith('internal/deps/v8/tools/');
+  // V8's tick processor (internal/deps/v8/tools, ES modules) is shipped: --prof-process runs it
+  const skip = () => false;
   const params = (id) => {
     if (id.startsWith('internal/per_context/')) return 'exports, primordials, privateSymbols, perIsolateSymbols';
     if (id === 'internal/bootstrap/realm') return 'process, getLinkedBinding, getInternalBinding, primordials';

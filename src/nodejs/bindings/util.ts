@@ -370,6 +370,16 @@ export function createUtil() {
     sleep: (ms: number) => void Atomics.wait(sleepCell, 0, 0, ms),
     parseEnv,
     arrayBufferViewHasBuffer: () => true,
+    // Node 26
+    constructSharedArrayBuffer: (length: number) => new SharedArrayBuffer(length),
+    getSharedArrayBufferGrowable(this: SharedArrayBuffer) {
+      return (this as any).growable === true;
+    },
+    /** v8::Promise::MarkAsHandled: no unhandled-rejection report for it */
+    markPromiseAsHandled(p: Promise<unknown>) {
+      // a handler is what the browser checks (then() also drops a rejection already held, loop.ts)
+      p.then(undefined, () => {});
+    },
     guessHandleType(fd: number) {
       try {
         const kind = sys<string | null>('fdKind', { fd });

@@ -7,6 +7,7 @@
 //   url_pattern          URLPattern (ada there; the browser's own here)
 //   async_context_frame  continuation-preserved embedder data (see the note on createAsyncContextFrame)
 
+// @ts-ignore - pure JS build, synchronous (no wasm init)
 import { parse as parseCjs } from 'cjs-module-lexer/lexer.js';
 import { lib } from '../state.ts';
 import { fromShape } from './shape.ts';

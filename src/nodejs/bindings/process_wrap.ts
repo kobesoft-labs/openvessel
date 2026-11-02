@@ -83,7 +83,15 @@ class ProcessWrap extends HandleWrap {
     super('ProcessWrap', false, 'PROCESSWRAP');
   }
 
-  spawn(options: { file: string; args?: string[]; cwd?: string; envPairs?: string[]; stdio?: StdioOption[]; detached?: boolean; uid?: number; gid?: number }) {
+  /**
+   * Node 26: spawn(file, args, cwd, envPairs, stdio, flags, uid, gid); an options object before.
+   * flags: kProcessFlagDetached | kProcessFlagWindowsHide | kProcessFlagWindowsVerbatimArguments.
+   */
+  spawn(...a: any[]) {
+    const options: { file: string; args?: string[]; cwd?: string; envPairs?: string[]; stdio?: StdioOption[]; detached?: boolean; uid?: number; gid?: number } =
+      a.length === 1 && a[0] !== null && typeof a[0] === 'object'
+        ? a[0]
+        : { file: a[0], args: a[1], cwd: a[2], envPairs: a[3], stdio: a[4], detached: !!((a[5] ?? 0) & 1), uid: a[6], gid: a[7] };
     installExitHandler();
     const credErr = credentialError(options);
     if (credErr) return credErr;
@@ -131,7 +139,11 @@ class ProcessWrap extends HandleWrap {
 }
 
 export function createProcessWrap() {
-  return Object.assign(fromShape('process_wrap'), { Process: ProcessWrap });
+  return Object.assign(fromShape('process_wrap'), {
+    Process: ProcessWrap,
+    /** this process's environment as 'KEY=value' strings (Node 26: the default env of a child) */
+    getEnvPairs: () => Object.entries(S.process.env as Record<string, string>).map(([k, v]) => `${k}=${v}`),
+  });
 }
 
 export function createSpawnSync() {

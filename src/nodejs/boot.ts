@@ -11,7 +11,7 @@ import { compiledPositions, lineOneOffset } from './bindings/contextify.ts';
 import { bare } from './bindings/util.ts';
 import { NativeProxy, installProxyTracking } from './proxies.ts';
 import { installIteratorTracking } from './iterators.ts';
-import { moduleUrlForServed } from './bindings/module_wrap.ts';
+import { ModuleWrap, moduleUrlForServed } from './bindings/module_wrap.ts';
 import { installCallSites } from './callsites.ts';
 import { fromShape } from './bindings/shape.ts';
 import * as loop from './loop.ts';
@@ -487,6 +487,31 @@ function boot(init: InitMsg) {
     setInternalLoaders(internalBinding: (n: string) => any, requireBuiltin: (id: string) => any) {
       S.internalBinding = internalBinding;
       S.requireBuiltin = requireBuiltin;
+    },
+    // Node 26: a builtin that is an ES module (V8's tick processor for --prof-process), with its
+    // relative imports resolved among the builtins; → { promise } of its evaluation
+    importBuiltinSourceTextModule(id: string) {
+      const wraps = new Map<string, ModuleWrap>();
+      const load = (mid: string): ModuleWrap => {
+        let w = wraps.get(mid);
+        if (w) return w;
+        const src = sources[mid];
+        if (typeof src !== 'string') {
+          const e = new Error(`No such built-in module: ${mid}`) as Error & { code: string };
+          e.code = 'ERR_UNKNOWN_BUILTIN_MODULE';
+          throw e;
+        }
+        // an id symbol: evaluated as a real module (free `arguments` is d8's global, as V8's tools expect)
+        w = new ModuleWrap(`node:${mid}`, undefined, src, 0, 0, Symbol(mid));
+        wraps.set(mid, w);
+        const dir = mid.slice(0, mid.lastIndexOf('/'));
+        const deps = w.getModuleRequests().map((r) => load(`${dir}/${r.specifier.replace(/^\.\//, '').replace(/\.m?js$/, '')}`));
+        w.link(deps);
+        return w;
+      };
+      const root = load(id);
+      root.instantiate();
+      return { promise: root.evaluate(-1, false) };
     },
     hasCachedBuiltins: () => true,
     getCacheUsage: () => ({ compiledWithCache: [], compiledWithoutCache: [], compiledInSnapshot: [] }),

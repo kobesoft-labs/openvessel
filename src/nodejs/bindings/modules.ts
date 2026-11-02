@@ -30,6 +30,14 @@ function read(path: string, isESM?: boolean, base?: string, specifier?: string):
     }
     throw e;
   }
+  const t = parse(path, text, isESM, base, specifier);
+  cache.set(path, t);
+  return t;
+}
+
+/** package.json text → the tuple node_modules.cc returns */
+function parse(path: string, text: string | Uint8Array, isESM?: boolean, base?: string, specifier?: string): Tuple {
+  if (typeof text !== 'string') text = decode(text, Enc.UTF8);
   let json: any;
   try {
     json = JSON.parse(text);
@@ -53,7 +61,6 @@ function read(path: string, isESM?: boolean, base?: string, specifier?: string):
     raw(field('exports')),
     path,
   ];
-  cache.set(path, t);
   return t;
 }
 
@@ -97,7 +104,11 @@ export function createModules() {
     enableCompileCache: () => [3 /* DISABLED */, 'the compile cache is not available in OpenVessel', undefined],
     getCompileCacheDir: () => undefined,
     flushCompileCache: () => {},
-    setLazyPathHelpers,
+    // Node 26: the compile cache entries the CJS/ESM loaders read and write (never cached here)
+    getCompileCacheEntry: () => undefined,
+    saveCompileCacheEntry: () => {},
+    // (content, path): a package.json a VFS mount provides
+    parsePackageJSON: (content: string | Uint8Array, path: string) => parse(path, content),
   });
 }
 
@@ -108,7 +119,7 @@ export function createModules() {
  * last '/', so a module at the root has ''. A URL that has no path (a host, an encoded '/') makes
  * Node fail an assertion on first access; here that access throws the conversion's error.
  */
-function setLazyPathHelpers(meta: object, url: string) {
+export function setLazyPathHelpers(meta: object, url: string) {
   let filename: string;
   try {
     // the common case without a lib round trip: no escapes, query or fragment

@@ -18,6 +18,7 @@ import { sucrase } from '../typescript.ts';
 import { cachedDataMatches, contextScope, makeCachedData, setPrivate } from './contextify.ts';
 import { fulfilledPromise, rejectedPromise } from './util.ts';
 import { hasV8StackApi } from '../callsites.ts';
+import { setLazyPathHelpers } from './modules.ts';
 
 const kUninstantiated = 0;
 const kInstantiating = 1;
@@ -25,6 +26,8 @@ const kInstantiated = 2;
 const kEvaluating = 3;
 const kEvaluated = 4;
 const kErrored = 5;
+// the phase of a plain import (Node 24+ also has `import source` = 1 and `import defer` = 2)
+const kEvaluationPhase = 3;
 
 interface Request {
   specifier: string;
@@ -71,7 +74,9 @@ function importedNames(head: string, out: Set<string>) {
 let nextId = 1;
 const byId = new Map<string, ModuleWrap>();
 let importMetaCallback: ((symbol: unknown, meta: object, wrap: ModuleWrap) => void) | null = null;
-let dynamicImportCallback: ((symbol: unknown, specifier: string, attributes: Record<string, string>, referrerName: string) => Promise<unknown>) | null = null;
+let dynamicImportCallback: ((symbol: unknown, specifier: string, phase: number, attributes: Record<string, string>, referrerName: string) => Promise<unknown>) | null = null;
+/** lib's createImportMetaResolve bound to the cascaded loader: url → import.meta.resolve */
+let importMetaResolveInitializer: ((url: string) => unknown) | null = null;
 
 function moduleUrl(id: string) {
   return `${S.runtimeBase}/__ov/mw/${S.init.pid}/${id}.mjs`;
@@ -219,7 +224,31 @@ export class ModuleWrap {
   }
 
   getModuleRequests() {
-    return this.#requests.map((r) => ({ specifier: r.specifier, attributes: r.attributes }));
+    return this.#requests.map((r) => ({ specifier: r.specifier, attributes: r.attributes, phase: kEvaluationPhase }));
+  }
+
+  /** Node 24+: a property (V8 knows it once the module is compiled) */
+  get hasTopLevelAwait(): boolean {
+    return this.#hasTLA();
+  }
+
+  /** Node 24+: whether the instantiated graph has top-level await (require(esm) refuses it) */
+  get hasAsyncGraph(): boolean {
+    return this.isGraphAsync();
+  }
+
+  #sourceObject: unknown = undefined;
+  /** the source phase's object (WebAssembly.Module for `import source`) */
+  setModuleSourceObject(o: unknown) {
+    this.#sourceObject = o;
+  }
+
+  getModuleSourceObject() {
+    if (this.#sourceObject === undefined) {
+      const { codes } = lib('internal/errors');
+      throw new codes.ERR_SOURCE_PHASE_NOT_DEFINED(this.url);
+    }
+    return this.#sourceObject;
   }
 
   /** link(modules) since Node 22.23; link(specifiers, modules) before. Aligned with getModuleRequests(). */
@@ -364,11 +393,6 @@ export class ModuleWrap {
     this.#walk((m) => {
       if (m.#status < kInstantiated) m.#status = kInstantiated;
     });
-  }
-
-  instantiateSync() {
-    this.instantiate();
-    return this.isGraphAsync();
   }
 
   evaluate(_timeout?: number, _breakOnSigint?: boolean): Promise<unknown> {
@@ -530,7 +554,7 @@ export class ModuleWrap {
         if (dep.isGraphAsync()) await dep.#evaluateAsyncGraph();
         else dep.#evaluateSyncGraph();
       }
-      await this.#runSource(this.hasTopLevelAwait());
+      await this.#runSource(this.#hasTLA());
     })());
   }
 
@@ -701,10 +725,6 @@ export class ModuleWrap {
     return (this.#facade ??= this.#makeFacade());
   }
 
-  getNamespaceSync() {
-    return this.getNamespace();
-  }
-
   getStatus() {
     return this.#status;
   }
@@ -716,12 +736,12 @@ export class ModuleWrap {
   isGraphAsync() {
     let async = false;
     this.#walk((m) => {
-      if (m.hasTopLevelAwait()) async = true;
+      if (m.#hasTLA()) async = true;
     });
     return async;
   }
 
-  hasTopLevelAwait(): boolean {
+  #hasTLA(): boolean {
     if (this.#tla !== undefined) return this.#tla;
     if (!this.#source || !/\bawait\b/.test(this.#source)) return (this.#tla = false);
     try {
@@ -784,16 +804,30 @@ export class ModuleWrap {
   _importMeta(): object {
     if (!this.#meta) {
       this.#meta = Object.create(null);
-      importMetaCallback?.(this.#hostDefinedOption, this.#meta!, this);
+      if (S.perIsolateSymbols && this.#hostDefinedOption === S.perIsolateSymbols.source_text_module_default_hdo) this.#defaultImportMeta(this.#meta!);
+      else importMetaCallback?.(this.#hostDefinedOption, this.#meta!, this);
     }
     return this.#meta!;
+  }
+
+  /**
+   * import.meta of a module the default loader compiled, which Node 24+ fills in C++
+   * (DefaultImportMetaObjectInitializer): dirname and filename for file: URLs, main, resolve (unless
+   * on the loader hooks thread), url — in this order.
+   */
+  #defaultImportMeta(meta: object) {
+    if (this.url.startsWith('file:')) setLazyPathHelpers(meta, this.url);
+    const define = (k: string, value: unknown) => Object.defineProperty(meta, k, { value, writable: true, enumerable: true, configurable: true });
+    define('main', !!(this as any).isMain);
+    if (importMetaResolveInitializer) define('resolve', importMetaResolveInitializer(this.url));
+    define('url', this.url);
   }
 
   /** @internal */
   _dynamicImport(specifier: unknown, options?: { with?: Record<string, string>; assert?: Record<string, string> }) {
     const attributes = attributesOf(Object.entries(options?.with ?? options?.assert ?? {}) as [string, string][]);
     if (!dynamicImportCallback) return Promise.reject(new Error('dynamic import callback not set'));
-    return dynamicImportCallback(this.#hostDefinedOption, String(specifier), attributes, this.url);
+    return dynamicImportCallback(this.#hostDefinedOption, String(specifier), kEvaluationPhase, attributes, this.url);
   }
 }
 // (a program may have deleted array iteration; see intrinsics.ts)
@@ -856,7 +890,7 @@ export function moduleUrlForServed(url: string): string | undefined {
 export function importFromScript(referrerSymbol: unknown, referrerName: string, specifier: unknown, options?: { with?: Record<string, string> }) {
   const attributes = attributesOf(Object.entries(options?.with ?? {}) as [string, string][]);
   if (!dynamicImportCallback) return Promise.reject(new Error('dynamic import callback not set'));
-  return dynamicImportCallback(referrerSymbol, String(specifier), attributes, referrerName);
+  return dynamicImportCallback(referrerSymbol, String(specifier), kEvaluationPhase, attributes, referrerName);
 }
 
 // Firefox (seen in 157) fails a static import of a data: URL from a module fetched over http in a
@@ -911,6 +945,9 @@ export function createModuleWrap() {
     },
     setInitializeImportMetaObjectCallback(fn: typeof importMetaCallback) {
       importMetaCallback = fn;
+    },
+    setImportMetaResolveInitializer(fn: typeof importMetaResolveInitializer) {
+      importMetaResolveInitializer = fn;
     },
     createRequiredModuleFacade(wrap: ModuleWrap) {
       return wrap.getNamespace();
