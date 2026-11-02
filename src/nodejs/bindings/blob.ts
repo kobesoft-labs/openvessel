@@ -73,6 +73,8 @@ class BlobHandle {
         if (!next) cb(0);
         else cb(1, next.slice().buffer as ArrayBuffer);
       },
+      // Node 26: called back when data arrives after a STATUS_BLOCK; every pull here answers at once
+      setWakeup(_fn: (() => void) | undefined) {},
     };
   }
 }
