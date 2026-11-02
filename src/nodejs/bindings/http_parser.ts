@@ -86,6 +86,18 @@ class ParserImpl implements Settings {
   chunkExtensionsNread = 0;
   maxHeaderSize = 16384;
   lastMessageStart = 0;
+  // false from initialize() with a ConnectionsList until a message starts: such a connection counts
+  // as idle (for closeIdleConnections) while its slowloris deadline runs
+  receivedData = false;
+  // header lines of the current request (as name+value, so 2 per line) against maxHeaderPairs, which
+  // is read from the parser object once per message part
+  headerPairs = 0;
+  maxHeaderPairs = -1;
+  // set by remove(): llhttp callbacks then do nothing
+  isBeingFreed = false;
+  // kOnHeadersComplete / kOnBody / kOnMessageComplete, cached once found (CachedCallback) until the
+  // next initialize() or free()
+  cachedCallbacks: (((...a: unknown[]) => unknown) | undefined)[] = [];
   connections: ConnectionsListImpl | null = null;
   closed = false;
   asyncId = 0;
@@ -98,9 +110,22 @@ class ParserImpl implements Settings {
     this.owner = owner;
   }
 
+  /** parser[index], remembered once it is a function (CachedCallback). */
+  private callback(index: number): unknown {
+    const cached = this.cachedCallbacks[index];
+    if (cached) return cached;
+    const cb = this.owner[index];
+    if (typeof cb === 'function') this.cachedCallbacks[index] = cb;
+    return cb;
+  }
+
+  clearCachedCallbacks() {
+    this.cachedCallbacks = [];
+  }
+
   /** Calls parser[index](...args) if it is a function; records an exception like V8 would. */
   private call(index: number, args: unknown[]): { ok: boolean; value?: unknown; called: boolean } {
-    const cb = this.owner[index];
+    const cb = index === kOnHeadersComplete || index === kOnBody || index === kOnMessageComplete ? this.callback(index) : this.owner[index];
     if (typeof cb !== 'function') return { ok: true, called: false };
     // InternalCallbackScope around the callback: the parser's async context is current
     const hooks = this.resource ? asyncHooks() : null;
@@ -130,6 +155,30 @@ class ParserImpl implements Settings {
     return 0;
   }
 
+  /** Counts a request header line against parser.maxHeaderPairs. */
+  private trackHeaderPair(): number {
+    if (this.llhttp.type !== TYPE_REQUEST) return 0;
+    this.headerPairs += 2;
+    if (this.maxHeaderPairs < 0) {
+      let v: unknown;
+      try {
+        v = this.owner.maxHeaderPairs;
+      } catch (e) {
+        this.hasException = true;
+        this.exception = e;
+        this.gotException = true;
+        return -1;
+      }
+      const n = typeof v === 'number' ? v : 0;
+      this.maxHeaderPairs = n > 0 ? n : 0;
+    }
+    if (this.maxHeaderPairs > 0 && this.headerPairs > this.maxHeaderPairs) {
+      this.llhttp.reason = 'HPE_HEADER_OVERFLOW:Header overflow';
+      return Err.USER;
+    }
+    return 0;
+  }
+
   private createHeaders(): string[] {
     const out: string[] = new Array(this.numValues * 2);
     for (let i = 0; i < this.numValues; i++) {
@@ -150,27 +199,27 @@ class ParserImpl implements Settings {
 
   // --- llhttp settings -------------------------------------------------------
 
+  // Each callback does nothing once remove() has been called (Proxy::Raw checks is_being_freed_).
+
   onMessageBegin(): number {
-    if (this.connections) {
-      this.connections.all.delete(this);
-      this.connections.active.delete(this);
-    }
+    if (this.isBeingFreed) return 0;
     this.numFields = this.numValues = 0;
     this.headersCompleted = false;
     this.chunkExtensionsNread = 0;
+    this.receivedData = true;
     this.lastMessageStart = hrtime();
     this.url = '';
     this.statusMessage = '';
-    if (this.connections) {
-      this.connections.all.add(this);
-      this.connections.active.add(this);
-    }
+    this.maxHeaderPairs = -1;
+    // the active list stays ordered by message start
+    this.connections?.pushActive(this);
     // An exception here is reported once execute() returns; parsing goes on (as in C++).
     this.call(kOnMessageBegin, []);
     return 0;
   }
 
   onSpan(kind: Span, data: Uint8Array, start: number, end: number): number {
+    if (this.isBeingFreed) return 0;
     const len = end - start;
     switch (kind) {
       case Span.URL: {
@@ -190,6 +239,8 @@ class ParserImpl implements Settings {
         if (rv !== 0) return rv;
         if (this.numFields === this.numValues) {
           // start of a new field name
+          const pr = this.trackHeaderPair();
+          if (pr !== 0) return pr;
           this.numFields++;
           if (this.numFields === kMaxHeaderFieldsCount) {
             // out of space: flush to JS land
@@ -223,7 +274,7 @@ class ParserImpl implements Settings {
         return 0;
       case Span.BODY: {
         if (len === 0) return 0;
-        if (typeof this.owner[kOnBody] !== 'function') return 0;
+        if (typeof this.callback(kOnBody) !== 'function') return 0;
         const r = this.call(kOnBody, [asBuffer(data.slice(start, end))]);
         if (!r.ok) {
           this.gotException = true;
@@ -237,9 +288,10 @@ class ParserImpl implements Settings {
   }
 
   onHeadersComplete(): number {
+    if (this.isBeingFreed) return 0;
     this.headersCompleted = true;
     this.headerNread = 0;
-    if (typeof this.owner[kOnHeadersComplete] !== 'function') return 0;
+    if (typeof this.callback(kOnHeadersComplete) !== 'function') return 0;
 
     const p = this.llhttp;
     let headers: string[] | undefined;
@@ -254,6 +306,8 @@ class ParserImpl implements Settings {
     }
     this.numFields = 0;
     this.numValues = 0;
+    this.headerPairs = 0;
+    this.maxHeaderPairs = -1;
 
     const method = p.type === TYPE_REQUEST ? p.method : undefined;
     const statusCode = p.type === TYPE_RESPONSE ? p.status_code : undefined;
@@ -277,16 +331,14 @@ class ParserImpl implements Settings {
   }
 
   onMessageComplete(): number {
-    if (this.connections) {
-      this.connections.all.delete(this);
-      this.connections.active.delete(this);
-    }
+    if (this.isBeingFreed) return 0;
+    this.connections?.active.delete(this);
     this.lastMessageStart = 0;
-    if (this.connections) this.connections.all.add(this);
 
     if (this.numFields) this.flush(); // trailing headers
+    this.headerPairs = 0;
 
-    if (typeof this.owner[kOnMessageComplete] !== 'function') return 0;
+    if (typeof this.callback(kOnMessageComplete) !== 'function') return 0;
     const r = this.call(kOnMessageComplete, []);
     if (!r.ok) {
       this.gotException = true;
@@ -296,12 +348,14 @@ class ParserImpl implements Settings {
   }
 
   onChunkHeader(): number {
+    if (this.isBeingFreed) return 0;
     this.headerNread = 0;
     this.chunkExtensionsNread = 0;
     return 0;
   }
 
   onChunkComplete(): number {
+    if (this.isBeingFreed) return 0;
     this.headerNread = 0;
     return 0;
   }
@@ -310,7 +364,8 @@ class ParserImpl implements Settings {
 
   init(type: number, maxHeaderSize: number, lenientFlags: number) {
     this.llhttp.init(type);
-    this.llhttp.lenient_flags = lenientFlags & 0x3ff;
+    this.clearCachedCallbacks();
+    this.llhttp.lenient_flags = lenientFlags & 0x7ff;
     this.headerNread = 0;
     this.url = '';
     this.statusMessage = '';
@@ -318,8 +373,11 @@ class ParserImpl implements Settings {
     this.numValues = 0;
     this.haveFlushed = false;
     this.gotException = false;
+    this.isBeingFreed = false;
     this.headersCompleted = false;
     this.maxHeaderSize = maxHeaderSize;
+    this.headerPairs = 0;
+    this.maxHeaderPairs = -1;
   }
 
   execute(data: Uint8Array | null): unknown {
@@ -428,6 +486,8 @@ class HTTPParser extends AsyncWrap {
   static kLenientOptionalCRLFAfterChunk = 1 << 7;
   static kLenientOptionalCRBeforeLF = 1 << 8;
   static kLenientSpacesAfterChunkSize = 1 << 9;
+  // not part of kLenientAll ('insecure'): http's httpValidation: 'relaxed'
+  static kLenientHeaderValueRelaxed = 1 << 10;
   static kLenientAll = 1023;
 
   constructor() {
@@ -447,6 +507,7 @@ class HTTPParser extends AsyncWrap {
 
   free() {
     const impl = implOf(this);
+    impl?.clearCachedCallbacks();
     if (impl?.resource) {
       asyncHooks()?.emitDestroy(impl.asyncId);
       impl.resource = null;
@@ -455,6 +516,7 @@ class HTTPParser extends AsyncWrap {
 
   remove() {
     const impl = implOf(this);
+    if (impl) impl.isBeingFreed = true;
     if (impl?.connections) {
       impl.connections.all.delete(impl);
       impl.connections.active.delete(impl);
@@ -511,10 +573,11 @@ class HTTPParser extends AsyncWrap {
 
     if (list) {
       impl.connections = list;
+      impl.receivedData = false;
       // Counts as a request in progress until the first message arrives (slowloris protection).
       impl.lastMessageStart = hrtime();
-      list.all.add(impl);
-      list.active.add(impl);
+      list.pushAll(impl);
+      list.pushActive(impl);
     } else {
       impl.connections = null;
     }
@@ -561,21 +624,27 @@ for (const proto of [AsyncWrap.prototype, HTTPParser.prototype]) {
   }
 }
 
+/**
+ * Node 26 keeps both lists as intrusive linked lists in insertion order: a parser joins `all` when
+ * initialized, and moves to the end of `active` whenever a message starts, so `active` is ordered by
+ * message start. A Set's insertion order models that (delete + add moves to the end).
+ */
 class ConnectionsListImpl {
   all = new Set<ParserImpl>();
   active = new Set<ParserImpl>();
+
+  pushAll(p: ParserImpl) {
+    this.all.delete(p);
+    this.all.add(p);
+  }
+
+  pushActive(p: ParserImpl) {
+    this.active.delete(p);
+    this.active.add(p);
+  }
 }
 
 const listImpls = new WeakMap<object, ConnectionsListImpl>();
-
-/** std::set<Parser*, ParserComparator> order: idle parsers first, then by message start. */
-function ordered(set: Set<ParserImpl>): ParserImpl[] {
-  const idle: ParserImpl[] = [];
-  const busy: ParserImpl[] = [];
-  for (const p of set) (p.lastMessageStart === 0 ? idle : busy).push(p);
-  busy.sort((a, b) => a.lastMessageStart - b.lastMessageStart);
-  return idle.concat(busy);
-}
 
 function listOf(self: object): ConnectionsListImpl {
   const l = listImpls.get(self);
@@ -589,17 +658,15 @@ class ConnectionsList {
   }
 
   all() {
-    return ordered(listOf(this).all).map((p) => p.owner);
+    return [...listOf(this).all].map((p) => p.owner);
   }
 
   idle() {
-    return ordered(listOf(this).all)
-      .filter((p) => p.lastMessageStart === 0)
-      .map((p) => p.owner);
+    return [...listOf(this).all].filter((p) => p.lastMessageStart === 0 || !p.receivedData).map((p) => p.owner);
   }
 
   active() {
-    return ordered(listOf(this).active).map((p) => p.owner);
+    return [...listOf(this).active].map((p) => p.owner);
   }
 
   expired(headersTimeout: number, requestTimeout: number) {
@@ -617,7 +684,7 @@ class ConnectionsList {
     if (headersDeadline === 0 && requestDeadline === 0) return [];
 
     const result: unknown[] = [];
-    for (const p of ordered(list.active)) {
+    for (const p of [...list.active]) {
       if ((!p.headersCompleted && headersDeadline > 0 && p.lastMessageStart < headersDeadline) || (requestDeadline > 0 && p.lastMessageStart < requestDeadline)) {
         result.push(p.owner);
         list.active.delete(p);

@@ -189,6 +189,24 @@ add({ name: 'finish mid request', type: REQ, input: 'GET / HT', finish: true });
 add({ name: 'execute after error', type: REQ, chunks: ['FOO / HTTP/1.1\r\n', 'GET / HTTP/1.1\r\n\r\n'], finish: true });
 add({ name: 'empty chunks', type: REQ, chunks: ['', 'GET / HTTP/1.1\r\nHost: x', '', '\r\n\r\n', ''] });
 add({ name: 'body split with empty chunks', type: REQ, chunks: ['POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\n', '', 'ab', '', 'cd'] });
+add({ name: 'relaxed header values', split: true, type: REQ, lenient: L.kLenientHeaderValueRelaxed, input: 'GET / HTTP/1.1\r\nA: b\x01c\x7f\r\nB: \x1fe \r\nC: \x0b\r\n\r\n' });
+add({ name: 'relaxed keeps other checks', type: REQ, lenient: L.kLenientHeaderValueRelaxed, input: 'GET / HTTP/1.1\r\nA: b\r\n c\r\n\r\n' });
+add({ name: 'relaxed with connection header', type: REQ, lenient: L.kLenientHeaderValueRelaxed, input: 'GET / HTTP/1.1\r\nConnection: close\x01\r\n\r\n' });
+// maxHeaderPairs (a property of the parser object, read once per message part; requests only)
+add({ name: 'maxHeaderPairs exceeded', type: REQ, maxHeaderPairs: 4, input: 'GET / HTTP/1.1\r\nA: 1\r\nB: 2\r\nC: 3\r\n\r\n' });
+add({ name: 'maxHeaderPairs exact', type: REQ, maxHeaderPairs: 6, input: 'GET / HTTP/1.1\r\nA: 1\r\nB: 2\r\nC: 3\r\n\r\n' });
+add({ name: 'maxHeaderPairs not a number', type: REQ, maxHeaderPairs: '2', input: 'GET / HTTP/1.1\r\nA: 1\r\nB: 2\r\nC: 3\r\n\r\n' });
+add({ name: 'maxHeaderPairs response', type: RES, maxHeaderPairs: 2, input: 'HTTP/1.1 200 OK\r\nA: 1\r\nB: 2\r\nContent-Length: 0\r\n\r\n' });
+add({ name: 'maxHeaderPairs per message', type: REQ, maxHeaderPairs: 4, input: 'GET / HTTP/1.1\r\nA: 1\r\nB: 2\r\n\r\nGET / HTTP/1.1\r\nA: 1\r\nB: 2\r\n\r\n' });
+add({
+  name: 'maxHeaderPairs trailers',
+  type: REQ,
+  maxHeaderPairs: 4,
+  input: 'POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\nA: 1\r\n\r\n1\r\nz\r\n0\r\nT1: 1\r\nT2: 2\r\nT3: 3\r\n\r\n',
+});
+add({ name: 'maxHeaderPairs split', split: true, type: REQ, maxHeaderPairs: 2, input: 'GET / HTTP/1.1\r\nAb: 1\r\nCd: 2\r\n\r\n' });
+// remove() (the server drops the connection): the parser's callbacks stop
+add({ name: 'execute after remove', type: REQ, ops: [['exec', 'GET /a HTTP/1.1\r\n\r\n'], ['remove'], ['exec', 'POST /b HTTP/1.1\r\nContent-Length: 2\r\n\r\nab'], ['init', REQ], ['exec', 'GET /c HTTP/1.1\r\n\r\n']] });
 add({ name: 'lenient all mixed', split: true, type: REQ, lenient: ALL, input: 'GET / HTTP/1.1\r\nHost : x\r\nA: b\x01c\r\nConnection: close\r\nTransfer-Encoding: chunked\r\nContent-Length: 4\r\n\r\n4 \nabcd\n0\n\nGARBAGE' });
 
 // every byte in the places where llhttp's character tables decide (they differ between llhttp versions)
@@ -197,6 +215,8 @@ for (let b = 0; b < 256; b++) {
   const hex = b.toString(16).padStart(2, '0');
   add({ name: `byte ${hex} in header value`, type: REQ, input: `GET / HTTP/1.1\r\nA: x${ch}y\r\n\r\n` });
   add({ name: `byte ${hex} in header value lenient`, type: REQ, lenient: L.kLenientHeaders, input: `GET / HTTP/1.1\r\nA: x${ch}y\r\n\r\n` });
+  // NUL is left out: llhttp 9.4.3 never returns from it with this flag (see http/llhttp.ts)
+  if (b !== 0) add({ name: `byte ${hex} in header value relaxed`, type: REQ, lenient: L.kLenientHeaderValueRelaxed, input: `GET / HTTP/1.1\r\nA: x${ch}y\r\n\r\n` });
   add({ name: `byte ${hex} in header name`, type: REQ, input: `GET / HTTP/1.1\r\nA${ch}B: x\r\n\r\n` });
   add({ name: `byte ${hex} in url`, type: REQ, input: `GET /a${ch}b HTTP/1.1\r\n\r\n` });
   add({ name: `byte ${hex} in reason`, type: RES, input: `HTTP/1.1 200 O${ch}K\r\nContent-Length: 0\r\n\r\n` });
@@ -257,6 +277,7 @@ function runCase(c) {
     parser.initialize(type, {}, c.max ?? 0, c.lenient ?? 0);
     errored = false;
   };
+  if (c.maxHeaderPairs !== undefined) parser.maxHeaderPairs = c.maxHeaderPairs;
   init(c.type);
   const exec = (s) => {
     let r;
@@ -293,6 +314,8 @@ function runCase(c) {
       parser.resume();
     } else if (op[0] === 'init') {
       init(op[1]);
+    } else if (op[0] === 'remove') {
+      parser.remove();
     }
   }
   if (c.pauseInHeadersComplete) {

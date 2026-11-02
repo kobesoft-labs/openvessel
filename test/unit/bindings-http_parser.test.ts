@@ -52,6 +52,7 @@ function runCase(c: any) {
     parser.initialize(type, {}, c.max ?? 0, c.lenient ?? 0);
     errored = false;
   };
+  if (c.maxHeaderPairs !== undefined) (parser as any).maxHeaderPairs = c.maxHeaderPairs;
   init(c.type);
   const exec = (s: string) => {
     let r;
@@ -84,6 +85,8 @@ function runCase(c: any) {
       parser.resume();
     } else if (op[0] === 'init') {
       init(op[1]);
+    } else if (op[0] === 'remove') {
+      parser.remove();
     }
   }
   if (c.pauseInHeadersComplete) {
