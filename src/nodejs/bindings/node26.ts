@@ -343,3 +343,24 @@ export function createAsyncContextFrame() {
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// ffi (node:ffi, --experimental-ffi): no native libraries in a browser. The module still loads
+// (process.getBuiltinModule walks every builtin); lib asserts that `functions` is an accessor.
+
+export function createFfi() {
+  const b = fromShape('ffi');
+  const proto = b.DynamicLibrary?.prototype;
+  if (proto) {
+    Object.defineProperty(proto, 'functions', {
+      get() {
+        const e = new Error('internalBinding (\'ffi\').DynamicLibrary.prototype.functions is not implemented in OpenVessel') as Error & { code: string };
+        e.code = 'ERR_NOT_IMPLEMENTED';
+        throw e;
+      },
+      configurable: true,
+      enumerable: false,
+    });
+  }
+  return b;
+}

@@ -9,5 +9,7 @@
   "test-vm-script-after-evaluate.js": "Needs a context with its own microtask queue (microtaskMode: 'afterEvaluate'); a browser has one microtask queue per agent and no API for another.",
   "test-vm-module-after-evaluate.js": "Needs a context with its own microtask queue (microtaskMode: 'afterEvaluate'); a browser has one microtask queue per agent and no API for another.",
   "test-vm-harmony-symbols.js": "Needs a context with its own builtins (its Symbol differs from the main one); a browser worker can't create another V8 realm, so contexts share the worker's builtins.",
-  "test-vm-global-property-prototype.js": "Code in the context changes the context's own Object.prototype; without a separate V8 realm the context shares the worker's Object.prototype."
+  "test-vm-global-property-prototype.js": "Code in the context changes the context's own Object.prototype; without a separate V8 realm the context shares the worker's Object.prototype.",
+  "test-vm-global-contextual-store.js": "A strict-mode assignment to an undeclared name must throw while a sloppy one creates a context property; the context is a with-scope over a proxy (no separate V8 realm), whose has() can't tell strict code from sloppy code.",
+  "test-vm-global-restricted-property.js": "A top-level let that collides with a non-configurable property of the context global must be a SyntaxError (GlobalDeclarationInstantiation); scripts run in a function scope under with(), where the declaration simply shadows it."
 }

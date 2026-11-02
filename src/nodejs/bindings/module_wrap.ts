@@ -26,7 +26,9 @@ const kInstantiated = 2;
 const kEvaluating = 3;
 const kEvaluated = 4;
 const kErrored = 5;
-// the phase of a plain import (Node 24+ also has `import source` = 1 and `import defer` = 2)
+// import phases (Node 24+): `import source x from` = 1, `import defer * as x from` = 2, plain = 3
+const kSourcePhase = 1;
+const kDeferPhase = 2;
 const kEvaluationPhase = 3;
 
 interface Request {
@@ -38,6 +40,10 @@ interface Request {
   star: boolean;
   /** names the module imports or re-exports from this request by name ('default' for a default import) */
   names: Set<string>;
+  /** kSourcePhase (`import source x from`), kDeferPhase (`import defer * as x from`) or kEvaluationPhase */
+  phase: number;
+  /** `import source x from …` statements: [start, end) and the local name */
+  sourceStatements: { s: number; e: number; local: string }[];
 }
 
 function bindingNames(p: any, out: Set<string>) {
@@ -200,12 +206,22 @@ export class ModuleWrap {
       }
       if (imp.specifier == null) continue;
       const attributes = attributesOf(imp.attributes);
-      const key = imp.specifier + '\0' + JSON.stringify(attributes);
+      const phase = imp.phase === 'source' ? kSourcePhase : imp.phase === 'defer' ? kDeferPhase : kEvaluationPhase;
+      const key = imp.specifier + '\0' + JSON.stringify(attributes) + '\0' + phase;
       let r = index.get(key);
       if (!r) {
-        r = { specifier: imp.specifier, attributes: Object.freeze(attributes), ranges: [], star: false, names: new Set() };
+        r = { specifier: imp.specifier, attributes: Object.freeze(attributes), ranges: [], star: false, names: new Set(), phase, sourceStatements: [] };
         index.set(key, r);
         this.#requests.push(r);
+      }
+      if (phase === kSourcePhase) {
+        // the browser can't import a module's source phase from a served URL: the statement becomes a
+        // const bound to the linked module's source object (see #rewritten)
+        const local = /^import\s+source\s+([\w$]+)/.exec(src.slice(imp.importStart, imp.start))?.[1];
+        if (local) {
+          r.sourceStatements.push({ s: imp.importStart, e: imp.importEnd, local });
+          continue;
+        }
       }
       const [as, ae] = imp.attributesStart >= 0 ? attributeClause(src, imp.attributesStart) : [-1, -1];
       r.ranges.push({ start: imp.start, end: imp.end, attrStart: as, attrEnd: ae });
@@ -224,7 +240,7 @@ export class ModuleWrap {
   }
 
   getModuleRequests() {
-    return this.#requests.map((r) => ({ specifier: r.specifier, attributes: r.attributes, phase: kEvaluationPhase }));
+    return this.#requests.map((r) => ({ specifier: r.specifier, attributes: r.attributes, phase: r.phase }));
   }
 
   /** Node 24+: a property (V8 knows it once the module is compiled) */
@@ -265,6 +281,19 @@ export class ModuleWrap {
       }
       this.#linked[i] = modules[i];
     }
+    // requests that differ only in phase are one module (ModuleCacheKey: specifier and attributes)
+    const firstSeen = new Map<string, number>();
+    this.#requests.forEach((r, i) => {
+      const attrs = Object.entries(r.attributes);
+      const key = `ModuleCacheKey("${r.specifier}"${attrs.length ? `, {${attrs.map(([k, v]) => `${k}: ${v}`).join(', ')}}` : ''})`;
+      const first = firstSeen.get(key);
+      if (first === undefined) firstSeen.set(key, i);
+      else if (this.#linked[first] !== this.#linked[i]) {
+        const e = new Error(`Module request '${key}' at index ${i} must be linked to the same module requested at index ${first}`) as Error & { code: string };
+        e.code = 'ERR_MODULE_LINK_MISMATCH';
+        throw e;
+      }
+    });
   }
 
   /** The source served to the browser. */
@@ -279,7 +308,10 @@ export class ModuleWrap {
         // the target is always served as JavaScript, so import attributes would make the browser reject it
         if (range.attrStart >= 0) edits.push({ s: range.attrStart, e: range.attrEnd, text: '' });
       }
+      for (const st of r.sourceStatements) edits.push({ s: st.s, e: st.e, text: `const ${st.local} = globalThis.__ovModuleSource(${JSON.stringify(this.id)}, ${i});` });
     });
+    // `import defer` runs eagerly here (the browser evaluates the whole graph up front)
+    for (const m of src.matchAll(/\bimport\s+defer(?=\s*\*)/g)) edits.push({ s: m.index!, e: m.index! + m[0].length, text: 'import' });
     // through globalThis rather than module-local helpers: code that stringifies a function and
     // evaluates it elsewhere (vite's CSS preprocessor workers via artichokie) keeps working
     const lit = JSON.stringify(this.id);
@@ -368,16 +400,24 @@ export class ModuleWrap {
     return out;
   }
 
-  /** What V8 checks while instantiating a vm module graph: every request linked, every imported name exported. */
+  /**
+   * What V8 checks while instantiating a vm module graph: first every request resolves (depth first,
+   * ModuleWrap::ResolveModule), then every imported name is exported.
+   */
   #checkLinks() {
+    if (this.#isVm && !this.#exportNames && this.#status < kInstantiated && !this.#linkCalled) throw linkFailure('module is not linked');
     this.#walk((m) => {
       if (!m.#isVm || m.#exportNames || m.#status >= kInstantiated) return;
-      // a module without requests needn't be linked, unless it's the one being instantiated
-      if (!m.#linkCalled && (m === this || m.#requests.length)) throw linkFailure(`module ${m.url} is not linked`);
+      m.#requests.forEach((r, i) => {
+        if (m.#linked[i]) return;
+        throw linkFailure(m.#linkCalled ? `request for '${r.specifier}' is not resolved` : `request for '${r.specifier}' can not be resolved on module '${m.url}' that is not linked`);
+      });
+    });
+    this.#walk((m) => {
+      if (!m.#isVm || m.#exportNames || m.#status >= kInstantiated) return;
       m.#requests.forEach((r, i) => {
         const t = m.#linked[i];
-        if (!t) throw linkFailure(`request for '${r.specifier}' is not resolved`);
-        if (!r.names.size) return;
+        if (!r.names.size || !t) return;
         const names = t.#allExportNames();
         for (const n of r.names) {
           if (!names.has(n)) throw new SyntaxError(`The requested module '${r.specifier}' does not provide an export named '${n}'`);
@@ -609,6 +649,10 @@ export class ModuleWrap {
     const edits: { s: number; e: number; text: string }[] = [];
     // bare names (not globalThis.…): a module run in a vm context resolves globalThis to the context
     for (const m of this.#metaRanges) edits.push({ s: m.start, e: m.end, text: `__ov$importMeta(${JSON.stringify(this.id)})` });
+    this.#requests.forEach((r, i) => {
+      for (const st of r.sourceStatements) edits.push({ s: st.s, e: st.e, text: `const ${st.local} = __ov$moduleSource(${JSON.stringify(this.id)}, ${i});` });
+    });
+    for (const m of src.matchAll(/\bimport\s+defer(?=\s*\*)/g)) edits.push({ s: m.index!, e: m.index! + m[0].length, text: 'import' });
     for (const d of this.#dynamicRanges) edits.push({ s: d.kwStart, e: d.kwEnd, text: `__ov$dynamicImport.bind(null, ${JSON.stringify(this.id)})` });
     // vm modules resolve `export *` statically (#readExport); sucrase's copy of the keys at require
     // time would read uninitialized bindings in a cycle. Keep the import for evaluation order.
@@ -795,6 +839,13 @@ export class ModuleWrap {
     this.#runSyntheticSteps();
   }
 
+  /** @internal the source object of the module linked at request i (`import source`) */
+  _moduleSource(i: number) {
+    const t = this.#linked[i];
+    if (!t) throw new Error(`module ${this.url} is not linked (${this.#requests[i]?.specifier})`);
+    return t.getModuleSourceObject();
+  }
+
   /** @internal */
   _syncNamespace() {
     return this.#syncExports;
@@ -929,6 +980,8 @@ export function createModuleWrap() {
     __ovImportMeta: { value: (id: string) => byId.get(id)?._importMeta() ?? {}, configurable: true },
     __ovDynamicImport: { value: (id: string, s: unknown, o?: any) => byId.get(id)?._dynamicImport(s, o) ?? importFromCwd(s, o), configurable: true },
     __ovSyncNamespace: { value: (id: string) => byId.get(id)?._syncNamespace(), configurable: true },
+    __ovModuleSource: { value: (id: string, i: number) => byId.get(id)!._moduleSource(i), configurable: true },
+    __ov$moduleSource: { value: (id: string, i: number) => byId.get(id)!._moduleSource(i), configurable: true },
     __ov$importMeta: { value: (id: string) => byId.get(id)?._importMeta(), configurable: true },
     __ov$dynamicImport: { value: (id: string, s: unknown, o?: any) => byId.get(id)!._dynamicImport(s, o), configurable: true },
   });

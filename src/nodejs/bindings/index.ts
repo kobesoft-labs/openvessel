@@ -49,7 +49,7 @@ import { createHeapUtils } from './heap_utils.ts';
 import { createWasiBinding } from './wasi.ts';
 import { createTlsWrap } from './tls_wrap.ts';
 import { createInspector, createProfiler } from './inspector.ts';
-import { createAsyncContextFrame, createCjsLexer, createDiagnosticsChannel, createIpcSerdes, createLocks, createUrlPattern, createWebstorage } from './node26.ts';
+import { createAsyncContextFrame, createCjsLexer, createDiagnosticsChannel, createFfi, createIpcSerdes, createLocks, createUrlPattern, createWebstorage } from './node26.ts';
 
 export type BindingFactory = () => any;
 
@@ -68,6 +68,7 @@ export const factories: Record<string, BindingFactory> = {
   credentials: createCredentials,
   crypto: createCrypto,
   diagnostics_channel: createDiagnosticsChannel,
+  ffi: createFfi,
   encoding_binding: createEncodingBinding,
   errors: createErrors,
   fs: createFs,
