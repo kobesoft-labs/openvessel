@@ -1,7 +1,7 @@
 // The network gate and the service workers: loopback goes to virtual ports, redirects are checked at
 // the host they end at, the prompt's initiator comes from the kernel, two runtimes on one origin keep
 // their own kernels, and the preview's decisions ("once", policy changes, WebSockets) hold.
-//   OV_PORT_BASE=<base> node test/e2e/net-gate.mjs        (needs the internet: registry.npmjs.org, httpbin.org)
+//   OV_PORT_BASE=<base> node test/e2e/net-gate.mjs        (needs the internet: registry.npmjs.org, httpbin.org, httpbin.dev)
 import { startServer, openBrowser } from './harness.mjs';
 
 const server = String.raw`
@@ -25,7 +25,8 @@ http.createServer((req, res) => {
 const U = 'https://registry.npmjs.org/is-number';
 // a host that allows CORS but is not in the policies below
 const DENIED = 'https://cdn.jsdelivr.net/npm/is-number@7.0.0/package.json';
-const redirectTo = (to) => 'https://httpbin.org/redirect-to?url=' + encodeURIComponent(to);
+// httpbin.org stopped redirecting to other hosts (403 "Forbidden redirect URL"); httpbin.dev still does, with CORS
+const redirectTo = (to) => 'https://httpbin.dev/redirect-to?url=' + encodeURIComponent(to);
 
 const srv = await startServer();
 const { browser, page } = await openBrowser({ headless: !process.env.HEADED });
@@ -59,7 +60,7 @@ try {
       await ov.fs.writeFile('/tmp/server.js', src);
       window.__srv = await ov.spawn('node', ['/tmp/server.js', '4321'], { cwd: '/tmp' });
       for (let i = 0; i < 100 && !(await ov._call('ports')).some((p) => p.port === 4321); i++) await new Promise((res) => setTimeout(res, 100));
-      await ov.network.setPolicy({ mode: 'allowlist', presets: ['npm'], allow: ['httpbin.org'] });
+      await ov.network.setPolicy({ mode: 'allowlist', presets: ['npm'], allow: ['httpbin.org', 'httpbin.dev'] });
       out.curlLocal = await ov.exec('curl -s http://localhost:4321/x && echo && curl -s http://127.0.0.1:4321/y');
       out.curlLocalRedirect = await ov.exec('curl -s http://localhost:4321/to-outside | head -c 20');
       // redirects: the host the request ended at is checked too
@@ -189,7 +190,7 @@ try {
   );
   check('an outside WebSocket is checked by the policy', ws === 'error,close 1006 blocked by OpenVessel network policy', ws);
   // redirects in the preview are checked at the host they end at
-  await page.evaluate(() => window.ovB.network.setPolicy({ mode: 'allowlist', presets: [], allow: ['httpbin.org', 'example.com'] }));
+  await page.evaluate(() => window.ovB.network.setPolicy({ mode: 'allowlist', presets: [], allow: ['httpbin.org', 'httpbin.dev', 'example.com'] }));
   const redirectCors = await get(redirectTo(U));
   const redirectNoCors = await get(redirectTo(U), { mode: 'no-cors' });
   const plainNoCors = await get('https://httpbin.org/get', { mode: 'no-cors' });
@@ -201,7 +202,7 @@ try {
   // opaque responses don't show where a redirect ended: a no-cors load is only checked at its first URL
   check('a no-cors preview redirect is checked at its first URL only', redirectNoCors === '0 opaque', redirectNoCors);
   check('a no-cors load from an allowed host works', plainNoCors === '0 opaque', plainNoCors);
-  await page.evaluate(() => window.ovB.network.setPolicy({ mode: 'allowlist', presets: ['npm'], allow: ['httpbin.org'] }));
+  await page.evaluate(() => window.ovB.network.setPolicy({ mode: 'allowlist', presets: ['npm'], allow: ['httpbin.org', 'httpbin.dev'] }));
   const redirectOk = await get(redirectTo(U), { mode: 'no-cors' });
   check('a no-cors preview redirect to an allowed host works', redirectOk === '0 opaque', redirectOk);
 } catch (e) {

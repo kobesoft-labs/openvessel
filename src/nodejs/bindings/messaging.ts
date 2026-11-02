@@ -1062,6 +1062,8 @@ export function createMessaging() {
       MessagePort,
       MessageChannel,
       DOMException: S.perContextExports.DOMException,
+      // Node 26: per_context/domexception.js defines it next to DOMException
+      QuotaExceededError: S.perContextExports.QuotaExceededError,
       broadcastChannel: (name: string) => NodeMessagePort.broadcast(name),
       stopMessagePort: (port: NodeMessagePort) => port instanceof NodeMessagePort && NodeMessagePort.stop(port),
       drainMessagePort: (port: NodeMessagePort) => port instanceof NodeMessagePort && NodeMessagePort.drain(port),

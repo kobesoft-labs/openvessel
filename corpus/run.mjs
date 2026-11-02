@@ -1,6 +1,7 @@
 // Runs `npm install && npm run build` for each corpus site in headless Chrome.
-//   node corpus/run.mjs [--legacy] [filter...]   results → corpus/results/port/ (the default, ported runtime) or corpus/results/ (--legacy)
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+//   node corpus/run.mjs [--legacy] [--shard=i/n] [filter...]   results → corpus/results/port/ (the default, ported runtime) or corpus/results/ (--legacy)
+//   --shard=i/n runs every n-th site from the i-th (1-based), so n runs with different OV_PORT_BASE values share the work
+import { mkdirSync, readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { startServer, openBrowser, exec } from '../test/e2e/harness.mjs';
 import { mountProject } from '../test/e2e/project.mjs';
@@ -11,9 +12,18 @@ const outDir = join(root, port ? 'results/port' : 'results');
 mkdirSync(join(outDir, 'logs'), { recursive: true });
 const sites = JSON.parse(readFileSync(join(root, 'sites.json'), 'utf8'));
 const filters = process.argv.slice(2).filter((a) => !a.startsWith('--'));
-const todo = sites.filter((s) => !filters.length || filters.some((f) => s.id.includes(f)));
+const shard = /^--shard=(\d+)\/(\d+)$/.exec(process.argv.find((a) => a.startsWith('--shard=')) ?? '');
+const todo = sites.filter((s) => !filters.length || filters.some((f) => s.id.includes(f))).filter((_, i) => !shard || i % Number(shard[2]) === Number(shard[1]) - 1);
 const resultsPath = join(outDir, 'results.json');
-const results = existsSync(resultsPath) ? JSON.parse(readFileSync(resultsPath, 'utf8')) : {};
+const readResults = () => (existsSync(resultsPath) ? JSON.parse(readFileSync(resultsPath, 'utf8')) : {});
+let results = readResults();
+/** Records one site; re-reads the file first, so shards running side by side keep each other's results. */
+function saveResult(r) {
+  results = { ...readResults(), [r.id]: r };
+  const tmp = `${resultsPath}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(results, null, 2));
+  renameSync(tmp, resultsPath);
+}
 const env = (port ? '' : 'mkdir -p /etc/openvessel && echo legacy > /etc/openvessel/node; ') + 'export CI=1 ASTRO_TELEMETRY_DISABLED=1;';
 
 /** The package manager the project asks for (packageManager field, then lockfile). */
@@ -58,9 +68,8 @@ try {
       session = await openBrowser();
     }
     r.ms = Date.now() - t0;
-    results[s.id] = r;
     writeFileSync(join(outDir, 'logs', s.id + '.log'), log);
-    writeFileSync(resultsPath, JSON.stringify(results, null, 2));
+    saveResult(r);
     console.log(`[${i + 1}/${todo.length}] ${r.build ? 'OK  ' : r.install ? 'FAIL' : 'INST'} ${s.id} (${Math.round(r.ms / 1000)}s)${r.build ? '' : '\n      ' + r.error.split('\n').slice(-3).join('\n      ')}`);
   }
 } finally {
