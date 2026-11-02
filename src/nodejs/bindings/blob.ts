@@ -2,6 +2,7 @@
 // blobs or a file read on demand) plus a window [start, end); readers hand out the parts in order.
 
 import { sys } from '../../node/sys.ts';
+import { pathString, uvError } from './fs.ts';
 import { registerHostObject } from './messaging.ts';
 import { fromShape } from './shape.ts';
 
@@ -90,14 +91,16 @@ export function createBlob() {
     createBlob(sources: (Uint8Array | BlobHandle)[], _length: number) {
       return new BlobHandle(sources.map((s) => (s instanceof BlobHandle ? s : new Uint8Array(s.buffer, s.byteOffset, s.byteLength))));
     },
-    createBlobFromFilePath(path: string) {
+    createBlobFromFilePath(path: unknown) {
+      // a path that can't be stat'ed throws the UVException (fs.openAsBlob/openAsBlobSync report it)
+      const p = pathString(path);
+      let st: { size: number };
       try {
-        const st = sys<{ size: number }>('stat', { p: path });
-        const h = new BlobHandle([new FilePart(path, st.size)]);
-        return [h, st.size];
-      } catch {
-        return undefined;
+        st = sys<{ size: number }>('stat', { p });
+      } catch (e) {
+        throw uvError(e, 'stat', path);
       }
+      return [new BlobHandle([new FilePart(p, st.size)]), st.size];
     },
     concat(buffers: (ArrayBuffer | ArrayBufferView)[]) {
       const views = buffers.map((x) => (ArrayBuffer.isView(x) ? new Uint8Array(x.buffer, x.byteOffset, x.byteLength) : new Uint8Array(x)));
