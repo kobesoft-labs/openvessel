@@ -50,9 +50,9 @@ const vessel = await OpenVessel.boot({
 | `kernel.js` | カーネル。ES モジュールの Worker（`src/kernel/index.ts`） | 起動ごとに 1 回、`new Worker('__ov/k/<id>/kernel.js', { type: 'module' })` として。`<id>` はランタイムのフレームごとにランダムに決まるカーネル ID で、Service Worker が `kernel.js` の中身を返す |
 | `process.js` | 旧ランタイム: 以前からある手書きの Node 互換レイヤー（`src/node/worker.ts`）。プロセスごとに 1 つのモジュール Worker | VFS のファイル `/etc/openvessel/node` が `legacy` のとき、すべての `node` プロセスで |
 | `node-process.js` | 移植版ランタイム: Node.js 自身の `lib/` を、再実装した `internalBinding()` の上で動かす（`src/nodejs/boot.ts`）。プロセスごとに 1 つのモジュール Worker | 既定で、すべての `node` プロセスで |
-| `nodelib.js` | Node.js v22.23.4 の `lib/`（と `deps/`）のソースを文字列として持つファイル。`scripts/gen-nodelib.mjs` が生成する（約 4.5 MB）。ビルド時に `vendor/node/` があった場合だけ書き出される | `node-process.js` が静的に import |
+| `nodelib.js` | Node.js v26.13.0 の `lib/`（と `deps/`）のソースを文字列として持つファイル。`scripts/gen-nodelib.mjs` が生成する（約 6.6 MB）。ビルド時に `vendor/node/` があった場合だけ書き出される | `node-process.js` が静的に import |
 | `ts-strip.js` | sucrase（クラシックスクリプト）。移植版ランタイムが `require(esm)` で ESM → CommonJS に書き換えるときに使う | 移植版ランタイムで初めて使うとき。同期の `XMLHttpRequest` で取得して評価する |
-| `amaro.js` | Node 自身の `amaro`（swc を WebAssembly にしたもの。JavaScript に埋め込まれていて約 3.4 MB）。Node が同梱しているのと同じバージョン | 移植版ランタイムで初めて TypeScript の型を除去するとき。同期の `XMLHttpRequest` |
+| `amaro.js` | Node 自身の `amaro`（swc を WebAssembly にしたもの。JavaScript に埋め込まれていて約 3.8 MB）。Node が同梱しているのと同じバージョン | 移植版ランタイムで初めて TypeScript の型を除去するとき。同期の `XMLHttpRequest` |
 | `chunks/chunk-<hash>.js` | `kernel.js` と `process.js` が共有するコード（esbuild のコード分割） | その 2 つが静的に import |
 | `chunks/esm-<hash>.js` | 分割した sucrase | カーネルか旧ランタイムが初めて TypeScript の型を除去するとき、または ESM を書き換えるときに動的 `import()` |
 | `chunks/legacy-<hash>.js` | `@noble/hashes` のレガシーなハッシュ | 組み込みの `md5sum` が動的 `import()` |

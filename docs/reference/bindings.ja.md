@@ -10,7 +10,7 @@ Node の `lib/` は、`internalBinding(name)` を通して C++ 側の実装を�
 
 1. `factories[name]` があれば、そのファクトリがバインディングを生成します。ほとんどのファクトリは `fromShape(name)` を土台に、独自のメンバーを上書きします。
 2. ファクトリが無ければ、`fromShape(name)` がそのままバインディングになります。
-3. ファクトリが無く、記録した構造も空（Node v22.23.4 にも存在しないバインディング）の場合は、コード `ERR_INVALID_MODULE` の `Error: No such binding: <name>` を投げます。`getLinkedBinding()` は常にこのエラーを投げます。
+3. ファクトリが無く、記録した構造も空（Node v26.13.0 にも存在しないバインディング）の場合は、コード `ERR_INVALID_MODULE` の `Error: No such binding: <name>` を投げます。`getLinkedBinding()` は常にこのエラーを投げます。
 
 `fromShape()`（`src/nodejs/bindings/shape.ts`）は、本物の Node から `src/node/data/bindings.json` に記録した構造を、実際のオブジェクトに変換します（[ビルド](building.ja.md#gen-node-datamjs) を参照）。
 
@@ -36,14 +36,14 @@ Node の `lib/` は、`internalBinding(name)` を通して C++ 側の実装を�
 | 実装済み | lib が使うメンバーにすべて実際の実装がある |
 | 一部 | 実装はあるが、記録した構造のままのスタブ（`ERR_NOT_IMPLEMENTED`）や、意図的に何もしないメンバーがある |
 | 形だけ | ファクトリが無い。定数だけで、関数はすべて `ERR_NOT_IMPLEMENTED` を投げる |
-| 無し | Node v22.23.4 にも無い。`internalBinding()` が `ERR_INVALID_MODULE` を投げる |
+| 無し | Node v26.13.0 にも無い。`internalBinding()` が `ERR_INVALID_MODULE` を投げる |
 
 ## プロセス・ループ・ランタイム
 
 | バインディング | 実装 | 状況 | メモ |
 |---|---|---|---|
 | `async_wrap` | `process.ts` | 一部 | `async_hook_fields`・`async_id_fields`・`async_ids_stack` は `AsyncHooks` の初期状態から始める（ダンプはコールバックの中で取得したため）。`pushAsyncContext`／`popAsyncContext`／`executionAsyncResource`／`clearAsyncIdStack` は C++ と同じ動作。destroy の ID は後続のタスクでまとめて処理する。スタックの ID は `Float64Array` に保持し、`grow_async_ids_stack` と同様に拡張する（バインディング上の配列を差し替える）。ネイティブのリソースは `AsyncWrap`（`process.ts` の `emitAsyncInit`）で、生成時に `kAsyncIdCounter` から ID を取得して `init` フックを呼ぶ。`loop.scope()` がコールバックの前後で非同期コンテキストを push／pop し、`before`／`after` を呼ぶ（`InternalCallbackScope`）。ハンドルが閉じたとき、リクエストが完了したときに `destroy` をキューに入れる。`getProviderType()` は `Providers` の番号を返す（[Node.js ランタイム](nodejs-runtime.ja.md#asynclocalstorage) を参照）。`setPromiseHooks`・`getPromiseHooks`・`registerDestroyHook`・`setCallbackTrampoline` は何もしない（V8 の Promise フックが無いため） |
-| `builtins` | `src/nodejs/boot.ts` | 実装済み | `nodelib.js` から生成する: `builtinIds`・`compileFunction`・`natives`・`setInternalLoaders`・`hasCachedBuiltins`・`getCacheUsage` |
+| `builtins` | `src/nodejs/boot.ts` | 実装済み | `nodelib.js` から生成する: `builtinIds`・`compileFunction`・`natives`・`setInternalLoaders`・`hasCachedBuiltins`・`getCacheUsage`。`importBuiltinSourceTextModule` は、ES モジュールである組み込みモジュール（`--prof-process` で使う V8 の tick processor）を `ModuleWrap` として評価する |
 | `config` | `process.ts` | 実装済み | 記録した値。ただし `hasInspector: true`・`isDebugBuild: false`・`noBrowserGlobals: false`、`getDefaultLocale()` は `en-US` |
 | `constants` | `index.ts` | 実装済み | 記録した `os`・`fs`・`crypto`・`zlib`・`trace`・`internal` のグループ。`NODE_DEFINE_CONSTANT` と同様に、どのグループもプロトタイプが null で、定数はすべて読み取り専用かつ削除不可 |
 | `credentials` | `process.ts` | 実装済み | uid・gid・euid・egid は 1000、グループは `[1000]`。`setuid` などは現在の ID だけを受け付ける（それ以外は `EPERM`）。名前は `/etc/passwd`・`/etc/group` から引く。`safeGetenv`。`getTempDir`（`TMPDIR`・`TMP`・`TEMP`・`TEMPDIR`・`/tmp`） |
@@ -56,9 +56,9 @@ Node の `lib/` は、`internalBinding(name)` を通して C++ 側の実装を�
 | `symbols` | `process.ts` | 実装済み | 記録した説明を持つ新しい Symbol |
 | `task_queue` | `process.ts` | 実装済み | `tickInfo` をラップし、コールバックスコープの外で `nextTick` が呼ばれたら tick のタスクをスケジュールする。`enqueueMicrotask` はブラウザの `queueMicrotask`。`runMicrotasks` は何もしない（マイクロタスクはブラウザが処理する）。`setPromiseRejectCallback` には、Worker の reject イベントがループ経由で届く |
 | `timers` | `process.ts` → `src/nodejs/loop.ts` | 実装済み | lib のタイマー全体で 1 つのネイティブタイマーを使う。`immediateInfo`・`timeoutInfo`・`toggleImmediateRef`・`getLibuvNow` |
-| `trace_events` | `process.ts` | 一部 | トレースはしない。カテゴリが有効になることはなく、`trace()` は何もしない |
+| `trace_events` | `process.ts` | 一部 | トレースはしない。カテゴリが有効になることはなく、`trace()` は何もしない。`hasAgent()` は `true` を返すので、`node:trace_events` は読み込める（Node 26 はエージェントが無いと読み込みを拒否する） |
 | `uv` | `process.ts` | 実装済み | 記録した Linux のエラーマップから `errname`・`getErrorMap`・`getErrorMessage`。`UV_*` の定数はすべてある |
-| `performance` | `process.ts`・`performance.ts` | 実装済み | `now`、`milestones`（time origin・bootstrap complete）、`Histogram`（Node と同じバケットを持つ HdrHistogram_c の移植）、`createELDHistogram`（ブラウザの interval タイマーでサンプリング）。`loopIdleTime()` は 0、`uvMetricsInfo()` は `[0, 0, 0]`。GC の追跡とオブザーバーは何もしない |
+| `performance` | `process.ts`・`performance.ts` | 実装済み | `now`、`milestones`（time origin・bootstrap complete）、`Histogram` と `SlidingWindowHistogram`（Node と同じバケットを持つ HdrHistogram_c の移植。Node 26 で加わった統計の関数も含む）、`createELDHistogram`（ブラウザの interval タイマーでサンプリング）。`loopIdleTime()` は 0、`uvMetricsInfo()` は `[0, 0, 0]`。GC の追跡とオブザーバーは何もしない |
 | `profiler` | `inspector.ts` | 一部 | V8 のカバレッジ: ディレクトリは受け付けるが、何も収集しない |
 | `inspector` | `inspector.ts` | 一部 | `Connection`／`MainThreadConnection` はすべてのメッセージにエラー `-32601` を返す。`url()` は `undefined`。`open`・`waitForDebugger`・非同期タスクのフックは何もしない。`consoleCall` は Node の console のメソッドだけを呼ぶ |
 | `heap_utils` | `heap_utils.ts` | 一部 | どの関数も `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`（`The feature heap snapshots is unavailable on the current platform…`）を投げる |
@@ -112,21 +112,25 @@ Node の `lib/` は、`internalBinding(name)` を通して C++ 側の実装を�
 | バインディング | 実装 | 状況 | メモ |
 |---|---|---|---|
 | `contextify` | `contextify.ts` | 一部 | `compileFunctionForCJSLoader`・`ContextifyScript`・`compileFunction`・`containsModuleSyntax`（acorn／es-module-lexer）・`makeContext`（エミュレートしたコンテキスト: プロキシのグローバルと `with` スコープ）・`measureMemory`。SIGINT の watchdog 関連の関数は何もしない。`timeout`／`breakOnSigint` と `microtaskMode` は効果が無い。`cachedData` はソースの 16 バイトの記録（`OVC1`）で、V8 と同じ方法で検証する |
-| `module_wrap` | `module_wrap.ts` | 実装済み | `ModuleWrap`（ソーステキストと合成）。ブラウザへは `/__ov/mw/<pid>/<id>.mjs` で配信する。`link` は 22.23 の `link(modules)` と以前の `link(specifiers, modules)` の両方を受け付ける。`require(esm)` 用の `evaluateSync` は sucrase で実装。`createRequiredModuleFacade`。`throwIfPromiseRejected` は何もしない |
+| `module_wrap` | `module_wrap.ts` | 実装済み | `ModuleWrap`（ソーステキストと合成）。ブラウザへは `/__ov/mw/<pid>/<id>.mjs` で配信する。`link` は 22.23 の `link(modules)` と以前の `link(specifiers, modules)` の両方を受け付ける。フェーズだけが違うリクエストは同じモジュールにリンクしなければならない（`ERR_MODULE_LINK_MISMATCH`）。import のフェーズ（`import source` はリンク先のモジュールのソースオブジェクトを束縛し、`import defer` はすぐに評価する）。既定のローダーがコンパイルしたモジュールの `import.meta` は、Node 26 が C++ で行うのと同じくバインディングが設定する。`hasTopLevelAwait`・`hasAsyncGraph`。`require(esm)` 用の `evaluateSync` は sucrase で実装。`createRequiredModuleFacade`。`throwIfPromiseRejected` は何もしない |
 | `modules` | `modules.ts` | 一部 | `readPackageJSON`・`getNearestParentPackageJSON(Type)`・`getPackageScopeConfig`・`getPackageType` をカーネルのファイル読み取りの上で実装。スレッドごとにキャッシュし、Node と同じタプル（`imports`／`exports` は JSON 文字列）で返す。JSON が不正なら `ERR_INVALID_PACKAGE_CONFIG`。コンパイルキャッシュ: `enableCompileCache` は無効と返す。`setLazyPathHelpers` は `file:` の URL に対して `import.meta.dirname`／`filename` を定義する |
 | `wasi` | `wasi.ts` | 実装済み | `WASI` は、`src/node/wasi.ts`（旧ランタイムと共用）の preview1 の関数をバインディングの構造に合わせたもの。ファイルはカーネルを経由する。`proc_exit` はプロセスを終了する。`sock_*` は `ENOSYS` を返す |
 | `wasm_web_api` | `index.ts` | 実装済み | `setImplementation` は何もしない。`WebAssembly.compileStreaming`／`instantiateStreaming` はブラウザのものを使う |
+| `cjs_lexer` | `node26.ts` | 実装済み | `parse()` は、ESM から import した CommonJS のモジュールの名前付き export と再 export を `cjs-module-lexer` で探す（Node 26 は C++ の merve を使う）。解析できなければ名前は無し |
 | `sea` | — | 形だけ | `node:sea` は読み込めるが、関数は例外を投げる |
+| `ffi` | `node26.ts` | 形だけ | `node:ffi` は読み込める。`DynamicLibrary` はネイティブのライブラリを読み込めないので、使うと `ERR_NOT_IMPLEMENTED` を投げる |
 
 ## ワーカーとメッセージング
 
 | バインディング | 実装 | 状況 | メモ |
 |---|---|---|---|
-| `worker` | `worker.ts` | 実装済み | `Worker` はカーネル経由でスレッドを起動する（`threadReserve`・`threadSpawn`・`threadKill`）。`getEnvMessagePort`。`threadId` はプロセスごと。`SHARE_ENV`。`execArgv`／`NODE_OPTIONS` の検証。`resourceLimits` は記録するが制限はしない。ヒープ統計と CPU 使用量は近似値、CPU プロファイルは空、`takeHeapSnapshot` は利用できない |
+| `worker` | `worker.ts` | 実装済み | `Worker` はカーネル経由でスレッドを起動する（`threadReserve`・`threadSpawn`・`threadKill`）。`getEnvMessagePort`。`threadId` はプロセスごと。`SHARE_ENV`。`execArgv`／`NODE_OPTIONS` の検証。`resourceLimits` は記録するが制限はしない。ヒープ統計と CPU 使用量は近似値、CPU プロファイルとヒーププロファイルは空（V8 の形式）、`takeHeapSnapshot` は利用できない |
 | `messaging` | `messaging.ts` | 実装済み | `MessagePort` はブラウザの `MessagePort`（またはプロセス全体の `BroadcastChannel` のグループ）をラップする。メッセージはブラウザの structured clone で複製し、その前後に Node の `Message::Serialize` の規則を適用する（転送リストの検証とエラーは Node と同じ順序。ポート、lib の JS の転送可能オブジェクト、登録済みのホストオブジェクトは参照として渡す）。`receiveMessageOnPort`／drain は、方向ごとの共有メモリのリングバッファ（16 KiB から 1 MiB まで拡張）を読む。`structuredClone`・`moveMessagePortToContext`・`exposeLazyDOMExceptionProperty`・`broadcastChannel` |
-| `serdes` | `serdes.ts` | 実装済み | `Serializer`／`Deserializer` は V8 の `ValueSerializer` の移植（V8 12.4 が書き出す wire format 15）。ブラウザから判別できない点は近似する: int32 の範囲の整数は Smi、Smi でない数を含む packed な数値配列は `PACKED_DOUBLE`、すべてのコードユニットが 0xFF 以下の文字列は 1 バイト文字列として扱う。Proxy はトラップ経由でシリアライズし、ホストオブジェクトは判別できない |
-| `async_context_frame` | — | 形だけ | `--experimental-async-context-frame` |
-| `locks` | — | 無し | |
+| `serdes` | `serdes.ts` | 実装済み | `Serializer`／`Deserializer` は V8 の `ValueSerializer` の移植（wire format 15。V8 14.6 もこの形式で書き出す）。ブラウザから判別できない点は近似する: int32 の範囲の整数は Smi、Smi でない数を含む packed な数値配列は `PACKED_DOUBLE`、すべてのコードユニットが 0xFF 以下の文字列は 1 バイト文字列として扱う。Proxy はトラップ経由でシリアライズし、ホストオブジェクトは判別できない |
+| `async_context_frame` | `node26.ts` | 一部 | continuation-preserved embedder data を入れておくだけの変数。V8 はこのデータを `await` の前後で引き継ぐが、JavaScript ではできない。そのためランタイムは既定で `--no-async-context-frame` とし、`AsyncLocalStorage` は `async_hooks` の上で動く（[Node.js ランタイム](nodejs-runtime.ja.md#asynclocalstorage) を参照） |
+| `locks` | `node26.ts` | 実装済み | `navigator.locks` の Web Locks API（`request`・`query`、共有と排他のモード、`ifAvailable`・`steal`）。ロックの管理はスレッドごと（Node はプロセス内のスレッドで共有する） |
+| `ipc_serdes` | `node26.ts` | 実装済み | `child_process` の IPC の `'advanced'` シリアライズ。4 バイトのビッグエンディアンの長さに続けて、V8 のシリアライズ（`serdes`）。`ArrayBufferView` は型を保つ |
+| `diagnostics_channel` | `node26.ts` | 実装済み | `linkNativeChannel`・`subscribers`。ネイティブのコードから publish するチャネルは無い |
 
 ## バッファ・エンコーディング・URL・国際化
 
@@ -134,15 +138,15 @@ Node の `lib/` は、`internalBinding(name)` を通して C++ 側の実装を�
 |---|---|---|---|
 | `buffer` | `buffer.ts` | 実装済み | slice・write・compare・fill・indexOf・swap の関数すべて、`byteLengthUtf8`・`isUtf8`・`isAscii`・`atob`／`btoa`・`createUnsafeArrayBuffer`。`kStringMaxLength` は 0x1fffffe8 で、Node と同じ「Cannot create a string longer than …」のエラーを出す。Node の起動処理がバインディングから削除する `getZeroFillToggle` と `setBufferPrototype` もある |
 | `blob` | `blob.ts` | 実装済み | blob はパーツ（バイト列、ほかの blob、`createBlobFromFilePath` の場合は必要になったときに読むファイル）のリストと、その範囲で表す。`concat`・`storeDataObject`／`getDataObject`／`revokeObjectURL` |
-| `encoding_binding` | `encoding.ts` | 実装済み | `encodeInto`・`encodeUtf8String`・`decodeUTF8`（`ignoreBOM` でなければ先頭の BOM を除去。`fatal`）・`decodeWindows1252`・`toASCII`／`toUnicode`（ASCII 以外のドメインはプラットフォームの URL パーサーで変換） |
+| `encoding_binding` | `encoding.ts` | 実装済み | `encodeInto`・`encodeUtf8String`・`decodeUTF8`（`ignoreBOM` でなければ先頭の BOM を除去。`fatal`）・`toASCII`／`toUnicode`（ASCII 以外のドメインはプラットフォームの URL パーサーで変換し、`xn--` のラベルは ada 4 と同じく検証する） |
 | `string_decoder` | `string_decoder.ts` | 実装済み | `lib/string_decoder.js` が持つ状態バッファの上で `decode`／`flush` |
 | `url` | `url.ts`・`whatwg-url.ts` | 実装済み | パースは、URL Standard のパーサーを ada と同じ方式で実装したもの（ブラウザの `URL` はパースに使わない）。`url_components` のオフセットはパース結果から計算し直す。`canParse`・`format`・`getOrigin`・`pathToFileURL`・`update`・`domainToASCII`／`domainToUnicode` |
 | `icu` | `icu.ts` | 実装済み | ICU は無い。`getStringWidth` は Node の ICU からダンプしたテーブルを使う。`transcode` は Node のエンコーディング間で変換する。`getConverter`／`decode` はプラットフォームの `TextDecoder` の上で実装（`x-user-defined` の `hasConverter` は false）。`icuErrName` |
-| `url_pattern` | — | 無し | |
-| `webstorage` | — | 形だけ | `localStorage`・`sessionStorage` |
+| `url_pattern` | `node26.ts` | 実装済み | `URLPattern` はブラウザのもの（Chrome、Firefox 142 以降）。ブラウザに無い場合は記録した構造のスタブ |
+| `webstorage` | `node26.ts` | 実装済み | `localStorage`・`sessionStorage` の `Storage`。データはメモリに置き、`--localstorage-file` のファイルは JSON として読み書きする（Node は SQLite を使う）。名前付きプロパティ（`localStorage.foo`）も使える。容量の上限は 10 MB（`QuotaExceededError`） |
 | `permission` | — | 形だけ | `--permission` |
 | `sqlite` | — | 形だけ | `node:sqlite` |
-| `quic` | — | 無し | |
+| `quic`・`dtls` | — | 無し | |
 
 ## 暗号
 
@@ -165,6 +169,8 @@ Node の `lib/` は、`internalBinding(name)` を通して C++ 側の実装を�
 | `crypto/x509.ts` | `parseX509` と `X509Certificate` のハンドル。DER を読み取り（RFC 5280）、名前と拡張は Node と同じ形式で表示する |
 | `crypto/spkac.ts` | `certVerifySpkac`・`certExportPublicKey`・`certExportChallenge` |
 | `crypto/pkcs12.ts` | `SecureContext.loadPKCS12` 用の PKCS#12 の解析と MAC の検証 |
+| `crypto/keccak.ts` | `TurboShakeJob`・`KangarooTwelveJob`・`KmacJob`（`crypto.subtle` でのみ使う） |
+| `crypto/mac.ts` | `crypto.createMac()`。HMAC と KMAC128／256（`getMacs()` もこの 2 つだけを返す） |
 | `crypto/util.ts` | エラーの形、バイト列の入力元、`CryptoJob` のプロトコル（同期の `run()` は `[err, result]`、非同期は `ondone`） |
 | `tls_wrap.ts` | `SecureContext`（ネットワークの節を参照） |
 

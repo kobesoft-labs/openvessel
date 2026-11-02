@@ -288,7 +288,7 @@ Built by `scriptEnv()` from the caller's environment plus:
 | `npm_package_name` | `name` from `package.json`, or empty |
 | `npm_package_version` | `version` from `package.json`, or empty |
 | `npm_package_json` | absolute path of the project's `package.json` |
-| `npm_config_user_agent` | `<pm>/<version> npm/? node/v22.23.4 linux x64 workspaces/false`. For `exec`, an existing value is kept, so a binary started by `npx` inside a `pnpm` script still sees `pnpm` (tools like `only-allow` rely on this). |
+| `npm_config_user_agent` | `<pm>/<version> npm/? node/v26.13.0 linux x64 workspaces/false`. For `exec`, an existing value is kept, so a binary started by `npx` inside a `pnpm` script still sees `pnpm` (tools like `only-allow` rely on this). |
 | `npm_execpath` | `/usr/lib/node_modules/<pm>/bin/<pm>-cli.js` |
 | `npm_node_execpath` | `/usr/bin/node` |
 | `npm_command` | `test` or `start` for those scripts, otherwise `run-script` (also during install) |

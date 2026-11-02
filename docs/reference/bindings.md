@@ -15,7 +15,7 @@ it for the life of the thread:
 1. If `factories[name]` exists, its factory builds the binding. Almost every factory starts from
    `fromShape(name)` and assigns its own members on top.
 2. Otherwise the binding is `fromShape(name)` alone.
-3. If there is no factory and the recorded shape is empty (the binding did not exist in Node v22.23.4),
+3. If there is no factory and the recorded shape is empty (the binding did not exist in Node v26.13.0),
    it throws `Error: No such binding: <name>` with code `ERR_INVALID_MODULE`. `getLinkedBinding()` always
    throws that error.
 
@@ -48,14 +48,14 @@ has no implementation fails loudly when called instead of being `undefined`.
 | implemented | every member lib uses has a real implementation |
 | partial | implemented, but some members are recorded stubs (`ERR_NOT_IMPLEMENTED`) or deliberate no-ops |
 | shape-only | no factory: constants only, every function throws `ERR_NOT_IMPLEMENTED` |
-| absent | not in Node v22.23.4 either: `internalBinding()` throws `ERR_INVALID_MODULE` |
+| absent | not in Node v26.13.0 either: `internalBinding()` throws `ERR_INVALID_MODULE` |
 
 ## Process, loop and runtime
 
 | Binding | Implementation | Status | Notes |
 |---|---|---|---|
 | `async_wrap` | `process.ts` | partial | `async_hook_fields`, `async_id_fields` and `async_ids_stack` start from `AsyncHooks`' initial state (the dump was taken inside a callback); `pushAsyncContext`/`popAsyncContext`/`executionAsyncResource`/`clearAsyncIdStack` as in C++; destroy ids are drained in a later task. The ids of the stack are kept in a `Float64Array` that grows (and is replaced on the binding) like `grow_async_ids_stack`. Native resources are `AsyncWrap`s (`emitAsyncInit` in `process.ts`): an id from `kAsyncIdCounter` and the `init` hook when they are made, `loop.scope()` pushes their async context and runs `before`/`after` around their callbacks (`InternalCallbackScope`), and `destroy` is queued when a handle has closed or a request is done; `getProviderType()` returns the number from `Providers` (see [Node.js runtime](nodejs-runtime.md#asynclocalstorage)). `setPromiseHooks`, `getPromiseHooks`, `registerDestroyHook`, `setCallbackTrampoline` are no-ops: there are no V8 promise hooks |
-| `builtins` | `src/nodejs/boot.ts` | implemented | built from `nodelib.js`: `builtinIds`, `compileFunction`, `natives`, `setInternalLoaders`, `hasCachedBuiltins`, `getCacheUsage` |
+| `builtins` | `src/nodejs/boot.ts` | implemented | built from `nodelib.js`: `builtinIds`, `compileFunction`, `natives`, `setInternalLoaders`, `hasCachedBuiltins`, `getCacheUsage`; `importBuiltinSourceTextModule` evaluates a builtin that is an ES module (V8's tick processor, for `--prof-process`) as a `ModuleWrap` |
 | `config` | `process.ts` | implemented | recorded values, with `hasInspector: true`, `isDebugBuild: false`, `noBrowserGlobals: false`, `getDefaultLocale()` → `en-US` |
 | `constants` | `index.ts` | implemented | recorded `os`, `fs`, `crypto`, `zlib`, `trace`, `internal` groups; every group has a null prototype and every constant is read-only and non-configurable, as `NODE_DEFINE_CONSTANT` makes them |
 | `credentials` | `process.ts` | implemented | uid/gid/euid/egid 1000, groups `[1000]`; `setuid` & co. accept only the current ids (else `EPERM`), names looked up in `/etc/passwd`/`/etc/group`; `safeGetenv`; `getTempDir` (`TMPDIR`, `TMP`, `TEMP`, `TEMPDIR`, `/tmp`) |
@@ -68,9 +68,9 @@ has no implementation fails loudly when called instead of being `undefined`.
 | `symbols` | `process.ts` | implemented | fresh symbols with the recorded descriptions |
 | `task_queue` | `process.ts` | implemented | `tickInfo` is wrapped so that a `nextTick` outside a callback scope schedules the tick task; `enqueueMicrotask` is the browser's `queueMicrotask`; `runMicrotasks` is a no-op (the browser drains microtasks); `setPromiseRejectCallback` is fed by the Worker's rejection events through the loop |
 | `timers` | `process.ts` → `src/nodejs/loop.ts` | implemented | one native timer for all of lib's timers; `immediateInfo`, `timeoutInfo`, `toggleImmediateRef`, `getLibuvNow` |
-| `trace_events` | `process.ts` | partial | no tracing: categories are never enabled, `trace()` does nothing |
+| `trace_events` | `process.ts` | partial | no tracing: categories are never enabled, `trace()` does nothing; `hasAgent()` is `true`, so `node:trace_events` loads (Node 26 refuses to load it without an agent) |
 | `uv` | `process.ts` | implemented | `errname`, `getErrorMap`, `getErrorMessage` from the recorded Linux error map, plus every `UV_*` constant |
-| `performance` | `process.ts`, `performance.ts` | implemented | `now`, `milestones` (time origin, bootstrap complete), `Histogram` (a port of HdrHistogram_c with Node's buckets), `createELDHistogram` (sampled with a browser interval timer); `loopIdleTime()` 0, `uvMetricsInfo()` `[0, 0, 0]`; GC tracking and observers are no-ops |
+| `performance` | `process.ts`, `performance.ts` | implemented | `now`, `milestones` (time origin, bootstrap complete), `Histogram` and `SlidingWindowHistogram` (a port of HdrHistogram_c with Node's buckets, with the statistics Node 26 added), `createELDHistogram` (sampled with a browser interval timer); `loopIdleTime()` 0, `uvMetricsInfo()` `[0, 0, 0]`; GC tracking and observers are no-ops |
 | `profiler` | `inspector.ts` | partial | V8 coverage: the directory is accepted, nothing is collected |
 | `inspector` | `inspector.ts` | partial | `Connection`/`MainThreadConnection` answer every message with error `-32601`; `url()` `undefined`; `open`, `waitForDebugger`, async-task hooks are no-ops; `consoleCall` calls Node's console method only |
 | `heap_utils` | `heap_utils.ts` | partial | every function throws `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` (`The feature heap snapshots is unavailable on the current platform…`) |
@@ -124,21 +124,25 @@ has no implementation fails loudly when called instead of being `undefined`.
 | Binding | Implementation | Status | Notes |
 |---|---|---|---|
 | `contextify` | `contextify.ts` | partial | `compileFunctionForCJSLoader`, `ContextifyScript`, `compileFunction`, `containsModuleSyntax` (acorn / es-module-lexer), `makeContext` (emulated contexts: proxy global + `with` scope), `measureMemory`. The SIGINT watchdog functions are no-ops; `timeout`/`breakOnSigint` and `microtaskMode` have no effect. `cachedData` is a 16-byte record of the source (`OVC1`) checked like V8's |
-| `module_wrap` | `module_wrap.ts` | implemented | `ModuleWrap` (source-text and synthetic), served to the browser at `/__ov/mw/<pid>/<id>.mjs`; `link` accepts both the 22.23 `link(modules)` and the older `link(specifiers, modules)`; `evaluateSync` for `require(esm)` through sucrase; `createRequiredModuleFacade`; `throwIfPromiseRejected` is a no-op |
+| `module_wrap` | `module_wrap.ts` | implemented | `ModuleWrap` (source-text and synthetic), served to the browser at `/__ov/mw/<pid>/<id>.mjs`; `link` accepts both the 22.23 `link(modules)` and the older `link(specifiers, modules)`, and requests that differ only in phase must be linked to the same module (`ERR_MODULE_LINK_MISMATCH`); import phases (`import source` binds the linked module's source object, `import defer` is evaluated eagerly); `import.meta` of a module the default loader compiled is filled in by the binding, as Node 26 does in C++; `hasTopLevelAwait`, `hasAsyncGraph`; `evaluateSync` for `require(esm)` through sucrase; `createRequiredModuleFacade`; `throwIfPromiseRejected` is a no-op |
 | `modules` | `modules.ts` | partial | `readPackageJSON`, `getNearestParentPackageJSON(Type)`, `getPackageScopeConfig`, `getPackageType` over the kernel's file reads, cached per thread, returned as Node's tuple with `imports`/`exports` as JSON text; `ERR_INVALID_PACKAGE_CONFIG` for bad JSON. Compile cache: `enableCompileCache` reports it disabled. `setLazyPathHelpers` defines `import.meta.dirname`/`filename` for `file:` URLs |
 | `wasi` | `wasi.ts` | implemented | `WASI` gives the preview1 functions of `src/node/wasi.ts` (shared with the legacy runtime) the binding's shape; files go through the kernel; `proc_exit` exits the process; the `sock_*` calls return `ENOSYS` |
 | `wasm_web_api` | `index.ts` | implemented | `setImplementation` is a no-op: `WebAssembly.compileStreaming`/`instantiateStreaming` are the browser's |
+| `cjs_lexer` | `node26.ts` | implemented | `parse()` finds the named exports and re-exports of a CommonJS module imported from ESM, with `cjs-module-lexer` (Node 26 uses merve in C++); on a parse error, no names |
 | `sea` | — | shape-only | `node:sea` loads; its functions throw |
+| `ffi` | `node26.ts` | shape-only | `node:ffi` loads; `DynamicLibrary` can't load native libraries, so using it throws `ERR_NOT_IMPLEMENTED` |
 
 ## Workers and messaging
 
 | Binding | Implementation | Status | Notes |
 |---|---|---|---|
-| `worker` | `worker.ts` | implemented | `Worker` starts a thread through the kernel (`threadReserve`, `threadSpawn`, `threadKill`); `getEnvMessagePort`; `threadId` per process; `SHARE_ENV`; `execArgv`/`NODE_OPTIONS` checks; `resourceLimits` recorded, not enforced; heap statistics and CPU usage approximated, CPU profiles empty, `takeHeapSnapshot` unavailable |
+| `worker` | `worker.ts` | implemented | `Worker` starts a thread through the kernel (`threadReserve`, `threadSpawn`, `threadKill`); `getEnvMessagePort`; `threadId` per process; `SHARE_ENV`; `execArgv`/`NODE_OPTIONS` checks; `resourceLimits` recorded, not enforced; heap statistics and CPU usage approximated, CPU and heap profiles empty (in V8's format), `takeHeapSnapshot` unavailable |
 | `messaging` | `messaging.ts` | implemented | `MessagePort` wraps a browser `MessagePort` (or a process-wide `BroadcastChannel` group); messages are cloned by the browser's structured clone with Node's `Message::Serialize` rules around it (transfer-list checks and errors in Node's order; ports, lib's JS transferables and registered host objects travel as references). `receiveMessageOnPort`/drain read a shared-memory ring per direction (16 KiB growing to 1 MiB). `structuredClone`, `moveMessagePortToContext`, `exposeLazyDOMExceptionProperty`, `broadcastChannel` |
-| `serdes` | `serdes.ts` | implemented | `Serializer`/`Deserializer` over a port of V8's `ValueSerializer` (wire format 15, as V8 12.4 writes it). What the browser can't tell is approximated: integers in int32 range are Smis, a packed array of numbers with a non-Smi is `PACKED_DOUBLE`, a string is one-byte when every code unit is ≤ 0xFF; proxies are serialized through their traps, host objects can't be recognized |
-| `async_context_frame` | — | shape-only | `--experimental-async-context-frame` |
-| `locks` | — | absent | |
+| `serdes` | `serdes.ts` | implemented | `Serializer`/`Deserializer` over a port of V8's `ValueSerializer` (wire format 15, which V8 14.6 still writes). What the browser can't tell is approximated: integers in int32 range are Smis, a packed array of numbers with a non-Smi is `PACKED_DOUBLE`, a string is one-byte when every code unit is ≤ 0xFF; proxies are serialized through their traps, host objects can't be recognized |
+| `async_context_frame` | `node26.ts` | partial | a plain slot for the continuation-preserved embedder data. V8 carries that data across `await`; JavaScript can't, so the runtime defaults to `--no-async-context-frame` and `AsyncLocalStorage` runs on `async_hooks` (see [Node.js runtime](nodejs-runtime.md#asynclocalstorage)) |
+| `locks` | `node26.ts` | implemented | the Web Locks API behind `navigator.locks` (`request`, `query`, shared/exclusive modes, `ifAvailable`, `steal`); one lock manager per thread, where Node shares one between the threads of a process |
+| `ipc_serdes` | `node26.ts` | implemented | the `'advanced'` serialization of `child_process` IPC: a 4-byte big-endian length, then V8's serialization (`serdes`); `ArrayBufferView`s keep their type |
+| `diagnostics_channel` | `node26.ts` | implemented | `linkNativeChannel`, `subscribers`; no channel is published from native code |
 
 ## Buffers, encodings, URL, i18n
 
@@ -146,15 +150,15 @@ has no implementation fails loudly when called instead of being `undefined`.
 |---|---|---|---|
 | `buffer` | `buffer.ts` | implemented | all slice/write/compare/fill/indexOf/swap functions, `byteLengthUtf8`, `isUtf8`, `isAscii`, `atob`/`btoa`, `createUnsafeArrayBuffer`; `kStringMaxLength` 0x1fffffe8 with Node's "Cannot create a string longer than …" error; also `getZeroFillToggle` and `setBufferPrototype`, which Node's bootstrap removes from the binding |
 | `blob` | `blob.ts` | implemented | a blob is a list of parts (bytes, other blobs, or a file read on demand for `createBlobFromFilePath`) with a window; `concat`, `storeDataObject`/`getDataObject`/`revokeObjectURL` |
-| `encoding_binding` | `encoding.ts` | implemented | `encodeInto`, `encodeUtf8String`, `decodeUTF8` (a leading BOM is removed unless `ignoreBOM`; `fatal`), `decodeWindows1252`, `toASCII`/`toUnicode` (non-ASCII domains are mapped through the platform URL parser) |
+| `encoding_binding` | `encoding.ts` | implemented | `encodeInto`, `encodeUtf8String`, `decodeUTF8` (a leading BOM is removed unless `ignoreBOM`; `fatal`), `toASCII`/`toUnicode` (non-ASCII domains are mapped through the platform URL parser, `xn--` labels checked as ada 4 checks them) |
 | `string_decoder` | `string_decoder.ts` | implemented | `decode`/`flush` over the state buffer that `lib/string_decoder.js` owns |
 | `url` | `url.ts`, `whatwg-url.ts` | implemented | parsing is the URL Standard's own parser written as ada does it (the browser's `URL` is not used for parsing); `url_components` offsets are recomputed from the parsed record; `canParse`, `format`, `getOrigin`, `pathToFileURL`, `update`, `domainToASCII`/`domainToUnicode` |
 | `icu` | `icu.ts` | implemented | no ICU: `getStringWidth` from a table dumped from Node's ICU; `transcode` between Node's encodings; `getConverter`/`decode` on the platform `TextDecoder` (`hasConverter` is false for `x-user-defined`); `icuErrName` |
-| `url_pattern` | — | absent | |
-| `webstorage` | — | shape-only | `localStorage`/`sessionStorage` |
+| `url_pattern` | `node26.ts` | implemented | `URLPattern` is the browser's own (Chrome, Firefox 142+); where the browser has none, the recorded stub |
+| `webstorage` | `node26.ts` | implemented | `Storage` for `localStorage`/`sessionStorage`, kept in memory; a `--localstorage-file` is read and rewritten as JSON (Node uses SQLite). Named properties (`localStorage.foo`) work; the quota is 10 MB (`QuotaExceededError`) |
 | `permission` | — | shape-only | `--permission` |
 | `sqlite` | — | shape-only | `node:sqlite` |
-| `quic` | — | absent | |
+| `quic`, `dtls` | — | absent | |
 
 ## Crypto
 
@@ -182,6 +186,8 @@ OpenSSL context.
 | `crypto/x509.ts` | `parseX509` and the `X509Certificate` handle over a DER reading (RFC 5280), names and extensions formatted as Node prints them |
 | `crypto/spkac.ts` | `certVerifySpkac`, `certExportPublicKey`, `certExportChallenge` |
 | `crypto/pkcs12.ts` | PKCS#12 parsing and MAC check for `SecureContext.loadPKCS12` |
+| `crypto/keccak.ts` | `TurboShakeJob`, `KangarooTwelveJob`, `KmacJob` (`crypto.subtle` only) |
+| `crypto/mac.ts` | `crypto.createMac()`: HMAC and KMAC128/256 (`getMacs()` lists only those) |
 | `crypto/util.ts` | error shapes, byte sources, the `CryptoJob` protocol (sync `run()` → `[err, result]`, async `ondone`) |
 | `tls_wrap.ts` | `SecureContext` (see Network) |
 

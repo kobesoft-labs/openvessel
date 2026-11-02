@@ -1,6 +1,6 @@
 # Node の移植（方針 A）
 
-2026-10-23 決定。手書きの組み込みモジュール（旧 `src/node/`）をやめ、**Node の `lib/` をそのまま動かす**（決めたときは v22.20.0、いまは v22.23.4。版は [NODE-VERSION.md](NODE-VERSION.md)）。
+2026-10-23 決定。手書きの組み込みモジュール（旧 `src/node/`）をやめ、**Node の `lib/` をそのまま動かす**（決めたときは v22.20.0、いまは v26.13.0。版は [NODE-VERSION.md](NODE-VERSION.md)）。
 本来 C++ で書かれている部分（`internalBinding`）を、OpenVessel のカーネル（OS の層）の上に TypeScript で書く。
 実装は `src/nodejs/`（移植版ランタイム）で、これが既定のランタイム。旧 `src/node/`（旧ランタイム）もまだ残っていて、VFS の `/etc/openvessel/node` に `legacy` と書くと旧ランタイムで動く（`port` は既定と同じ意味で、いまも受け付ける）。
 
@@ -24,7 +24,7 @@ OS の層（カーネル・残す）               ← src/kernel/
 - 版は `src/node/version.ts` の 1 か所。`scripts/gen-node-data.mjs` が公式の Docker イメージ（`node:<版>-bookworm-slim`、linux/amd64）の Node から、lib と deps のソースを `vendor/node/natives.json`（git の外。読む用に `vendor/node/lib/` にも同じものを置く）に取る。ライセンスは Node の LICENSE を dist に同梱
 - 定数の表（オプションの既定値・uv の errno・各種 constants・http のメソッド・crypto/zlib の定数など）とバインディングの形は、同じ `scripts/gen-node-data.mjs` が同じイメージの Node（`--expose-internals`）から吸い出して `src/node/data/*.json` にする。手で書かない
 - 起動の速さ: lib 全体をビルド時に 1 つのファイル（`scripts/gen-nodelib.mjs` が作る `dist/runtime/nodelib.js`）に束ね（各モジュールは関数のまま、評価は使う時）、Worker の読み込みに V8 のコードキャッシュを効かせる。起動時間を計り続ける（目標: `node -e 0` が 30ms 以内）
-- TypeScript の型の除去は Node と同じ amaro（swc の WASM、3 MB）。`nodelib.js` には入れず `amaro.js` として別に置き、初めて使うときに読む。sucrase は `require(esm)` の ESM → CommonJS の書き換えにだけ使う（`ts-strip.js`）
+- TypeScript の型の除去は Node と同じ amaro（swc の WASM、約 3.8 MB）。`nodelib.js` には入れず `amaro.js` として別に置き、初めて使うときに読む。sucrase は `require(esm)` の ESM → CommonJS の書き換えにだけ使う（`ts-strip.js`）
 
 ## 実行のモデル（libuv の代わり）
 
@@ -37,7 +37,7 @@ OS の層（カーネル・残す）               ← src/kernel/
 
 | 部分 | 方針 |
 |---|---|
-| ESM（`module_wrap`） | `ModuleWrap` を JS で書く。ソースはカーネルに登録し、ランタイムの SW が `/__ov/mw/<pid>/<id>.mjs` でブラウザの本物の ESM として配る。リンクは import の指定子をリンク先の URL に書き換えて表す。合成モジュール（`node:fs` など）は `var` と `setExport()` で生きた束縛を作る。`import.meta` と動的 import は Node のコールバックへつなぐ。同期の評価（`require(esm)`）は sucrase で ESM→CJS に書き換えて |
+| ESM（`module_wrap`） | `ModuleWrap` を JS で書く。ソースはカーネルに登録し、ランタイムの SW が `/__ov/mw/<pid>/<id>.mjs` でブラウザの本物の ESM として配る。リンクは import の指定子をリンク先の URL に書き換えて表す。合成モジュール（`node:fs` など）は `var` と `setExport()` で生きた束縛を作る。`import.meta` は、既定のローダーのモジュールならバインディングが埋める（Node 26 は C++ で埋める）。それ以外の `import.meta` と動的 import は Node のコールバックへつなぐ。`import source` はリンク先のソースオブジェクトに、`import defer` はふつうの import に書き換える（すぐ評価する）。同期の評価（`require(esm)`）は sucrase で ESM→CJS に書き換えて |
 | CJS（`contextify.compileFunctionForCJSLoader`） | 関数で包んで間接 `eval` で評価。`sourceURL` を付ける。中の動的 `import()` は es-module-lexer で見つけて Node のコールバックへ回す |
 | ストリーム（`stream_wrap`・`pipe_wrap`・`tty_wrap`） | カーネルの fd の読み（readStart/readStop）と書きに載せる。`streamBaseState` と `onread` は Node と同じ形 |
 | 子プロセス（`process_wrap`・`spawn_sync`） | カーネルの spawn。IPC は socketpair（`NODE_CHANNEL_FD`）。親子の JSON のやり取りは lib の JS がそのまま行う |
@@ -46,6 +46,8 @@ OS の層（カーネル・残す）               ← src/kernel/
 | `zlib` | pako の zlib の移植（z_stream 単位で Node と同じ）。Brotli と Zstd は WASM |
 | `crypto` | @noble/hashes・@noble/ciphers・@noble/curves の上に書く（ハッシュ・HMAC・乱数・PBKDF2/scrypt/HKDF・暗号・鍵・署名・X.509）。同期のものは同期のまま、非同期のジョブはループの次のターンで終わる |
 | `vm` | 新しい realm は作れないので、`with` とプロキシで近似（`contextify.ts`）。範囲を文書に書く |
+| `AsyncLocalStorage` | Node 24 からの既定（`--async-context-frame`。V8 の continuation-preserved embedder data）はブラウザから見えない。既定を `--no-async-context-frame` にして、Node 22 と同じ `async_hooks` の上で動かす（`src/nodejs/options.ts`）。`await` のあとでストアが消えるのは前と同じ |
+| Node 26 で増えたバインディング（`cjs_lexer`・`ipc_serdes`・`locks`・`webstorage`・`url_pattern` など） | `src/nodejs/bindings/node26.ts`。`cjs_lexer` は cjs-module-lexer、`url_pattern` はブラウザの `URLPattern`、`webstorage` はメモリ（`--localstorage-file` は JSON のファイル）、`locks` はスレッドごと |
 | `util`（Promise の状態・Proxy の中身・反復子の中身） | ブラウザから見えないので「分からない」を返す（inspect の表示が Node と違う箇所として一覧に残す） |
 
 ## 段階

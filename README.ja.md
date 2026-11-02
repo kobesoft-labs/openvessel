@@ -31,7 +31,7 @@ OpenVessel はクリーンルーム方式で開発しています（ほかのブ
 
 ## ほかと違うところ
 
-- Node.js を模倣したものではなく、Node.js そのものを動かします。Node.js v22 の `lib/`（Node の JavaScript で書かれた部分）を
+- Node.js を模倣したものではなく、Node.js そのものを動かします。Node.js v26 の `lib/`（Node の JavaScript で書かれた部分）を
   変更せずに実行し、Node が C++ で実装している部分（`internalBinding()`）を、小さなカーネルの上に TypeScript で
   実装し直しています。そのため、エラーメッセージ・スタックトレース・引数のチェック・イベントループの順序が Node と同じになります。
   Node の新しいバージョンへの追従は、そのソースを読み直す作業になります（[docs/NODE-VERSION.md](docs/NODE-VERSION.md)）。
@@ -48,10 +48,9 @@ OpenVessel はクリーンルーム方式で開発しています（ほかのブ
 
 - バージョン: 1.2.1。[変更履歴](CHANGELOG.md)・[リリース手順](docs/RELEASING.md) を参照してください。バージョン番号は
   OpenVessel 独自の semver で、移植している Node.js のバージョンは各リリースのタイトルに記載します。
-- Node.js: v22.23.4（`src/node/version.ts`）
-- Node 自身のテストスイート: 対象モジュールの 1271 本のうち、ブラウザで通せる 1237 本すべて（100%）が通ります。
-  残りの 34 本は理由とともに対象外として [docs/compatibility.ja.md](docs/compatibility.ja.md) に記載しています。
-- Astro のサイト: 実際のサイト 147 本のうち 131 本がビルドできます（Astro 5・6・7）。[docs/compatibility.ja.md](docs/compatibility.ja.md) を参照してください。
+- Node.js: v26.13.0（`src/node/version.ts`）
+- Node 自身のテストスイート: {{NODE_TESTS}}。ブラウザでは通せないテストは、理由とともに [docs/compatibility.ja.md](docs/compatibility.ja.md) に記載しています。
+- Astro のサイト: {{CORPUS}}（Astro 5・6・7）。[docs/compatibility.ja.md](docs/compatibility.ja.md) を参照してください。
 - ブラウザ: Chromium 系のブラウザ。Firefox（現行版）でも移植版ランタイムが動き、シェル・npm・Astro のビルドと開発サーバー・
   プレビューが使えます。Node のテストは 1237 本中 1200 本が通ります（[注意点](docs/compatibility.ja.md#firefox)）。
   クロスオリジン分離（`SharedArrayBuffer`）が必要です。
@@ -133,8 +132,9 @@ node test/node-compat/run.mjs --port --report              # モジュールご�
 node corpus/run.mjs [絞り込み]                              # Astro のサイト集をビルド
 ```
 
-E2E テストは `playwright-core` でシステムの Chrome を操作します（`OV_BROWSER=firefox` を指定すると Playwright の Firefox を使います。
-Firefox は `npx playwright-core install firefox` で 1 度だけインストールしておきます）。`HEADED=1` でブラウザの画面を表示し、
+E2E テストは `playwright-core` でシステムの Chrome を操作します。Chrome がインストールされていなければ Playwright の Chromium を使います
+（`npx playwright-core install chromium` で 1 度だけインストールしておきます。`OV_CHROME=chromium` を指定すると常に Chromium を使います）。
+`OV_BROWSER=firefox` を指定すると Playwright の Firefox を使います（`npx playwright-core install firefox` で 1 度だけインストールしておきます）。`HEADED=1` でブラウザの画面を表示し、
 `OV_CONSOLE=1` でブラウザのコンソール出力を表示します。`OV_PORT_BASE=<port>` を使うと複数のテストスイートを並行して実行できます。
 
 ## ライセンス

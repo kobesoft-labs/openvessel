@@ -17,7 +17,7 @@ contains two different scripts for that Worker:
 |---|---|---|
 | Worker script | `dist/runtime/node-process.js` | `dist/runtime/process.js` |
 | Source | `src/nodejs/` (entry `src/nodejs/boot.ts`) | `src/node/` (entry `src/node/worker.ts`) |
-| What runs | Node.js v22.23.4's own `lib/` (bundled in `dist/runtime/nodelib.js`); the C++ half (`internalBinding()`) is re-implemented in TypeScript (see [Bindings](bindings.md)) | hand-written Node-compatible modules (`fs.ts`, `http.ts`, `module.ts`, …) |
+| What runs | Node.js v26.13.0's own `lib/` (bundled in `dist/runtime/nodelib.js`); the C++ half (`internalBinding()`) is re-implemented in TypeScript (see [Bindings](bindings.md)) | hand-written Node-compatible modules (`fs.ts`, `http.ts`, `module.ts`, …) |
 | Command line | Node's option table and parser (`src/nodejs/options.ts`); unknown options are errors | a small hand-written parser; unknown options are ignored |
 | TypeScript | Node's own type stripping (amaro) | sucrase's `typescript` transform (enums etc. are accepted) |
 | ES modules | `module_wrap` binding, served at `/__ov/mw/<pid>/<id>.mjs` | the kernel's ESM service at `/__ov/esm/…` and `/__ov/builtin/…` |
@@ -86,7 +86,7 @@ registered by a binding (`child-exit`, `signal`, `fd-data`, `fd-writable`, `tcp-
 
 1. Records the init message, connects the system-call channel, and (main thread only) reads the
    `--env-file` files and parses the command line. An invalid command line prints each error as
-   `<argv0>: <error>` and exits with code 9. `--version`/`-v` prints `v22.23.4` and `--v8-options` prints
+   `<argv0>: <error>` and exits with code 9. `--version`/`-v` prints `v26.13.0` and `--v8-options` prints
    V8's option list, then exit with 0 before anything else is loaded. `Error.stackTraceLimit` is set from
    `--stack-trace-limit` (10 by default).
 2. Installs listeners for the Worker's `unhandledrejection`, `rejectionhandled` and `error` events.
@@ -154,7 +154,10 @@ The parameter lists are those of `node_builtins.cc`:
 
 `internalBinding('builtins')` exposes `builtinIds`, `compileFunction(id)` (unknown id:
 `ERR_UNKNOWN_BUILTIN_MODULE`, `No such built-in module: <id>`), `natives` (a read-only view of the
-sources), `hasCachedBuiltins()` → `true` and `getCacheUsage()` → three empty lists.
+sources), `hasCachedBuiltins()` → `true` and `getCacheUsage()` → three empty lists. A few builtins are ES
+modules (V8's tick processor under `internal/deps/v8/tools/`, which `--prof-process` runs); for those,
+`importBuiltinSourceTextModule(id)` builds a `ModuleWrap` for the module and the builtins it imports and
+evaluates it.
 
 ### OV_TIMING
 
@@ -199,7 +202,7 @@ hooks and calls `threadExit`), then blocks in `Atomics.wait` until the kernel te
 ### Parsing
 
 `parseCommandLine()` (`src/nodejs/options.ts`) follows `node_options.cc`, driven by the option table
-dumped from real Node (`src/node/data/process.json`: 210 options, 25 aliases, their types and whether
+dumped from real Node (`src/node/data/process.json`: 248 options, 30 aliases, their types and whether
 they are allowed in `NODE_OPTIONS`):
 
 - `NODE_OPTIONS` is applied first, then the command line, so the command line wins. `NODE_OPTIONS` is
@@ -211,17 +214,19 @@ they are allowed in `NODE_OPTIONS`):
   `process.execArgv` keeps what was typed).
 - `--name=value` and `--name value` are both accepted for options that take a value. Aliases are expanded
   as in Node (`-e` → `--eval`, `-p` → `--print`, `-pe` → `--print --eval`, `-C` → `--conditions`,
-  `-r` → `--require`, `--loader` → `--experimental-loader`, `-c` → `--check`, `-i` → `--interactive`, …).
+  `-r` → `--require`, `--loader` → `--experimental-loader`, `-c` → `--check`, `-i` → `--interactive`,
+  `--experimental-strip-types` → `--strip-types`, `--webstorage` → `--experimental-webstorage`, …).
   `--prof-process` expands to `--prof-process --`, so everything after it is an argument.
 - `--no-<name>` negates a boolean option. Options switch on others as `Implies()` does in
   `node_options.cc`: `--eval` → `[has_eval_string]`, `--env-file`/`--env-file-if-exists` →
-  `[has_env_file_string]`, `--watch-path` → `--watch`, `--experimental-strip-types` →
-  `--experimental-detect-module`, `--experimental-transform-types` → `--experimental-strip-types` and
-  `--enable-source-maps`, `--inspect-brk` → `--inspect`, `--report-signal` → `--report-on-signal`, ….
+  `[has_env_file_string]`, `--watch-path` → `--watch`, `--experimental-require-module` →
+  `--require-module`, `--inspect-brk` → `--inspect`, `--report-signal` → `--report-on-signal`, ….
+  `--require-module` and `--experimental-require-module` set the same value, so `--no-` of either turns
+  both off.
 - Integer options are stored as numbers, string lists (`--require`, `--import`, `--conditions`, …)
   accumulate.
 - An option Node doesn't know goes to V8, as in Node. V8's own list of flags (`node --v8-options` of
-  Node v22.23.4 on Linux x64, `src/nodejs/data/v8-options.json`) decides: a V8 flag is accepted (and has
+  Node v26.13.0 on Linux x64, `src/nodejs/data/v8-options.json`) decides: a V8 flag is accepted (and has
   no effect, see below), anything else is a bad option. A boolean flag takes `--no-`; any other flag needs
   its value after `=` (Node hands the argument to V8 alone), which must suit its type.
 
@@ -230,7 +235,7 @@ Errors (each printed as `node: <message>`, exit code 9):
 | Message | Cause |
 |---|---|
 | `bad option: <arg>` | an option in neither Node's table nor V8's, or a V8 flag with a value that doesn't suit it (V8's own message comes first, see below) |
-| `<option> is not allowed in NODE_OPTIONS` | an option Node disallows in `NODE_OPTIONS` (40 of them, e.g. `--eval`), and any option not in Node's table (V8 flags included) |
+| `<option> is not allowed in NODE_OPTIONS` | an option Node disallows in `NODE_OPTIONS` (50 of them, e.g. `--eval`), and any option not in Node's table (V8 flags included) |
 | `--no-<name> is an invalid negation because it is not a boolean option` | `--no-` on a Node option that isn't boolean |
 | `<arg> requires an argument` | a value option at the end of the line |
 | `<file>: not found` | an `--env-file` that can't be opened (`--env-file-if-exists` prints `<file> not found. Continuing without it.` instead and goes on) |
@@ -240,8 +245,8 @@ Errors (each printed as `node: <message>`, exit code 9):
 
 A V8 flag with a wrong value gets V8's message before Node's. V8 stops there, so that flag, the V8
 flags after it and the V8 flags Node adds itself (`--harmony-import-attributes`,
-`--no-harmony-import-assertions`, `--experimental-wasm-imported-strings`, `--experimental-wasm-memory64`,
-`--experimental-wasm-exnref`) are all reported as bad options, as in Node:
+`--js-source-phase-imports`, `--external-memory-max-reasonable-size=0`) are all reported as bad options,
+as in Node:
 
 ```text
 $ node --bogus
@@ -253,24 +258,22 @@ Error: illegal value for flag --stack-trace-limit of type int
 Try --help for options
 node: bad option: --stack-trace-limit
 node: bad option: --harmony-import-attributes
-node: bad option: --no-harmony-import-assertions
-node: bad option: --experimental-wasm-imported-strings
-node: bad option: --experimental-wasm-memory64
-node: bad option: --experimental-wasm-exnref
+node: bad option: --js-source-phase-imports
+node: bad option: --external-memory-max-reasonable-size=0
 ```
 
 ### What the options do
 
 The parsed values are what `internalBinding('options').getCLIOptionsValues()` returns, so Node's own
 `lib/` reads and honours them exactly as in Node (`--require`, `--import`, `--conditions`,
-`--input-type`, `--experimental-strip-types`, `--unhandled-rejections`, `--trace-warnings`,
+`--input-type`, `--strip-types`, `--unhandled-rejections`, `--trace-warnings`,
 `--no-warnings`, `--experimental-vm-modules`, `--test`, …). A few are consumed by the runtime itself:
 
 | Option | Effect in the runtime |
 |---|---|
 | `--version`, `-v` | printed during boot, before Node's bootstrap |
 | `--v8-options` | prints V8's option list (the dump in `src/nodejs/data/v8-options.json`, whose first line lists the CPU features of the machine it was taken on) |
-| `-e`, `-p`, `--check`, `--test`, `--interactive`, `--help`, `--prof-process`, `--watch` | choose the main script (table above). `--prof-process` runs V8's tick processor from lib (without a log: `Please provide a valid isolate file as the final argument.`, exit code 1); `--watch` runs Node's watch mode, which restarts the script in a child process when a file it loaded (or a `--watch-path`) changes |
+| `-e`, `-p`, `--check`, `--test`, `--interactive`, `--help`, `--prof-process`, `--watch` | choose the main script (table above). `--prof-process` runs V8's tick processor from lib on the log file it is given (without a log: `Please provide a valid isolate file as the final argument.`, exit code 1); `--watch` runs Node's watch mode, which restarts the script in a child process when a file it loaded (or a `--watch-path`) changes |
 | `--env-file`, `--env-file-if-exists` | see [--env-file](#--env-file) |
 | `--run` | see [--run](#--run) |
 | `--stack-trace-limit` | `Error.stackTraceLimit` (also in worker threads, which inherit it) |
@@ -369,20 +372,27 @@ copies taken when the worker script loads (`src/nodejs/web.ts`): `URL`, `URLSear
 `queueMicrotask`, `fetch`, `XMLHttpRequest` and `navigator.hardwareConcurrency` (4 when unavailable).
 
 `WebSocket` is the browser's (see [fetch](#fetch-and-the-web-classes)). `EventSource` is not a global,
-as in Node 22 without `--experimental-eventsource`. `localStorage` is not a global (Node's
-`--experimental-webstorage` is off by default; its binding is not implemented).
+as in Node 26 without `--experimental-eventsource`. `URLPattern` is the browser's own class.
+`navigator.locks` (Web Locks) works within a thread; Node shares locks between the threads of a process,
+OpenVessel does not.
+
+Node 26 turns `--experimental-webstorage` on by default, so `localStorage` and `sessionStorage` are
+globals. `sessionStorage` lives in memory for the life of the process. `localStorage` needs
+`--localstorage-file=<path>`, as in Node (without it, reading `localStorage` gives `undefined` and an
+`ExperimentalWarning`); the file is kept as JSON on the VFS, not as Node's SQLite database, and is
+rewritten on every change. `--no-experimental-webstorage` removes both globals.
 
 ## process and os values
 
 | API | Value in OpenVessel |
 |---|---|
-| `process.version`, `process.versions` | `v22.23.4` and every component version of the real Node 22.23.4 build (`v8` `12.4.254.21-node.57`, `openssl` `3.5.9`, …) |
-| `process.release`, `process.features`, `process.config` | those of the real build (`release.lts` `Jod`, `features.typescript` `strip`) |
+| `process.version`, `process.versions` | `v26.13.0` and every component version of the real Node 26.13.0 build (`v8` `14.6.202.34-node.40`, `openssl` `3.5.9`, `undici` `8.12.2`, …). The versions describe Node's build, not OpenVessel's implementation: `fetch` is OpenVessel's own (see [fetch](#fetch-and-the-web-classes)), not undici |
+| `process.release`, `process.features`, `process.config` | those of the real build (`release.lts` `Lithium`, `features.typescript` `strip`) |
 | `process.platform`, `process.arch` | `linux`, `x64` |
 | `process.execPath` | `/usr/bin/node` |
 | `process.pid`, `process.ppid` | kernel process ids |
-| `process.title` | `--title`, else the basename of `argv[0]`; only the main thread can change it |
-| `process.debugPort` | 9229; only the main thread can change it |
+| `process.title` | `--title`, else the basename of `argv[0]`; worker threads can change it too (since Node 26), but the value is kept per thread |
+| `process.debugPort` | 9229; worker threads can change it too (since Node 26), kept per thread |
 | `process.getuid()`, `geteuid()`, `getgid()`, `getegid()` | 1000; `getgroups()` → `[1000]` |
 | `process.setuid()` etc. | to the real or effective id: succeeds; to another id: `EPERM`; names are looked up in `/etc/passwd` and `/etc/group` |
 | `process.memoryUsage()` | `heapUsed` = `performance.memory.usedJSHeapSize` (50 MB when unavailable), `heapTotal` = `totalJSHeapSize`, `rss` = 1.5 × `heapUsed`, `external` and `arrayBuffers` 0 |
@@ -471,7 +481,7 @@ An exception escaping a callback goes to `process._fatalException` (Node's `Trig
 If it is not handled, the error is printed to fd 2 and the process exits with the exit code an `exit`
 handler set, or 1. The printout is Node's: the source line with a caret (when the error's first frame is a
 file or a builtin whose source can be read), the stack (after Node's `enhanceStackForFatalException`), and
-`Node.js v22.23.4`. A thrown non-error is printed as
+`Node.js v26.13.0`. A thrown non-error is printed as
 ``Uncaught <inspect(value)>`` followed by ``(Use `node --trace-uncaught ...` to show where the exception was thrown)``.
 Errors the Worker reports through its own `error` event are treated the same way.
 
@@ -490,10 +500,10 @@ later `rejectionhandled` events as `kPromiseHandlerAddedAfterReject`. From there
 ### Builtins
 
 `require('fs')`, `require('node:fs')` and `import 'node:fs'` load Node's own `lib/` modules from
-`nodelib.js`. Two dependencies are replaced by overrides (see [Overrides](#overrides)); the V8 profiler
-tools under `internal/deps/v8/tools/` are not shipped, so `node --prof-process <log>` fails with
-`TypeError [ERR_INVALID_ARG_TYPE]: The "sourceText" argument must be of type string. Received undefined`
-(without a log it answers like Node).
+`nodelib.js`. Two dependencies are replaced by overrides (see [Overrides](#overrides)). V8's tick
+processor under `internal/deps/v8/tools/` is shipped too, so `node --prof-process <log>` processes a log
+written elsewhere (OpenVessel itself can't write one: `--prof` has no effect).
+`node:ffi` loads, but it can't be used (see [Not implemented](#not-implemented)).
 
 ### CommonJS
 
@@ -502,7 +512,7 @@ compiles each file with an indirect `eval` as a function of
 `exports, require, module, __filename, __dirname`, with the file's code on the wrapper's first line (so
 line numbers match) and a `sourceURL` of the file name. A leading `#!` line is turned into a comment. When
 the code fails to compile and looks like ES module syntax (with `--experimental-detect-module`, on by
-default in 22.23.4), lib retries it as an ES module, as in Node. `import()` inside CommonJS code is routed
+default in Node 26), lib retries it as an ES module, as in Node. `import()` inside CommonJS code is routed
 to Node's `importModuleDynamically` callback.
 
 ### ES modules
@@ -514,22 +524,30 @@ ES modules are real browser modules, evaluated by the browser (`src/nodejs/bindi
 2. When lib links the graph, each static specifier in the source is rewritten to the URL of the
    `ModuleWrap` it was linked to. Import attributes (`with { type: 'json' }`) are removed from the served
    source (lib has already checked them; the target is always served as JavaScript).
-3. `import.meta` becomes `globalThis.__ovImportMeta(<id>)`, which calls Node's
-   `initializeImportMeta` callback; `import(` becomes `globalThis.__ovDynamicImport.bind(null, <id>)(`,
+3. `import.meta` becomes `globalThis.__ovImportMeta(<id>)`, which creates the object on first use (see
+   [import.meta](#importmeta)); `import(` becomes `globalThis.__ovDynamicImport.bind(null, <id>)(`,
    which calls Node's `importModuleDynamically` callback.
 4. On evaluation every module of the graph is registered with the kernel (`esmRegister` system call). The
    runtime's service worker serves them at `/__ov/mw/<pid>/<id>.mjs`, and evaluating the root is a native
    `import()` of its URL. Linking, cycles, live bindings and top-level `await` are therefore the
    browser's. The kernel drops a process's modules when it exits.
 5. Builtins, CommonJS modules and JSON modules reach the browser as generated "synthetic" modules: one
-   `var` per export name, exported, and assigned by the binding's `setExport()`.
+   `var` per export name, exported, and assigned by the binding's `setExport()`. The named exports of a
+   CommonJS module are found by `internalBinding('cjs_lexer')`, which uses `cjs-module-lexer` where Node 26
+   uses merve in C++.
+
+Import phases, which Node 26 enables in V8 (`--js-source-phase-imports`), are handled in the rewrite:
+`import source x from '…'` becomes a constant bound to the linked module's source object (for a
+WebAssembly module, its `WebAssembly.Module`), and `import defer * as ns from '…'` becomes a plain import, so
+the deferred module is evaluated eagerly with the rest of the graph.
 
 Module evaluation counts as a request (the loop stays alive) until the module's own body starts to run; a
 top-level `await` that never settles after that does not keep the process alive (exit code 13, above).
 
 ### require(esm)
 
-`require()` of an ES module (enabled by default in 22.23.4) must evaluate synchronously, which the
+`require()` of an ES module (`--require-module`, on by default; `--experimental-require-module` is its
+older name) must evaluate synchronously, which the
 browser cannot do with a module graph. The binding therefore runs each source module of the graph as a
 CommonJS-shaped function produced by sucrase's `imports` transform (`dist/runtime/ts-strip.js`, loaded
 the first time it is needed), and synthetic modules run their evaluation steps directly. A graph with
@@ -545,17 +563,21 @@ console.log(m.v, m.default()); // 42 def
 
 ### import.meta
 
-`import.meta.url` (a `file://` URL), `import.meta.resolve()` and `import.meta.main` are set by Node's
-callback. For a `file:` module, `internalBinding('modules').setLazyPathHelpers` adds
-`import.meta.dirname` and `import.meta.filename` (the module's directory and path, as
-`url.fileURLToPath()` gives them) as writable, enumerable data properties, so `Object.keys(import.meta)`
-is `['dirname', 'filename', 'main', 'resolve', 'url']` as in Node. Node computes them on first access;
-here they are computed right away.
+In Node 26, C++ fills in `import.meta` for the modules the default loader compiles
+(`DefaultImportMetaObjectInitializer`); the binding does the same in `#defaultImportMeta()`
+(`module_wrap.ts`). For a `file:` module it adds `import.meta.dirname` and `import.meta.filename` (the
+module's directory and path, as `url.fileURLToPath()` gives them, through
+`internalBinding('modules').setLazyPathHelpers`), then `main`, `resolve` (not on the loader hooks
+thread) and `url` (a `file://` URL), all writable, enumerable data properties, so
+`Object.keys(import.meta)` is `['dirname', 'filename', 'main', 'resolve', 'url']` as in Node. Node
+computes `dirname` and `filename` on first access; here they are computed right away. Modules compiled
+with another host-defined option (`vm.SourceTextModule`, for example) go through Node's
+`initializeImportMeta` callback.
 
 ### Conditions, preloading and hooks
 
 These are handled by Node's lib and work as in Node: `--conditions`/`-C` for both `require` and `import`,
-`--require`/`-r`, `--import`, `--input-type`, `--experimental-default-type`, and module customization
+`--require`/`-r`, `--import`, `--input-type`, and module customization
 hooks registered with `module.register()`:
 
 ```js
@@ -574,9 +596,10 @@ console.log((await import('virtual:x')).default); // 7
 
 `vm.SourceTextModule` and `vm.SyntheticModule` (with `--experimental-vm-modules`) are implemented in the
 same binding. Source-text modules created through `vm` are evaluated with sucrase's `imports` transform
-inside the context's scope (see [vm](#vm)); before instantiation every request must be linked and every
-imported name must exist (`ERR_VM_MODULE_LINK_FAILURE`, or
-`SyntaxError: The requested module '<spec>' does not provide an export named '<name>'`). A graph with
+inside the context's scope (see [vm](#vm)). Instantiation checks the graph in V8's order: first every
+request must be linked (`ERR_VM_MODULE_LINK_FAILURE`), then every imported name must exist
+(`SyntaxError: The requested module '<spec>' does not provide an export named '<name>'`). Requests that
+differ only in phase must be linked to the same module (`ERR_MODULE_LINK_MISMATCH`). A graph with
 top-level `await` is evaluated dependency by dependency. `cachedData` that was not produced for the same
 source is rejected with `ERR_VM_MODULE_CACHED_DATA_REJECTED`.
 
@@ -587,11 +610,12 @@ source is rejected with `ERR_VM_MODULE_CACHED_DATA_REJECTED`.
 
 ## TypeScript
 
-Type stripping is Node's own: `--experimental-strip-types` is on by default in Node 22.23.4, and lib
-decides which files are stripped (`.ts`, `.mts`, `.cts`, and `--input-type=module-typescript` /
-`commonjs-typescript` for eval input) and which errors to raise. lib calls `internal/deps/amaro`, which the
+Type stripping is Node's own: in Node 26 it is no longer experimental, `--strip-types` (old name
+`--experimental-strip-types`) is on by default, and lib decides which files are stripped (`.ts`, `.mts`,
+`.cts`, and `--input-type=module-typescript` / `commonjs-typescript` for eval input) and which errors to
+raise. lib calls `internal/deps/amaro`, which the
 override replaces with `globalThis.__ovAmaro` (`src/nodejs/typescript.ts`). The real amaro (the same
-version Node bundles, `process.versions.amaro` 1.1.8; swc compiled to WebAssembly, about 3 MB) is
+version Node bundles, `process.versions.amaro` 1.1.11; swc compiled to WebAssembly, about 3.8 MB) is
 shipped as `dist/runtime/amaro.js` and fetched with a synchronous `XMLHttpRequest` from the runtime origin
 the first time something is stripped, then evaluated once per worker.
 
@@ -599,8 +623,8 @@ the first time something is stripped, then evaluated once per worker.
 |---|---|
 | `node a.mts` with type annotations only | runs |
 | `node e.ts` with an `enum` | `SyntaxError [ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX]: TypeScript enum is not supported in strip-only mode` |
-| `node --experimental-transform-types e.ts` | runs (with the ExperimentalWarning); source maps are enabled by implication |
-| `node --no-experimental-strip-types a.mts` | `SyntaxError` from the JavaScript parser |
+| `node --experimental-transform-types e.ts` | `node: bad option: --experimental-transform-types` (Node 26 no longer has the option) |
+| `node --no-strip-types a.mts` | `SyntaxError` from the JavaScript parser |
 
 The legacy runtime strips types with sucrase's `typescript` transform instead, which also accepts enums
 and other non-erasable syntax.
@@ -610,6 +634,8 @@ and other non-erasable syntax.
 Node's `fetch`, `Headers`, `Request`, `Response`, `FormData`, `WebSocket`, `EventSource` and `MessageEvent`
 come from `internal/deps/undici`, which the override replaces with `globalThis.__ovUndici`
 (`src/nodejs/fetch.ts`). undici speaks HTTP over TCP sockets, which a browser cannot open to the outside.
+`process.versions.undici` still reports 8.12.2, the undici that Node 26.13.0 bundles, but OpenVessel's
+`fetch` is its own implementation.
 
 ### Routing
 
@@ -673,7 +699,7 @@ puts each file there in place of the builtin with the same id. There are two:
   `src/nodejs/fetch.ts`). undici needs outgoing TCP sockets; fetch goes to virtual ports through
   `node:http` and everywhere else through the policy-checked proxy.
 - `internal/deps/amaro/dist/index` is replaced by `module.exports = globalThis.__ovAmaro(require);` (from
-  `src/nodejs/typescript.ts`). amaro bundles swc as a 3 MB WebAssembly module; it is kept out of
+  `src/nodejs/typescript.ts`). amaro bundles swc as a WebAssembly module (about 3.8 MB); it is kept out of
   `nodelib.js` and fetched on first use.
 
 ## worker_threads
@@ -690,8 +716,8 @@ and the thread talk over a `MessageChannel` on which Node's lib speaks its own p
   that way are delivered only the normal way.
 - With `trackUnmanagedFds` (the default) the fds a thread opened with `fs.open` are closed when it exits.
 - `worker.getHeapStatistics()` reports numbers derived from `performance.memory`; `worker.cpuUsage()`
-  reports wall time since the thread started; `startCpuProfile()`/`stopCpuProfile()` return an empty
-  profile in V8's format; `getHeapSnapshot()` is unavailable.
+  reports wall time since the thread started; CPU and heap profiles (`startCpuProfile()`,
+  `startHeapProfile()`) come back empty, in V8's format; `getHeapSnapshot()` is unavailable.
 - A thread runs on the same runtime as its process's main thread, even if `/etc/openvessel/node` changed
   after the process started.
 
@@ -770,10 +796,18 @@ Not emulated: separate built-ins (`vm.runInContext('Array', ctx) === Array` is `
 
 ## AsyncLocalStorage
 
-Node propagates async context through promises with V8 promise hooks, which a browser doesn't expose
-(`setPromiseHooks` is a no-op). Context set with `AsyncLocalStorage.run()`/`enterWith()` is visible in
-synchronous code and in callbacks scheduled before the first `await` (`process.nextTick`, timers,
-immediates, I/O), but it is lost after an `await`:
+Node 24 and later run `AsyncLocalStorage` on V8's continuation-preserved embedder data
+(`--async-context-frame`, on by default in Node 26), which V8 carries across `await` and promise jobs.
+A browser doesn't expose it to JavaScript, so OpenVessel turns the option off by default
+(`--no-async-context-frame`, set in `defaultOptionValues()` in `src/nodejs/options.ts`), and
+`AsyncLocalStorage` runs on `async_hooks`, as in Node 22. Giving `--async-context-frame` explicitly selects
+lib's frame-based implementation over a plain slot (`internalBinding('async_context_frame')`), which
+loses the store across `await` too.
+
+On `async_hooks`, Node propagates context through promises with V8 promise hooks, which a browser doesn't
+expose either (`setPromiseHooks` is a no-op). Context set with `AsyncLocalStorage.run()`/`enterWith()` is
+visible in synchronous code and in callbacks scheduled before the first `await` (`process.nextTick`,
+timers, immediates, I/O), but it is lost after an `await`:
 
 ```js
 const { AsyncLocalStorage } = require('node:async_hooks');
@@ -829,9 +863,9 @@ These load but fail when used, with `ERR_NOT_IMPLEMENTED`
 | `node:sea` | `sea.isSea()` etc. fail |
 | `net.BlockList`, `net.SocketAddress` | construction fails (`block_list`) |
 | `tls.connect({ socket })` with a JavaScript stream (not a native socket) | fails (`js_stream`) |
-| `localStorage`/`sessionStorage` | not available (`webstorage`) |
 | `--permission` | `process.permission.has()` fails (`permission`) |
 | native addons | `process.dlopen` always fails (above) |
+| `node:ffi` | `require('node:ffi')` works; native libraries can't be loaded (`ffi`) |
 
 The binding-level status of every module is in [Bindings](bindings.md).
 

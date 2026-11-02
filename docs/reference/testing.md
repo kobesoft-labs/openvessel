@@ -10,7 +10,7 @@ arguments, environment variables, timeouts and result files, followed by how to 
 | Suite | Runner | Needs | Typical command |
 |---|---|---|---|
 | Unit | `scripts/test.mjs` | Node.js | `npm test` |
-| End to end | `test/e2e/*.mjs` | a build (`dist/`), Google Chrome | `node test/e2e/harness.mjs 'node -v'` |
+| End to end | `test/e2e/*.mjs` | a build (`dist/`), Google Chrome or Playwright's Chromium | `node test/e2e/harness.mjs 'node -v'` |
 | Node's test suite | `test/node-compat/run.mjs` | a build, Chrome, `test/node-compat/.node/` | `node test/node-compat/run.mjs --port fs` |
 | Astro corpus | `corpus/run.mjs` | a build, Chrome, `corpus/sites/`, network | `node corpus/run.mjs basics` |
 
@@ -23,6 +23,7 @@ files.
 |---|---|---|
 | `OV_PORT_BASE` | `scripts/serve.mjs`, `test/e2e/harness.mjs` | the three server ports become base, base + 1, base + 2 (default 5170), and the browser profile becomes `node_modules/.cache/ov-chrome-<base>` (`ov-chrome` for 5170), so several suites can run side by side |
 | `OV_HOST_PORT`, `OV_RUNTIME_PORT`, `OV_PREVIEW_PORT` | `scripts/serve.mjs` | set one port individually. The harness only knows `OV_PORT_BASE`, so don't use these with the test scripts |
+| `OV_CHROME` | `harness.mjs` | `chromium`: use Playwright's Chromium even when Google Chrome is installed; any other value: launch that Playwright channel (`chrome-beta`, `msedge`, …). Unset: the system Google Chrome, or Playwright's Chromium when Chrome isn't installed |
 | `HEADED` | `harness.mjs` (direct use), `project.mjs`, `dev.mjs`, `preview-port.mjs` | non-empty: show the browser window |
 | `OV_CONSOLE` | `harness.mjs` | non-empty: print the page's console messages as `[console.<type>] <text>` (page errors are always printed as `[pageerror] …`) |
 | `OV_TRACE` | `harness.mjs` | non-empty: turn on the kernel's trace (`debug.trace`), which logs `[trace]` lines to the console for spawns, pipe closes, EOF on reads and synchronous reads of fd 0 (visible with `OV_CONSOLE=1`) |
@@ -68,7 +69,9 @@ doesn't keep the test process alive.
 ## End-to-end scripts
 
 All scripts in `test/e2e/` use `harness.mjs`. They start `scripts/serve.mjs` (using `OV_PORT_BASE`), launch
-the system Chrome through `playwright-core` (`channel: 'chrome'`, persistent profile, `--js-flags=--stack-size=4000`),
+the system Google Chrome through `playwright-core` (`channel: 'chrome'`, persistent profile, `--js-flags=--stack-size=4000`),
+or Playwright's Chromium when Google Chrome isn't installed (install it once with
+`npx playwright-core install chromium`; `OV_CHROME` overrides the choice),
 open the playground at `http://localhost:<base>/`, wait for `window.ovReady`, and use the playground's
 `window.ov` (an `OpenVessel` instance). The playground mounts a sample Astro 5 project at
 `/home/user/app`. Runs use the ported runtime unless the command writes `legacy` to `/etc/openvessel/node`
@@ -92,7 +95,8 @@ open the playground at `http://localhost:<base>/`, wait for `window.ovReady`, an
 | `project.mjs` | `<dir> ['<command>']` (default `npm install && npm run build`) | replaces `/home/user/app` with a local project and runs the command (15-minute timeout). Skips `node_modules`, `.git`, `dist`, `.astro`, `.vercel`, `.netlify`, `.cache`, `.turbo`, `.output` and files over 64 MiB; keeps symlinks. Exports `collectFiles()` and `mountProject()` |
 | `dev.mjs` | `[--legacy]` | `npm install` in `/home/user/app`, spawns `npm run dev`, waits for `server-ready`, checks the preview's `<h1>`, edits `src/pages/index.astro` and waits up to 30 s for the HMR update |
 | `preview-port.mjs` | — | on the ported runtime: starts an `http` server on port 4000, loads it in the preview iframe (a 70000-byte chunked body) and POSTs to it from the iframe; prints `OK` or `FAIL` and exits 0/1 |
-| `port-fs.mjs` | `[scenario…]` | on the ported runtime: runs the fs scenarios `dir`, `watch`, `watch2`, `cp`, `cp2`, `misc`, `misc2` (opendir/Dir, `fs.watch`, `fs.watchFile`, `fs.cp`/`cpSync`, readv/writev, FileHandle) and compares each output with the expected output recorded from Node v22.23.4 on Linux (`node:22.23.4-bookworm-slim` in Docker); prints `ok`/`FAIL` with a line diff, `all passed` or `<n> failed`, exits 0/1 |
+| `port-fs.mjs` | `[scenario…]` | on the ported runtime: runs the fs scenarios `dir`, `watch`, `watch2`, `cp`, `cp2`, `misc`, `misc2` (opendir/Dir, `fs.watch`, `fs.watchFile`, `fs.cp`/`cpSync`, readv/writev, FileHandle) and compares each output with the expected output recorded from Node v26.13.0 on Linux (`node:26.13.0-bookworm-slim` in Docker); prints `ok`/`FAIL` with a line diff, `all passed` or `<n> failed`, exits 0/1 |
+| `net-gate.mjs` | — | checks the network gate and the service workers: loopback goes to virtual ports, redirects are checked at the host they end at, the permission prompt's initiator, two runtimes on one origin, the preview's decisions; prints `ok`/`FAIL` per check, then `OK` or `FAIL`, exits 0/1. Needs the internet (`registry.npmjs.org`, `httpbin.org`, and `httpbin.dev` for redirects to another host, which `httpbin.org` no longer allows) |
 | `esm-graph.mjs` | `[--port] <project dir> <entry path in VFS> [install command='npm install']` | mounts a project, installs, then walks the ES module graph the kernel serves under `/__ov/esm` (the legacy runtime's ESM service) and reports modules that don't load |
 | `debug-esm.mjs` | `[--port] <vfs path…>` | runs `npm install`, then prints the first 3000 characters of `/__ov/esm<path>` for each path |
 
@@ -129,7 +133,7 @@ module names or starts with one followed by `-` (the longest match wins): `fs`, 
 `event-emitter`, `eventemitter`, `stream`, `stream2`, `stream3`, `readable`, `buffer`, `util`, `worker`, `crypto`, `child-process`, `url`, `whatwg-url`,
 `string-decoder`, `zlib`, `timers`, `process`, `module`, `require`, `readline`, `os`, `querystring`,
 `assert`, `abortcontroller`, `console`, `vm`, `async-local-storage`, `next-tick`, `promises`,
-`microtask`, `queue-microtask`, `wasi`.
+`microtask`, `queue-microtask`, `wasi`, `webcrypto`.
 
 A selected test is skipped when its source matches any of: `expose-internals`/`expose_internals`,
 `internalBinding`, `--expose-gc`, `common/inspector`, `--inspect`, `--cpu-prof`, `--heap-prof`, `--prof`,
@@ -253,8 +257,8 @@ any failed. Directories in `corpus/sites/` that `sites.json` doesn't list are le
 
 ### corpus/run.mjs
 
-`node corpus/run.mjs [--legacy] [filter…]` runs, for each site whose id contains one of the filters (all
-sites without filters):
+`node corpus/run.mjs [--legacy] [--shard=i/n] [filter…]` runs, for each site whose id contains one of the
+filters (all sites without filters):
 
 1. reload the playground (a fresh kernel), mount `corpus/sites/<id>` at `/home/user/app`;
 2. pick the package manager: the `packageManager` field of `package.json` (`npm`, `pnpm`, `yarn`, `bun`),
@@ -263,6 +267,13 @@ sites without filters):
    (and, with `--legacy`, the line that selects the legacy runtime) and a 15-minute timeout.
 
 If the harness itself fails, the browser is relaunched and the run continues with the next site.
+
+`--shard=i/n` keeps every n-th of those sites, starting with the i-th (1-based), so n runs started side by
+side, each with its own `OV_PORT_BASE`, share the corpus:
+
+```bash
+for i in 1 2 3; do OV_PORT_BASE=$((5170 + i * 100)) node corpus/run.mjs --shard=$i/3 & done; wait
+```
 
 Results go to `corpus/results/port/` (the ported runtime, the default) or, with `--legacy`, to
 `corpus/results/`. In the paths below, `[/port]` stands for that choice.
@@ -273,7 +284,8 @@ Results go to `corpus/results/port/` (the ported runtime, the default) or, with 
 - `corpus/results[/port]/logs/<id>.log`: `$ <pm> install`, its output and `[exit <code> <ms>ms]`, then the
   same for the build.
 
-Existing entries of `results.json` are kept and overwritten per site. Each site prints
+Existing entries of `results.json` are kept and overwritten per site. Before each write the file is read
+again and replaced atomically, so shards running at the same time merge their results into one file. Each site prints
 `[<i>/<n>] OK|FAIL|INST <id> (<s>s)` (FAIL: build failed, INST: install failed) with the last error lines,
 and the run ends with `build ok: <x>/<total>, install ok: <y>`. `corpus/results/logs/` and
 `corpus/results/port/` are not in git.

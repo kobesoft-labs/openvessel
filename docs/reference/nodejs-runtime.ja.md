@@ -13,7 +13,7 @@
 |---|---|---|
 | Worker のスクリプト | `dist/runtime/node-process.js` | `dist/runtime/process.js` |
 | ソース | `src/nodejs/`（エントリは `src/nodejs/boot.ts`） | `src/node/`（エントリは `src/node/worker.ts`） |
-| 実行されるもの | Node.js v22.23.4 の `lib/` そのもの（`dist/runtime/nodelib.js` にバンドル）。C++ 側（`internalBinding()`）を TypeScript で実装し直している（[バインディング](bindings.ja.md) を参照） | 独自に実装した Node 互換のモジュール（`fs.ts`・`http.ts`・`module.ts` など） |
+| 実行されるもの | Node.js v26.13.0 の `lib/` そのもの（`dist/runtime/nodelib.js` にバンドル）。C++ 側（`internalBinding()`）を TypeScript で実装し直している（[バインディング](bindings.ja.md) を参照） | 独自に実装した Node 互換のモジュール（`fs.ts`・`http.ts`・`module.ts` など） |
 | コマンドライン | Node のオプションテーブルとパーサー（`src/nodejs/options.ts`）。未知のオプションはエラー | 独自の小さなパーサー。未知のオプションは無視 |
 | TypeScript | Node 自身の型除去（amaro） | sucrase の `typescript` 変換（enum なども通る） |
 | ES モジュール | `module_wrap` バインディング。`/__ov/mw/<pid>/<id>.mjs` で配信 | カーネルの ESM 配信（`/__ov/esm/…`・`/__ov/builtin/…`） |
@@ -67,7 +67,7 @@ Worker はほかに次のメッセージを受け付けます。`{ t: 'ping', id
 
 `src/nodejs/boot.ts` の `boot()` は、C++ の `node::CreateEnvironment` と `node::StartExecution` に相当する処理を行います。
 
-1. init メッセージを保存し、システムコールのチャネルを接続します。メインスレッドの場合は、`--env-file` のファイルを読み込んでコマンドラインを解析します。コマンドラインが不正なら、エラーを 1 件ずつ `<argv0>: <エラー>` の形で出力し、終了コード 9 で終了します。`--version`／`-v` は `v22.23.4` を、`--v8-options` は V8 のオプション一覧を出力し、ほかに何も読み込まずに 0 で終了します。`Error.stackTraceLimit` を `--stack-trace-limit` の値（既定は 10）に設定します。
+1. init メッセージを保存し、システムコールのチャネルを接続します。メインスレッドの場合は、`--env-file` のファイルを読み込んでコマンドラインを解析します。コマンドラインが不正なら、エラーを 1 件ずつ `<argv0>: <エラー>` の形で出力し、終了コード 9 で終了します。`--version`／`-v` は `v26.13.0` を、`--v8-options` は V8 のオプション一覧を出力し、ほかに何も読み込まずに 0 で終了します。`Error.stackTraceLimit` を `--stack-trace-limit` の値（既定は 10）に設定します。
 2. Worker の `unhandledrejection`・`rejectionhandled`・`error` のイベントリスナーを登録します。
 3. グローバルの `Proxy` を、ターゲットとハンドラを記録するものに置き換えます（`util.types.isProxy` と `util.inspect(…, { showProxy: true })` を動かすため）。また、Map／Set のイテレーターを作るメソッドをラップします（`util.types.isMapIterator` とイテレーターのプレビューを動かすため）。どちらも Node の primordials がこれらを取り込む前に行います。
 4. コンテキストごとのスクリプト `internal/per_context/primordials`・`internal/per_context/domexception`・`internal/per_context/messageport` を実行します。
@@ -114,7 +114,7 @@ Worker はほかに次のメッセージを受け付けます。`{ t: 'ping', id
 | ほかの `internal/bootstrap/*`・`internal/main/*` | `process, require, internalBinding, primordials` |
 | それ以外 | `exports, require, module, process, internalBinding, primordials` |
 
-`internalBinding('builtins')` は、`builtinIds`、`compileFunction(id)`（未知の ID には `ERR_UNKNOWN_BUILTIN_MODULE`、`No such built-in module: <id>`）、`natives`（ソースの読み取り専用ビュー）、`hasCachedBuiltins()`（`true` を返す）、`getCacheUsage()`（空のリストを 3 つ返す）を提供します。
+`internalBinding('builtins')` は、`builtinIds`、`compileFunction(id)`（未知の ID には `ERR_UNKNOWN_BUILTIN_MODULE`、`No such built-in module: <id>`）、`natives`（ソースの読み取り専用ビュー）、`hasCachedBuiltins()`（`true` を返す）、`getCacheUsage()`（空のリストを 3 つ返す）を提供します。いくつかの組み込みモジュールは ES モジュールです（`--prof-process` が実行する `internal/deps/v8/tools/` の V8 の tick processor）。これらは `importBuiltinSourceTextModule(id)` が、そのモジュールと、そこから import する組み込みモジュールの `ModuleWrap` を作って評価します。
 
 ### OV_TIMING
 
@@ -153,22 +153,22 @@ Worker はほかに次のメッセージを受け付けます。`{ t: 'ping', id
 
 ### 解析
 
-`parseCommandLine()`（`src/nodejs/options.ts`）は `node_options.cc` と同じ処理を、本物の Node からダンプしたオプションテーブル（`src/node/data/process.json`。オプション 210 個とエイリアス 25 個、それぞれの型と `NODE_OPTIONS` で使えるかどうか）に基づいて行います。
+`parseCommandLine()`（`src/nodejs/options.ts`）は `node_options.cc` と同じ処理を、本物の Node からダンプしたオプションテーブル（`src/node/data/process.json`。オプション 248 個とエイリアス 30 個、それぞれの型と `NODE_OPTIONS` で使えるかどうか）に基づいて行います。
 
 - 先に `NODE_OPTIONS` を、次にコマンドラインを適用するので、コマンドラインのほうが優先されます。`NODE_OPTIONS` は空白で分割します。`'…'` と `"…"` で囲めます。バックスラッシュによる次の 1 文字のエスケープは、ダブルクォートの中でだけ有効です。
 - オプションの並びは、`--`、`-`、または `-` で始まらない最初の引数で終わります。それ以降が `process.argv[1…]` になります。
 - オプション名の `_` と `-` は区別しません（`--stack_trace_limit=3` は `--stack-trace-limit=3` と同じ。`process.execArgv` には入力したとおりに残る）。
-- 値を取るオプションは `--name=value` と `--name value` のどちらでも書けます。エイリアスは Node と同じように展開します（`-e` → `--eval`、`-p` → `--print`、`-pe` → `--print --eval`、`-C` → `--conditions`、`-r` → `--require`、`--loader` → `--experimental-loader`、`-c` → `--check`、`-i` → `--interactive` など）。`--prof-process` は `--prof-process --` に展開されるので、それ以降はすべて引数になります。
-- `--no-<name>` は真偽値のオプションを否定します。`node_options.cc` の `Implies()` と同じように、ほかのオプションを有効にするオプションがあります: `--eval` → `[has_eval_string]`、`--env-file`・`--env-file-if-exists` → `[has_env_file_string]`、`--watch-path` → `--watch`、`--experimental-strip-types` → `--experimental-detect-module`、`--experimental-transform-types` → `--experimental-strip-types` と `--enable-source-maps`、`--inspect-brk` → `--inspect`、`--report-signal` → `--report-on-signal` など。
+- 値を取るオプションは `--name=value` と `--name value` のどちらでも書けます。エイリアスは Node と同じように展開します（`-e` → `--eval`、`-p` → `--print`、`-pe` → `--print --eval`、`-C` → `--conditions`、`-r` → `--require`、`--loader` → `--experimental-loader`、`-c` → `--check`、`-i` → `--interactive`、`--experimental-strip-types` → `--strip-types`、`--webstorage` → `--experimental-webstorage` など）。`--prof-process` は `--prof-process --` に展開されるので、それ以降はすべて引数になります。
+- `--no-<name>` は真偽値のオプションを否定します。`node_options.cc` の `Implies()` と同じように、ほかのオプションを有効にするオプションがあります: `--eval` → `[has_eval_string]`、`--env-file`・`--env-file-if-exists` → `[has_env_file_string]`、`--watch-path` → `--watch`、`--experimental-require-module` → `--require-module`、`--inspect-brk` → `--inspect`、`--report-signal` → `--report-on-signal` など。`--require-module` と `--experimental-require-module` は同じ値を設定するので、どちらかに `--no-` を付けると両方が無効になります。
 - 整数のオプションは数値として保存し、文字列のリスト（`--require`・`--import`・`--conditions` など）は値を追加していきます。
-- Node が知らないオプションは、Node と同じく V8 に渡します。判定には V8 自身のフラグ一覧（Linux x64 の Node v22.23.4 での `node --v8-options`。`src/nodejs/data/v8-options.json`）を使います。V8 のフラグなら受け付け（効果は無い。後述）、それ以外は bad option です。真偽値のフラグは `--no-` を付けられます。それ以外のフラグは値を `=` の後ろに書く必要があり（Node はその引数だけを V8 に渡すため）、値はフラグの型に合っていなければなりません。
+- Node が知らないオプションは、Node と同じく V8 に渡します。判定には V8 自身のフラグ一覧（Linux x64 の Node v26.13.0 での `node --v8-options`。`src/nodejs/data/v8-options.json`）を使います。V8 のフラグなら受け付け（効果は無い。後述）、それ以外は bad option です。真偽値のフラグは `--no-` を付けられます。それ以外のフラグは値を `=` の後ろに書く必要があり（Node はその引数だけを V8 に渡すため）、値はフラグの型に合っていなければなりません。
 
 エラー（いずれも `node: <メッセージ>` と出力し、終了コード 9）:
 
 | メッセージ | 原因 |
 |---|---|
 | `bad option: <arg>` | Node のテーブルにも V8 の一覧にも無いオプション、または値が型に合わない V8 のフラグ（先に V8 自身のメッセージが出る。後述） |
-| `<option> is not allowed in NODE_OPTIONS` | Node が `NODE_OPTIONS` で禁止しているオプション（40 個。`--eval` など）と、Node のテーブルに無いすべてのオプション（V8 のフラグを含む） |
+| `<option> is not allowed in NODE_OPTIONS` | Node が `NODE_OPTIONS` で禁止しているオプション（50 個。`--eval` など）と、Node のテーブルに無いすべてのオプション（V8 のフラグを含む） |
 | `--no-<name> is an invalid negation because it is not a boolean option` | 真偽値でない Node のオプションに `--no-` を付けた |
 | `<arg> requires an argument` | 値を取るオプションが行の最後にある |
 | `<file>: not found` | 開けない `--env-file`（`--env-file-if-exists` の場合は `<file> not found. Continuing without it.` と出力して続行する） |
@@ -176,7 +176,7 @@ Worker はほかに次のメッセージを受け付けます。`{ t: 'ping', id
 | `either --watch or --check can be used, not both`（`--eval`・`--interactive`・`--test-force-exit` も同様）、`--watch requires specifying a file` | `EnvironmentOptions::CheckOptions` |
 | `--secure-heap must be a power of 2`／`--secure-heap-min must be a power of 2` | `PerProcessOptions::CheckOptions` |
 
-値が不正な V8 のフラグに対しては、Node のメッセージの前に V8 のメッセージが出ます。V8 はそこで処理を止めるので、Node と同じく、そのフラグ、それ以降の V8 のフラグ、Node が自分で追加する V8 のフラグ（`--harmony-import-attributes`・`--no-harmony-import-assertions`・`--experimental-wasm-imported-strings`・`--experimental-wasm-memory64`・`--experimental-wasm-exnref`）がすべて bad option として報告されます。
+値が不正な V8 のフラグに対しては、Node のメッセージの前に V8 のメッセージが出ます。V8 はそこで処理を止めるので、Node と同じく、そのフラグ、それ以降の V8 のフラグ、Node が自分で追加する V8 のフラグ（`--harmony-import-attributes`・`--js-source-phase-imports`・`--external-memory-max-reasonable-size=0`）がすべて bad option として報告されます。
 
 ```text
 $ node --bogus
@@ -188,21 +188,19 @@ Error: illegal value for flag --stack-trace-limit of type int
 Try --help for options
 node: bad option: --stack-trace-limit
 node: bad option: --harmony-import-attributes
-node: bad option: --no-harmony-import-assertions
-node: bad option: --experimental-wasm-imported-strings
-node: bad option: --experimental-wasm-memory64
-node: bad option: --experimental-wasm-exnref
+node: bad option: --js-source-phase-imports
+node: bad option: --external-memory-max-reasonable-size=0
 ```
 
 ### オプションの効果
 
-解析した値は `internalBinding('options').getCLIOptionsValues()` が返す値になるので、Node の `lib/` がそれを読み、Node とまったく同じように動作します（`--require`・`--import`・`--conditions`・`--input-type`・`--experimental-strip-types`・`--unhandled-rejections`・`--trace-warnings`・`--no-warnings`・`--experimental-vm-modules`・`--test` など）。ランタイム自身が処理するオプションは次のとおりです。
+解析した値は `internalBinding('options').getCLIOptionsValues()` が返す値になるので、Node の `lib/` がそれを読み、Node とまったく同じように動作します（`--require`・`--import`・`--conditions`・`--input-type`・`--strip-types`・`--unhandled-rejections`・`--trace-warnings`・`--no-warnings`・`--experimental-vm-modules`・`--test` など）。ランタイム自身が処理するオプションは次のとおりです。
 
 | オプション | ランタイムでの効果 |
 |---|---|
 | `--version`・`-v` | 起動処理の途中、Node の bootstrap より前に出力する |
 | `--v8-options` | V8 のオプション一覧を出力する（`src/nodejs/data/v8-options.json` のダンプ。最初の行は、ダンプを取得したマシンの CPU の機能） |
-| `-e`・`-p`・`--check`・`--test`・`--interactive`・`--help`・`--prof-process`・`--watch` | メインスクリプトを選ぶ（上の表）。`--prof-process` は lib にある V8 の tick processor を実行する（ログを渡さないと `Please provide a valid isolate file as the final argument.` で終了コード 1）。`--watch` は Node の watch モードを実行し、読み込んだファイル（または `--watch-path`）が変わると、子プロセスでスクリプトを再実行する |
+| `-e`・`-p`・`--check`・`--test`・`--interactive`・`--help`・`--prof-process`・`--watch` | メインスクリプトを選ぶ（上の表）。`--prof-process` は、渡したログのファイルに対して lib にある V8 の tick processor を実行する（ログを渡さないと `Please provide a valid isolate file as the final argument.` で終了コード 1）。`--watch` は Node の watch モードを実行し、読み込んだファイル（または `--watch-path`）が変わると、子プロセスでスクリプトを再実行する |
 | `--env-file`・`--env-file-if-exists` | [--env-file](#--env-file) を参照 |
 | `--run` | [--run](#--run) を参照 |
 | `--stack-trace-limit` | `Error.stackTraceLimit`（設定を継承するワーカースレッドでも有効） |
@@ -259,19 +257,21 @@ outer
 
 Node の起動処理は、Web のグローバルを lib の実装に置き換えます（`URL`・`TextDecoder`・`structuredClone`・`queueMicrotask`・`MessageChannel`・`Blob`・`fetch` など）。ブラウザ本来の実装が必要なバインディングは、Worker のスクリプトを読み込んだ時点で保存しておいたコピー（`src/nodejs/web.ts`）を使います。対象は `URL`・`URLSearchParams`・`TextEncoder`・`TextDecoder`・`MessageChannel`・`MessagePort`・`BroadcastChannel`・`Blob`・`structuredClone`・`queueMicrotask`・`fetch`・`XMLHttpRequest`・`navigator.hardwareConcurrency`（取得できなければ 4）です。
 
-`WebSocket` はブラウザのものです（[fetch](#fetch-と-web-のクラス) を参照）。`EventSource` は、`--experimental-eventsource` を付けない Node 22 と同じく、グローバルにはありません。`localStorage` もグローバルにはありません（Node の `--experimental-webstorage` は既定で無効で、そのバインディングは実装していません）。
+`WebSocket` はブラウザのものです（[fetch](#fetch-と-web-のクラス) を参照）。`EventSource` は、`--experimental-eventsource` を付けない Node 26 と同じく、グローバルにはありません。`URLPattern` はブラウザのクラスです。`navigator.locks`（Web Locks）はスレッドの中で動作します。Node はプロセス内のスレッドでロックを共有しますが、OpenVessel は共有しません。
+
+Node 26 では `--experimental-webstorage` が既定で有効なので、`localStorage` と `sessionStorage` はグローバルにあります。`sessionStorage` はメモリ上にあり、プロセスが終わるまで保たれます。`localStorage` には、Node と同じく `--localstorage-file=<パス>` が必要です（無い場合、`localStorage` を読むと `undefined` になり、`ExperimentalWarning` が出ます）。ファイルは Node の SQLite のデータベースではなく JSON として VFS に置き、変更のたびに書き直します。`--no-experimental-webstorage` を付けると、どちらのグローバルも無くなります。
 
 ## process と os の値
 
 | API | OpenVessel での値 |
 |---|---|
-| `process.version`・`process.versions` | `v22.23.4` と、本物の Node 22.23.4 のビルドの各コンポーネントのバージョン（`v8` は `12.4.254.21-node.57`、`openssl` は `3.5.9` など） |
-| `process.release`・`process.features`・`process.config` | 本物のビルドのもの（`release.lts` は `Jod`、`features.typescript` は `strip`） |
+| `process.version`・`process.versions` | `v26.13.0` と、本物の Node 26.13.0 のビルドの各コンポーネントのバージョン（`v8` は `14.6.202.34-node.40`、`openssl` は `3.5.9`、`undici` は `8.12.2` など）。これは Node のビルドのバージョンで、OpenVessel の実装のバージョンではない。`fetch` は undici ではなく OpenVessel 独自の実装（[fetch](#fetch-と-web-のクラス) を参照） |
+| `process.release`・`process.features`・`process.config` | 本物のビルドのもの（`release.lts` は `Lithium`、`features.typescript` は `strip`） |
 | `process.platform`・`process.arch` | `linux`・`x64` |
 | `process.execPath` | `/usr/bin/node` |
 | `process.pid`・`process.ppid` | カーネルのプロセス ID |
-| `process.title` | `--title`、無ければ `argv[0]` のベース名。変更できるのはメインスレッドだけ |
-| `process.debugPort` | 9229。変更できるのはメインスレッドだけ |
+| `process.title` | `--title`、無ければ `argv[0]` のベース名。Node 26 からはワーカースレッドでも変更できる（値はスレッドごとに持つ） |
+| `process.debugPort` | 9229。Node 26 からはワーカースレッドでも変更できる（値はスレッドごとに持つ） |
 | `process.getuid()`・`geteuid()`・`getgid()`・`getegid()` | 1000。`getgroups()` は `[1000]` |
 | `process.setuid()` など | 実 ID または実効 ID への変更は成功し、それ以外の ID への変更は `EPERM`。名前は `/etc/passwd` と `/etc/group` から引く |
 | `process.memoryUsage()` | `heapUsed` は `performance.memory.usedJSHeapSize`（取得できなければ 50 MB）、`heapTotal` は `totalJSHeapSize`、`rss` は `heapUsed` の 1.5 倍、`external` と `arrayBuffers` は 0 |
@@ -333,7 +333,7 @@ Node の起動処理は、Web のグローバルを lib の実装に置き換え
 
 ### キャッチされない例外
 
-コールバックから漏れた例外は `process._fatalException` に渡します（Node の `TriggerUncaughtException`）。処理されなかった場合は、エラーを fd 2 に出力し、`exit` ハンドラが設定した終了コード、または 1 でプロセスを終了します。出力の形式は Node と同じで、エラーの最初のフレームがソースを読めるファイルまたは組み込みモジュールの場合はソースの行とキャレット、次にスタック（Node の `enhanceStackForFatalException` を通したもの）、最後に `Node.js v22.23.4` を出力します。エラーでない値が投げられた場合は、``Uncaught <inspect(value)>`` に続けて ``(Use `node --trace-uncaught ...` to show where the exception was thrown)`` を出力します。Worker 自身の `error` イベントで報告されたエラーも同じように扱います。
+コールバックから漏れた例外は `process._fatalException` に渡します（Node の `TriggerUncaughtException`）。処理されなかった場合は、エラーを fd 2 に出力し、`exit` ハンドラが設定した終了コード、または 1 でプロセスを終了します。出力の形式は Node と同じで、エラーの最初のフレームがソースを読めるファイルまたは組み込みモジュールの場合はソースの行とキャレット、次にスタック（Node の `enhanceStackForFatalException` を通したもの）、最後に `Node.js v26.13.0` を出力します。エラーでない値が投げられた場合は、``Uncaught <inspect(value)>`` に続けて ``(Use `node --trace-uncaught ...` to show where the exception was thrown)`` を出力します。Worker 自身の `error` イベントで報告されたエラーも同じように扱います。
 
 ### 未処理の Promise の reject
 
@@ -343,11 +343,11 @@ Node の起動処理は、Web のグローバルを lib の実装に置き換え
 
 ### 組み込みモジュール
 
-`require('fs')`・`require('node:fs')`・`import 'node:fs'` は、`nodelib.js` から Node 自身の `lib/` のモジュールを読み込みます。2 つの依存モジュールは差し替えています（[差し替え](#差し替え) を参照）。`internal/deps/v8/tools/` にある V8 のプロファイラーのツールは同梱していないので、`node --prof-process <ログ>` は `TypeError [ERR_INVALID_ARG_TYPE]: The "sourceText" argument must be of type string. Received undefined` で失敗します（ログを渡さない場合は Node と同じ応答をします）。
+`require('fs')`・`require('node:fs')`・`import 'node:fs'` は、`nodelib.js` から Node 自身の `lib/` のモジュールを読み込みます。2 つの依存モジュールは差し替えています（[差し替え](#差し替え) を参照）。`internal/deps/v8/tools/` にある V8 の tick processor も同梱しているので、`node --prof-process <ログ>` はほかで書き出したログを処理できます（`--prof` は効果が無いので、OpenVessel 自身はログを書き出せません）。`node:ffi` は読み込めますが、使えません（[実装していないもの](#実装していないもの) を参照）。
 
 ### CommonJS
 
-Node 自身の CommonJS ローダーを変更なしで使います。ネイティブ部分の `contextify.compileFunctionForCJSLoader` は、各ファイルを `exports, require, module, __filename, __dirname` を引数とする関数として間接 `eval` でコンパイルします。ファイルのコードはラッパーの 1 行目に置き（行番号を一致させるため）、`sourceURL` にはファイル名を設定します。先頭の `#!` の行はコメントに変換します。コンパイルに失敗し、コードが ES モジュールの構文に見える場合は（`--experimental-detect-module`。22.23.4 では既定で有効）、Node と同じく lib が ES モジュールとして再試行します。CommonJS のコード内の `import()` は、Node の `importModuleDynamically` コールバックに渡します。
+Node 自身の CommonJS ローダーを変更なしで使います。ネイティブ部分の `contextify.compileFunctionForCJSLoader` は、各ファイルを `exports, require, module, __filename, __dirname` を引数とする関数として間接 `eval` でコンパイルします。ファイルのコードはラッパーの 1 行目に置き（行番号を一致させるため）、`sourceURL` にはファイル名を設定します。先頭の `#!` の行はコメントに変換します。コンパイルに失敗し、コードが ES モジュールの構文に見える場合は（`--experimental-detect-module`。Node 26 では既定で有効）、Node と同じく lib が ES モジュールとして再試行します。CommonJS のコード内の `import()` は、Node の `importModuleDynamically` コールバックに渡します。
 
 ### ES モジュール
 
@@ -355,15 +355,17 @@ ES モジュールはブラウザの本物のモジュールで、ブラウザ�
 
 1. Node の ESM ローダーがソースを解決して読み込み、`ModuleWrap` を作成します。バインディングは `es-module-lexer` でソースを走査し、静的な import と再 export、`import.meta`、`import()` を見つけます。
 2. lib がグラフをリンクするとき、ソース内の静的な指定子を、リンク先の `ModuleWrap` の URL に書き換えます。import 属性（`with { type: 'json' }`）は配信するソースから削除します（lib がすでに検証済みで、リンク先は常に JavaScript として配信するため）。
-3. `import.meta` は `globalThis.__ovImportMeta(<id>)` に置き換わり、Node の `initializeImportMeta` コールバックを呼びます。`import(` は `globalThis.__ovDynamicImport.bind(null, <id>)(` に置き換わり、Node の `importModuleDynamically` コールバックを呼びます。
+3. `import.meta` は `globalThis.__ovImportMeta(<id>)` に置き換わり、初めて使われたときにオブジェクトを作ります（[import.meta](#importmeta) を参照）。`import(` は `globalThis.__ovDynamicImport.bind(null, <id>)(` に置き換わり、Node の `importModuleDynamically` コールバックを呼びます。
 4. 評価時に、グラフ内のすべてのモジュールをカーネルに登録します（`esmRegister` システムコール）。ランタイムの Service Worker がそれらを `/__ov/mw/<pid>/<id>.mjs` で配信し、ルートモジュールの評価はその URL に対するネイティブの `import()` で行います。そのため、リンク、循環参照、ライブバインディング、トップレベル `await` はブラウザの実装がそのまま使われます。プロセスが終了すると、カーネルはそのプロセスのモジュールを破棄します。
-5. 組み込みモジュール、CommonJS モジュール、JSON モジュールは、生成した「合成」モジュールとしてブラウザに渡します。エクスポート名ごとに `var` を 1 つ宣言してエクスポートし、バインディングの `setExport()` で値を設定します。
+5. 組み込みモジュール、CommonJS モジュール、JSON モジュールは、生成した「合成」モジュールとしてブラウザに渡します。エクスポート名ごとに `var` を 1 つ宣言してエクスポートし、バインディングの `setExport()` で値を設定します。CommonJS モジュールの名前付き export は `internalBinding('cjs_lexer')` が探します。Node 26 は C++ の merve を使いますが、ここでは `cjs-module-lexer` を使います。
+
+Node 26 が V8 で有効にしている import のフェーズ（`--js-source-phase-imports`）は、書き換えの段階で処理します。`import source x from '…'` は、リンク先のモジュールのソースオブジェクト（WebAssembly のモジュールなら `WebAssembly.Module`）を束縛する定数に置き換えます。`import defer * as ns from '…'` は通常の import に置き換えるので、遅延するはずのモジュールもグラフのほかのモジュールと一緒にすぐ評価されます。
 
 モジュールの評価は、そのモジュール自身の本体が実行を始めるまではリクエストとして数えます（ループは生存したまま）。それ以降に完了しないトップレベル `await` は、プロセスを生存させません（前述の終了コード 13）。
 
 ### require(esm)
 
-ES モジュールの `require()`（22.23.4 では既定で有効）は同期的に評価しなければなりませんが、ブラウザはモジュールグラフを同期的に評価できません。そのためバインディングは、グラフ内の各ソースモジュールを、sucrase の `imports` 変換で生成した CommonJS 形式の関数として実行します（`dist/runtime/ts-strip.js`。初めて必要になったときに読み込む）。合成モジュールは評価の手順を直接実行します。トップレベル `await` を含むグラフは、Node と同じく `ERR_REQUIRE_ASYNC_MODULE` で失敗します。同じモジュールをあとで import した場合、ブラウザには `require()` が生成した値を再 export するファサードモジュールを渡すので、コードが 2 回実行されることはありません。
+ES モジュールの `require()`（`--require-module`。既定で有効。`--experimental-require-module` は以前の名前）は同期的に評価しなければなりませんが、ブラウザはモジュールグラフを同期的に評価できません。そのためバインディングは、グラフ内の各ソースモジュールを、sucrase の `imports` 変換で生成した CommonJS 形式の関数として実行します（`dist/runtime/ts-strip.js`。初めて必要になったときに読み込む）。合成モジュールは評価の手順を直接実行します。トップレベル `await` を含むグラフは、Node と同じく `ERR_REQUIRE_ASYNC_MODULE` で失敗します。同じモジュールをあとで import した場合、ブラウザには `require()` が生成した値を再 export するファサードモジュールを渡すので、コードが 2 回実行されることはありません。
 
 ```js
 // m.mjs: export const v = 42; export default function f() { return 'def'; }
@@ -373,11 +375,11 @@ console.log(m.v, m.default()); // 42 def
 
 ### import.meta
 
-`import.meta.url`（`file://` の URL）・`import.meta.resolve()`・`import.meta.main` は Node のコールバックが設定します。`file:` のモジュールには、`internalBinding('modules').setLazyPathHelpers` が `import.meta.dirname` と `import.meta.filename`（`url.fileURLToPath()` で得られる、モジュールのディレクトリとパス）を、書き込み可能かつ列挙可能なデータプロパティとして追加します。そのため `Object.keys(import.meta)` は、Node と同じ `['dirname', 'filename', 'main', 'resolve', 'url']` になります。Node は最初のアクセス時にこれらを計算しますが、ここでは即座に計算します。
+Node 26 は、既定のローダーがコンパイルしたモジュールの `import.meta` を C++ で設定します（`DefaultImportMetaObjectInitializer`）。バインディングも `#defaultImportMeta()`（`module_wrap.ts`）で同じことをします。`file:` のモジュールには `import.meta.dirname` と `import.meta.filename`（`url.fileURLToPath()` で得られる、モジュールのディレクトリとパス。`internalBinding('modules').setLazyPathHelpers` で設定）を追加し、続けて `main`、`resolve`（ローダーのフックのスレッドでは無し）、`url`（`file://` の URL）を設定します。どれも書き込み可能かつ列挙可能なデータプロパティなので、`Object.keys(import.meta)` は Node と同じ `['dirname', 'filename', 'main', 'resolve', 'url']` になります。Node は `dirname` と `filename` を最初のアクセス時に計算しますが、ここでは即座に計算します。ほかの host-defined option でコンパイルしたモジュール（`vm.SourceTextModule` など）は、Node の `initializeImportMeta` コールバックを通します。
 
 ### 条件・プリロード・フック
 
-次の機能は Node の lib が処理し、Node と同じように動作します: `require` と `import` の両方に対する `--conditions`／`-C`、`--require`／`-r`、`--import`、`--input-type`、`--experimental-default-type`、`module.register()` で登録するモジュールのカスタマイズフック。
+次の機能は Node の lib が処理し、Node と同じように動作します: `require` と `import` の両方に対する `--conditions`／`-C`、`--require`／`-r`、`--import`、`--input-type`、`module.register()` で登録するモジュールのカスタマイズフック。
 
 ```js
 // hooks.mjs
@@ -393,7 +395,7 @@ console.log((await import('virtual:x')).default); // 7
 
 ### vm モジュール
 
-`vm.SourceTextModule` と `vm.SyntheticModule`（`--experimental-vm-modules` のとき）も同じバインディングで実装しています。`vm` で作成したソーステキストモジュールは、コンテキストのスコープ内で sucrase の `imports` 変換を使って評価します（[vm](#vm) を参照）。インスタンス化の前に、すべてのリクエストがリンクされていること、import するすべての名前が存在することを確認します（満たさない場合は `ERR_VM_MODULE_LINK_FAILURE`、または `SyntaxError: The requested module '<spec>' does not provide an export named '<name>'`）。トップレベル `await` を含むグラフは、依存モジュールを 1 つずつ評価します。同じソースから作られたものでない `cachedData` は `ERR_VM_MODULE_CACHED_DATA_REJECTED` で拒否します。
+`vm.SourceTextModule` と `vm.SyntheticModule`（`--experimental-vm-modules` のとき）も同じバインディングで実装しています。`vm` で作成したソーステキストモジュールは、コンテキストのスコープ内で sucrase の `imports` 変換を使って評価します（[vm](#vm) を参照）。インスタンス化では、V8 と同じ順序でグラフを確認します。まずすべてのリクエストがリンクされていること（満たさない場合は `ERR_VM_MODULE_LINK_FAILURE`）、次に import するすべての名前が存在すること（`SyntaxError: The requested module '<spec>' does not provide an export named '<name>'`）です。フェーズだけが違うリクエストは、同じモジュールにリンクしなければなりません（`ERR_MODULE_LINK_MISMATCH`）。トップレベル `await` を含むグラフは、依存モジュールを 1 つずつ評価します。同じソースから作られたものでない `cachedData` は `ERR_VM_MODULE_CACHED_DATA_REJECTED` で拒否します。
 
 ### コンパイルキャッシュ
 
@@ -401,20 +403,20 @@ console.log((await import('virtual:x')).default); // 7
 
 ## TypeScript
 
-型の除去には Node 自身の仕組みを使います。Node 22.23.4 では `--experimental-strip-types` が既定で有効で、どのファイルの型を除去するか（`.ts`・`.mts`・`.cts`、eval の入力では `--input-type=module-typescript`／`commonjs-typescript`）と、どのエラーを出すかは lib が決めます。lib は `internal/deps/amaro` を呼び出しますが、これは差し替えにより `globalThis.__ovAmaro`（`src/nodejs/typescript.ts`）になります。本物の amaro（Node が同梱しているのと同じバージョンで、`process.versions.amaro` は 1.1.8。swc を WebAssembly にコンパイルしたもので約 3 MB）は `dist/runtime/amaro.js` として配布し、初めて型の除去が必要になったときに、ランタイムのオリジンから同期の `XMLHttpRequest` で取得して、Worker ごとに 1 回評価します。
+型の除去には Node 自身の仕組みを使います。Node 26 では型の除去は実験的な機能ではなくなり、`--strip-types`（以前の名前は `--experimental-strip-types`）が既定で有効です。どのファイルの型を除去するか（`.ts`・`.mts`・`.cts`、eval の入力では `--input-type=module-typescript`／`commonjs-typescript`）と、どのエラーを出すかは lib が決めます。lib は `internal/deps/amaro` を呼び出しますが、これは差し替えにより `globalThis.__ovAmaro`（`src/nodejs/typescript.ts`）になります。本物の amaro（Node が同梱しているのと同じバージョンで、`process.versions.amaro` は 1.1.11。swc を WebAssembly にコンパイルしたもので約 3.8 MB）は `dist/runtime/amaro.js` として配布し、初めて型の除去が必要になったときに、ランタイムのオリジンから同期の `XMLHttpRequest` で取得して、Worker ごとに 1 回評価します。
 
 | コマンド | 結果 |
 |---|---|
 | 型注釈だけを含む `node a.mts` | 実行できる |
 | `enum` を含む `node e.ts` | `SyntaxError [ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX]: TypeScript enum is not supported in strip-only mode` |
-| `node --experimental-transform-types e.ts` | 実行できる（ExperimentalWarning が出る）。ソースマップも暗黙に有効になる |
-| `node --no-experimental-strip-types a.mts` | JavaScript パーサーの `SyntaxError` |
+| `node --experimental-transform-types e.ts` | `node: bad option: --experimental-transform-types`（Node 26 にはこのオプションが無い） |
+| `node --no-strip-types a.mts` | JavaScript パーサーの `SyntaxError` |
 
 旧ランタイムは代わりに sucrase の `typescript` 変換で型を除去します。こちらは enum など、型を消すだけでは処理できない構文も受け付けます。
 
 ## fetch と Web のクラス
 
-Node の `fetch`・`Headers`・`Request`・`Response`・`FormData`・`WebSocket`・`EventSource`・`MessageEvent` は `internal/deps/undici` から提供されますが、これは差し替えにより `globalThis.__ovUndici`（`src/nodejs/fetch.ts`）になります。undici は TCP ソケットの上で HTTP を話しますが、ブラウザは外部へのソケットを開けないためです。
+Node の `fetch`・`Headers`・`Request`・`Response`・`FormData`・`WebSocket`・`EventSource`・`MessageEvent` は `internal/deps/undici` から提供されますが、これは差し替えにより `globalThis.__ovUndici`（`src/nodejs/fetch.ts`）になります。undici は TCP ソケットの上で HTTP を話しますが、ブラウザは外部へのソケットを開けないためです。`process.versions.undici` は Node 26.13.0 が同梱する undici のバージョン（8.12.2）を返しますが、OpenVessel の `fetch` は独自の実装です。
 
 ### ルーティング
 
@@ -456,7 +458,7 @@ undici と同じ動作です。リクエストには `host`（URL のホスト�
 Node の `lib/` のファイルを差し替えているのは、`src/nodejs/overrides/` にあるものだけです。`scripts/gen-nodelib.mjs` は、そこにある各ファイルを同じ ID の組み込みモジュールの代わりに組み込みます。差し替えは次の 2 つです。
 
 - `internal/deps/undici/undici` は `module.exports = globalThis.__ovUndici;`（`src/nodejs/fetch.ts` から）に差し替えます。undici は外部への TCP ソケットを必要とするためで、fetch は仮想ポートへは `node:http` で、それ以外へはポリシーのチェックを行うプロキシ経由で送ります。
-- `internal/deps/amaro/dist/index` は `module.exports = globalThis.__ovAmaro(require);`（`src/nodejs/typescript.ts` から）に差し替えます。amaro は swc を 3 MB の WebAssembly モジュールとして同梱しているため、`nodelib.js` には含めず、初めて使うときに取得します。
+- `internal/deps/amaro/dist/index` は `module.exports = globalThis.__ovAmaro(require);`（`src/nodejs/typescript.ts` から）に差し替えます。amaro は swc を WebAssembly モジュール（約 3.8 MB）として同梱しているため、`nodelib.js` には含めず、初めて使うときに取得します。
 
 ## worker_threads
 
@@ -465,7 +467,7 @@ Node の `lib/` のファイルを差し替えているのは、`src/nodejs/over
 - `threadId` はプロセスごとの番号です（カーネルが予約します）。`isMainThread`・`threadName`・`resourceLimits`・`SHARE_ENV` に対応しています。`resourceLimits` は記録して返しますが、制限は行いません。
 - `receiveMessageOnPort()` と同期的な読み出しは、共有メモリのリングバッファで実現しています。`MessageChannel` のポートに届くメッセージは、`v8.serialize` でシリアライズしてリングバッファにも書き込みます。リングバッファは 16 KiB から始まって 1 MiB まで拡張します（拡張可能な `SharedArrayBuffer` が無い場合は 1 MiB 固定）。この方法でシリアライズできないメッセージは、通常の経路でだけ届きます。
 - `trackUnmanagedFds`（既定）の場合、スレッドが `fs.open` で開いた fd はスレッドの終了時に閉じます。
-- `worker.getHeapStatistics()` は `performance.memory` から算出した値を返します。`worker.cpuUsage()` はスレッドの起動からの経過時間を返します。`startCpuProfile()`／`stopCpuProfile()` は V8 の形式の空のプロファイルを返します。`getHeapSnapshot()` は利用できません。
+- `worker.getHeapStatistics()` は `performance.memory` から算出した値を返します。`worker.cpuUsage()` はスレッドの起動からの経過時間を返します。CPU とヒープのプロファイル（`startCpuProfile()`・`startHeapProfile()`）は、V8 の形式の空のプロファイルになります。`getHeapSnapshot()` は利用できません。
 - スレッドは、プロセスのメインスレッドと同じランタイムで動きます。プロセスの起動後に `/etc/openvessel/node` が変わっても同じです。
 
 ## child_process
@@ -515,7 +517,9 @@ Web Worker では新しい JavaScript の realm を作れないので、`vm` の
 
 ## AsyncLocalStorage
 
-Node は V8 の Promise フックを使って、非同期コンテキストを Promise に沿って伝播させます。ブラウザはこのフックを公開していないため（`setPromiseHooks` は何もしない）、`AsyncLocalStorage.run()`／`enterWith()` で設定したコンテキストは、同期的なコードと、最初の `await` より前にスケジュールしたコールバック（`process.nextTick`、タイマー、immediate、I/O）では参照できますが、`await` のあとでは失われます。
+Node 24 以降は、`AsyncLocalStorage` を V8 の continuation-preserved embedder data の上で動かします（`--async-context-frame`。Node 26 では既定で有効）。V8 はこのデータを `await` や Promise のジョブの前後で引き継ぎますが、ブラウザはこれを JavaScript に公開していません。そのため OpenVessel はこのオプションを既定で無効にし（`--no-async-context-frame`。`src/nodejs/options.ts` の `defaultOptionValues()` で設定）、`AsyncLocalStorage` は Node 22 と同じく `async_hooks` の上で動きます。`--async-context-frame` を明示すると lib のフレームを使う実装になりますが、その下は単なる変数（`internalBinding('async_context_frame')`）なので、やはり `await` のあとでストアは失われます。
+
+`async_hooks` の場合、Node は V8 の Promise フックを使って、非同期コンテキストを Promise に沿って伝播させます。ブラウザはこのフックも公開していないため（`setPromiseHooks` は何もしない）、`AsyncLocalStorage.run()`／`enterWith()` で設定したコンテキストは、同期的なコードと、最初の `await` より前にスケジュールしたコールバック（`process.nextTick`、タイマー、immediate、I/O）では参照できますが、`await` のあとでは失われます。
 
 ```js
 const { AsyncLocalStorage } = require('node:async_hooks');
@@ -549,9 +553,9 @@ als.run(42, async () => {
 | `node:sea` | `sea.isSea()` などが失敗する |
 | `net.BlockList`・`net.SocketAddress` | インスタンスの作成が失敗する（`block_list`） |
 | JavaScript のストリーム（ネイティブのソケットでないもの）を渡す `tls.connect({ socket })` | 失敗する（`js_stream`） |
-| `localStorage`／`sessionStorage` | 利用できない（`webstorage`） |
 | `--permission` | `process.permission.has()` が失敗する（`permission`） |
 | ネイティブアドオン | `process.dlopen` は常に失敗する（前述） |
+| `node:ffi` | `require('node:ffi')` はできる。ネイティブのライブラリは読み込めない（`ffi`） |
 
 各モジュールのバインディング単位の状況は [バインディング](bindings.ja.md) にあります。
 

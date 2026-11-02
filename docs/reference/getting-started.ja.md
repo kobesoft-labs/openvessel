@@ -38,7 +38,7 @@ npm install https://github.com/kobesoft-labs/openvessel/releases/download/v1.2.1
   ありません。
 - `exports["."].types`・`types`: `./dist/types/host/index.d.ts`。TypeScript の型定義です（`dist/types/shared/policy.d.ts`
   を import しています）。
-- `openvessel.node`: `22.23.4`。移植版の Node.js ランタイムが追従している Node.js のバージョンです。
+- `openvessel.node`: `26.13.0`。移植版の Node.js ランタイムが追従している Node.js のバージョンです。
 
 ```ts
 import { OpenVessel, PRESETS, type BootOptions, type Process } from 'openvessel';
@@ -136,7 +136,7 @@ Service Worker は最新のカーネルとの接続しか保持しないため�
 
 ビルドには 2 つの Node.js ランタイムが含まれています。カーネルは `node` プロセスを起動するたびに、どちらを使うかを決めます。
 
-- 移植版ランタイム: `dist/runtime/node-process.js`（`src/nodejs/`）。Node.js v22.23.4 の `lib/` をそのまま、TypeScript で
+- 移植版ランタイム: `dist/runtime/node-process.js`（`src/nodejs/`）。Node.js v26.13.0 の `lib/` をそのまま、TypeScript で
   書いた `internalBinding()` の上で動かします。既定はこちらです。
 - 旧ランタイム: `dist/runtime/process.js`（`src/node/worker.ts`）。以前から使っていた、手書きの Node 互換レイヤーです。
   VFS のファイル `/etc/openvessel/node` の中身が `legacy` のときに使われます（前後の空白は無視します）。

@@ -164,7 +164,7 @@ const png = await sharp({ create: { width: 2, height: 2, channels: 3, background
 |---|---|---|
 | `require('x.node')` | Node 自身のローダーが `process.dlopen` を呼び、`ERR_DLOPEN_FAILED` を投げる | `ERR_DLOPEN_FAILED` を投げる: `Native addons are not supported in OpenVessel (tried to load <file>). Use the WebAssembly build of this package.` |
 | `process.dlopen()` | glibc の `dlopen` に似たメッセージ（下記）で `ERR_DLOPEN_FAILED` を投げる | 同じ |
-| `import 'x.node'` | `ERR_UNKNOWN_FILE_EXTENSION`（`--experimental-addon-modules` なしの Node 22 と同じ） | 失敗する |
+| `import 'x.node'` | Node 26 は既定でアドオンを import できる（`--experimental-addon-modules`）。`ExperimentalWarning`（`Importing addons`）が出たあと、`process.dlopen` が `ERR_DLOPEN_FAILED` を投げる | 失敗する |
 
 `process.dlopen` のメッセージ（両方のランタイム）:
 

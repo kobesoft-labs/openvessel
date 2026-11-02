@@ -24,7 +24,7 @@ OpenVessel は、ブラウザのタブの中で動く Node.js 用の小さな仮
 
 ### プロセス（Node.js そのもの）
 
-`node` のプロセスは、それぞれが独立した Web Worker です。Node.js v22 自身の JavaScript（`lib/`）を変更せずに実行します。
+`node` のプロセスは、それぞれが独立した Web Worker です。Node.js v26 自身の JavaScript（`lib/`）を変更せずに実行します。
 Node の `lib/` は、通常は C++ の上で動いています。その下にあるのは、50 ほどの `internalBinding()` モジュール（ファイル・ストリーム・TCP・
 タイマー・crypto・zlib・モジュール・worker など）、libuv のイベントループ、そして OS です。OpenVessel は、ちょうどこの部分を
 TypeScript で実装し直しています。

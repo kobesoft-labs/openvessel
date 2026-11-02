@@ -40,7 +40,7 @@ The package is an ES module with one entry point. The relevant `package.json` fi
   dependencies.
 - `exports["."].types` and `types`: `./dist/types/host/index.d.ts`, the TypeScript declarations (they
   import `dist/types/shared/policy.d.ts`).
-- `openvessel.node`: `22.23.4`, the Node.js version the ported runtime follows.
+- `openvessel.node`: `26.13.0`, the Node.js version the ported runtime follows.
 
 ```ts
 import { OpenVessel, PRESETS, type BootOptions, type Process } from 'openvessel';
@@ -137,7 +137,7 @@ runtime's service worker keeps only the most recent kernel connection, so a seco
 
 The build contains two Node.js runtimes, and the kernel picks one each time it starts a `node` process:
 
-- The ported runtime, `dist/runtime/node-process.js` (`src/nodejs/`), runs Node.js v22.23.4's own
+- The ported runtime, `dist/runtime/node-process.js` (`src/nodejs/`), runs Node.js v26.13.0's own
   `lib/` on a TypeScript `internalBinding()`. It is used by default.
 - The legacy runtime, `dist/runtime/process.js` (`src/node/worker.ts`), is an older hand-written
   Node-compatible layer. It is used when the VFS file `/etc/openvessel/node` contains `legacy`

@@ -31,7 +31,7 @@ in-browser runtimes. It is open source under the [Apache License 2.0](LICENSE).
 
 ## How it is different
 
-- It runs Node.js itself. Node.js v22's own `lib/` (the JavaScript half of Node) runs
+- It runs Node.js itself. Node.js v26's own `lib/` (the JavaScript half of Node) runs
   unmodified. OpenVessel re-implements the part Node writes in C++, `internalBinding()`,
   in TypeScript on top of a small kernel. Error messages, stack traces, argument validation and
   event-loop ordering come out the way Node produces them, and following a new Node release is a
@@ -50,10 +50,10 @@ in-browser runtimes. It is open source under the [Apache License 2.0](LICENSE).
 
 - Version: 1.2.1. See the [Changelog](CHANGELOG.md) and [releasing](docs/RELEASING.md). OpenVessel uses its
   own semver; the ported Node.js version is in every release title.
-- Node.js: v22.23.4 (`src/node/version.ts`).
-- Node's own test suite: 1237 of 1237 (100%) of the tests a browser can pass, across 1271 tests of the
-  targeted modules. The other 34 are listed with the reason in [docs/compatibility.md](docs/compatibility.md).
-- Astro sites: 131 of a corpus of 147 real sites build (Astro 5, 6 and 7); see
+- Node.js: v26.13.0 (`src/node/version.ts`).
+- Node's own test suite: {{NODE_TESTS}}. The tests a browser can't pass are listed with the reason in
+  [docs/compatibility.md](docs/compatibility.md).
+- Astro sites: {{CORPUS}} (Astro 5, 6 and 7); see
   [docs/compatibility.md](docs/compatibility.md).
 - Browsers: Chromium-based browsers. Firefox (current release) runs the ported runtime: the shell, npm,
   Astro build and dev server with the preview, and 1200 of the 1237 Node tests
@@ -136,8 +136,9 @@ node test/node-compat/run.mjs --port --report              # pass / target per m
 node corpus/run.mjs [filter]                               # build the Astro site corpus
 ```
 
-The end-to-end tests drive the system Chrome through `playwright-core` (`OV_BROWSER=firefox` uses
-Playwright's Firefox, installed once with `npx playwright-core install firefox`). Set `HEADED=1` to watch,
+The end-to-end tests drive the system Chrome through `playwright-core`, or Playwright's Chromium when
+Chrome isn't installed (`npx playwright-core install chromium` once; `OV_CHROME=chromium` forces it).
+`OV_BROWSER=firefox` uses Playwright's Firefox, installed once with `npx playwright-core install firefox`. Set `HEADED=1` to watch,
 `OV_CONSOLE=1` for browser console output, and `OV_PORT_BASE=<port>` to run several suites side by side.
 
 ## License

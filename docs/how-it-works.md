@@ -29,7 +29,7 @@ One Web Worker plays the role of the operating system. It owns:
 
 ### Processes: Node.js itself
 
-Every `node` process is its own Web Worker. It runs Node.js v22's own JavaScript (`lib/`) without
+Every `node` process is its own Web Worker. It runs Node.js v26's own JavaScript (`lib/`) without
 changes. Node's `lib/` normally sits on top of C++: about fifty `internalBinding()` modules (files,
 streams, TCP, timers, crypto, zlib, modules, workers…), libuv's event loop and the operating system.
 OpenVessel re-implements exactly that part in TypeScript.

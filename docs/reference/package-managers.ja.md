@@ -279,7 +279,7 @@ npm error command sh -c exit 3
 | `npm_package_name` | `package.json` の `name`。なければ空 |
 | `npm_package_version` | `package.json` の `version`。なければ空 |
 | `npm_package_json` | プロジェクトの `package.json` の絶対パス |
-| `npm_config_user_agent` | `<pm>/<version> npm/? node/v22.23.4 linux x64 workspaces/false`。`exec` では既存の値を残すので、`pnpm` のスクリプト内で `npx` が起動した実行ファイルにも `pnpm` と見えます（`only-allow` などのツールはこれを前提にしています） |
+| `npm_config_user_agent` | `<pm>/<version> npm/? node/v26.13.0 linux x64 workspaces/false`。`exec` では既存の値を残すので、`pnpm` のスクリプト内で `npx` が起動した実行ファイルにも `pnpm` と見えます（`only-allow` などのツールはこれを前提にしています） |
 | `npm_execpath` | `/usr/lib/node_modules/<pm>/bin/<pm>-cli.js` |
 | `npm_node_execpath` | `/usr/bin/node` |
 | `npm_command` | `test`・`start` のスクリプトではその名前、それ以外は `run-script`（インストール中も同じ） |

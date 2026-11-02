@@ -174,7 +174,7 @@ only a native file finds it and then fails to load it.
 |---|---|---|
 | `require('x.node')` | Node's own loader calls `process.dlopen`, which throws `ERR_DLOPEN_FAILED` | throws `ERR_DLOPEN_FAILED`: `Native addons are not supported in OpenVessel (tried to load <file>). Use the WebAssembly build of this package.` |
 | `process.dlopen()` | throws `ERR_DLOPEN_FAILED` with a message like glibc's `dlopen` (below) | the same |
-| `import 'x.node'` | `ERR_UNKNOWN_FILE_EXTENSION` (as in Node 22 without `--experimental-addon-modules`) | fails |
+| `import 'x.node'` | Node 26 imports addons by default (`--experimental-addon-modules`): an `ExperimentalWarning` (`Importing addons`), then `process.dlopen` throws `ERR_DLOPEN_FAILED` | fails |
 
 Messages of `process.dlopen` (both runtimes):
 

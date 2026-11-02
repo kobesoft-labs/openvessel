@@ -7,7 +7,7 @@ OpenVessel のテストは 4 種類あります。Node.js で実行する単体�
 | テスト | ランナー | 必要なもの | よく使うコマンド |
 |---|---|---|---|
 | 単体 | `scripts/test.mjs` | Node.js | `npm test` |
-| E2E | `test/e2e/*.mjs` | ビルド（`dist/`）・Google Chrome | `node test/e2e/harness.mjs 'node -v'` |
+| E2E | `test/e2e/*.mjs` | ビルド（`dist/`）・Google Chrome または Playwright の Chromium | `node test/e2e/harness.mjs 'node -v'` |
 | Node のテストスイート | `test/node-compat/run.mjs` | ビルド・Chrome・`test/node-compat/.node/` | `node test/node-compat/run.mjs --port fs` |
 | Astro のコーパス | `corpus/run.mjs` | ビルド・Chrome・`corpus/sites/`・ネットワーク | `node corpus/run.mjs basics` |
 
@@ -19,6 +19,7 @@ OpenVessel のテストは 4 種類あります。Node.js で実行する単体�
 |---|---|---|
 | `OV_PORT_BASE` | `scripts/serve.mjs`・`test/e2e/harness.mjs` | 3 つのサーバーのポートが base・base + 1・base + 2 になり（既定は 5170）、ブラウザのプロファイルが `node_modules/.cache/ov-chrome-<base>`（5170 のときは `ov-chrome`）になる。複数のテストを並行して実行できる |
 | `OV_HOST_PORT`・`OV_RUNTIME_PORT`・`OV_PREVIEW_PORT` | `scripts/serve.mjs` | ポートを個別に指定する。ハーネスは `OV_PORT_BASE` しか知らないので、テスト用のスクリプトとは併用しない |
+| `OV_CHROME` | `harness.mjs` | `chromium` なら、Google Chrome がインストールされていても Playwright の Chromium を使う。それ以外の値なら、その名前の Playwright のチャネル（`chrome-beta`・`msedge` など）を起動する。未設定なら、システムの Google Chrome を使い、Chrome が無ければ Playwright の Chromium を使う |
 | `HEADED` | `harness.mjs`（直接実行するとき）・`project.mjs`・`dev.mjs`・`preview-port.mjs` | 空でなければブラウザのウィンドウを表示する |
 | `OV_CONSOLE` | `harness.mjs` | 空でなければ、ページのコンソールメッセージを `[console.<type>] <text>` の形で出力する（ページのエラーは常に `[pageerror] …` と出力する） |
 | `OV_TRACE` | `harness.mjs` | 空でなければカーネルのトレース（`debug.trace`）を有効にする。プロセスの起動、パイプのクローズ、読み取りでの EOF、fd 0 の同期読み取りのたびに `[trace]` の行をコンソールに出す（`OV_CONSOLE=1` で見える） |
@@ -56,7 +57,7 @@ OpenVessel のテストは 4 種類あります。Node.js で実行する単体�
 
 ## E2E テスト
 
-`test/e2e/` のスクリプトはすべて `harness.mjs` を使います。ハーネスは `scripts/serve.mjs` を起動し（`OV_PORT_BASE` に従う）、ローカルの Chrome を `playwright-core` で起動して（`channel: 'chrome'`・永続プロファイル・`--js-flags=--stack-size=4000`）、`http://localhost:<base>/` のプレイグラウンドを開きます。`window.ovReady` を待ってから、プレイグラウンドの `window.ov`（`OpenVessel` のインスタンス）を使います。プレイグラウンドは `/home/user/app` に Astro 5 のサンプルプロジェクトをマウントします。コマンドが `/etc/openvessel/node` に `legacy` を書き込まない限り、移植版ランタイムで実行します（[Node.js ランタイム](nodejs-runtime.ja.md#ランタイムの選び方) を参照）。
+`test/e2e/` のスクリプトはすべて `harness.mjs` を使います。ハーネスは `scripts/serve.mjs` を起動し（`OV_PORT_BASE` に従う）、システムの Google Chrome を `playwright-core` で起動して（`channel: 'chrome'`・永続プロファイル・`--js-flags=--stack-size=4000`。Google Chrome がインストールされていなければ Playwright の Chromium を使う。Chromium は `npx playwright-core install chromium` で 1 度だけインストールしておく。`OV_CHROME` で選び方を変えられる）、`http://localhost:<base>/` のプレイグラウンドを開きます。`window.ovReady` を待ってから、プレイグラウンドの `window.ov`（`OpenVessel` のインスタンス）を使います。プレイグラウンドは `/home/user/app` に Astro 5 のサンプルプロジェクトをマウントします。コマンドが `/etc/openvessel/node` に `legacy` を書き込まない限り、移植版ランタイムで実行します（[Node.js ランタイム](nodejs-runtime.ja.md#ランタイムの選び方) を参照）。
 
 `harness.mjs` がエクスポートする関数:
 
@@ -76,7 +77,8 @@ OpenVessel のテストは 4 種類あります。Node.js で実行する単体�
 | `project.mjs` | `<dir> ['<コマンド>']`（既定は `npm install && npm run build`） | `/home/user/app` をローカルのプロジェクトで置き換えてコマンドを実行する（タイムアウト 15 分）。`node_modules`・`.git`・`dist`・`.astro`・`.vercel`・`.netlify`・`.cache`・`.turbo`・`.output` と 64 MiB を超えるファイルはスキップし、シンボリックリンクは保持する。`collectFiles()` と `mountProject()` をエクスポートする |
 | `dev.mjs` | `[--legacy]` | `/home/user/app` で `npm install` を実行し、`npm run dev` を起動して `server-ready` を待つ。プレビューの `<h1>` を確認し、`src/pages/index.astro` を編集して HMR による更新を最大 30 秒待つ |
 | `preview-port.mjs` | — | 移植版ランタイムで、ポート 4000 に `http` サーバーを立て、プレビューの iframe に読み込み（70000 バイトの chunked の本文）、iframe から POST する。`OK` か `FAIL` を表示し、0／1 で終了する |
-| `port-fs.mjs` | `[シナリオ…]` | 移植版ランタイムで fs のシナリオ `dir`・`watch`・`watch2`・`cp`・`cp2`・`misc`・`misc2`（opendir と Dir・`fs.watch`・`fs.watchFile`・`fs.cp`／`cpSync`・readv／writev・FileHandle）を実行し、それぞれの出力を Linux 上の Node v22.23.4（Docker の `node:22.23.4-bookworm-slim`）で記録した期待値と比較する。`ok`／`FAIL` と行単位の差分、`all passed` または `<n> failed` を表示し、0／1 で終了する |
+| `port-fs.mjs` | `[シナリオ…]` | 移植版ランタイムで fs のシナリオ `dir`・`watch`・`watch2`・`cp`・`cp2`・`misc`・`misc2`（opendir と Dir・`fs.watch`・`fs.watchFile`・`fs.cp`／`cpSync`・readv／writev・FileHandle）を実行し、それぞれの出力を Linux 上の Node v26.13.0（Docker の `node:26.13.0-bookworm-slim`）で記録した期待値と比較する。`ok`／`FAIL` と行単位の差分、`all passed` または `<n> failed` を表示し、0／1 で終了する |
+| `net-gate.mjs` | — | ネットワークの関門と Service Worker を確認する。ループバックは仮想ポートに届くこと、リダイレクトは最後に着いたホストで確認されること、許可のプロンプトの依頼元、1 つのオリジンでの 2 つのランタイム、プレビューでの判断。確認ごとに `ok`／`FAIL` を表示し、最後に `OK` か `FAIL` を表示して 0／1 で終了する。インターネットへの接続が必要（`registry.npmjs.org`・`httpbin.org`、ほかのホストへのリダイレクトには `httpbin.dev`。`httpbin.org` はほかのホストへのリダイレクトをしなくなった） |
 | `esm-graph.mjs` | `[--port] <プロジェクトのディレクトリ> <VFS 上のエントリのパス> [インストールのコマンド='npm install']` | プロジェクトをマウントしてインストールし、カーネルが `/__ov/esm` で配信する ES モジュールのグラフ（旧ランタイムの ESM 配信）をたどって、読み込めないモジュールを報告する |
 | `debug-esm.mjs` | `[--port] <VFS のパス…>` | `npm install` を実行したあと、各パスについて `/__ov/esm<パス>` の先頭 3000 文字を表示する |
 
@@ -99,7 +101,7 @@ node test/e2e/watch.mjs --mount ~/sites/blog 'npm run dev' 60
 
 ### テストの選択
 
-ファイル名から `test-` と拡張子 `.js`／`.mjs` を除いた部分が、次のモジュール名のいずれかと一致するか、モジュール名に `-` が続く形で始まるテストを選びます（最も長く一致するものを採用）: `fs`・`path`・`events`・`event-emitter`・`eventemitter`・`stream`・`stream2`・`stream3`・`readable`・`buffer`・`util`・`worker`・`crypto`・`child-process`・`url`・`whatwg-url`・`string-decoder`・`zlib`・`timers`・`process`・`module`・`require`・`readline`・`os`・`querystring`・`assert`・`abortcontroller`・`console`・`vm`・`async-local-storage`・`next-tick`・`promises`・`microtask`・`queue-microtask`・`wasi`。
+ファイル名から `test-` と拡張子 `.js`／`.mjs` を除いた部分が、次のモジュール名のいずれかと一致するか、モジュール名に `-` が続く形で始まるテストを選びます（最も長く一致するものを採用）: `fs`・`path`・`events`・`event-emitter`・`eventemitter`・`stream`・`stream2`・`stream3`・`readable`・`buffer`・`util`・`worker`・`crypto`・`child-process`・`url`・`whatwg-url`・`string-decoder`・`zlib`・`timers`・`process`・`module`・`require`・`readline`・`os`・`querystring`・`assert`・`abortcontroller`・`console`・`vm`・`async-local-storage`・`next-tick`・`promises`・`microtask`・`queue-microtask`・`wasi`・`webcrypto`。
 
 選ばれたテストでも、ソースに次のいずれかを含むものはスキップします: `expose-internals`／`expose_internals`・`internalBinding`・`--expose-gc`・`common/inspector`・`--inspect`・`--cpu-prof`・`--heap-prof`・`--prof`・`--trace-`・`--report`・`--diagnostic`・`--allow-natives-syntax`・`--max-old-space`・`--abort-on-uncaught`・`common/sea`・`common/v8`・`v8.setFlagsFromString`・`--experimental-permission`・`--permission`・`process.binding`・`--snapshot`・`--build-snapshot`・`--frozen-intrinsics`・`--icu`・`common/shared-lib-util`・`common/wpt`・`common/benchmark`・`common/debugger`・`--watch`。
 
@@ -188,7 +190,7 @@ node test/e2e/watch.mjs --mount ~/sites/blog 'npm run dev' 60
 
 ### corpus/run.mjs
 
-`node corpus/run.mjs [--legacy] [filter…]` は、ID にいずれかの filter を含むサイト（filter が無ければ全サイト）について、次の処理を行います。
+`node corpus/run.mjs [--legacy] [--shard=i/n] [filter…]` は、ID にいずれかの filter を含むサイト（filter が無ければ全サイト）について、次の処理を行います。
 
 1. プレイグラウンドを再読み込みし（新しいカーネルになる）、`corpus/sites/<id>` を `/home/user/app` にマウントする
 2. パッケージマネージャを決める。`package.json` の `packageManager` フィールド（`npm`・`pnpm`・`yarn`・`bun`）があればそれを使い、無ければ `pnpm-lock.yaml` → pnpm、`yarn.lock` → yarn、`bun.lock`／`bun.lockb` → bun、どれも無ければ npm
@@ -196,12 +198,18 @@ node test/e2e/watch.mjs --mount ~/sites/blog 'npm run dev' 60
 
 ハーネス自体が失敗した場合は、ブラウザを起動し直して次のサイトに進みます。
 
+`--shard=i/n` を付けると、対象のサイトのうち i 番目（1 から数える）から n 個おきのサイトだけを実行します。それぞれ別の `OV_PORT_BASE` で n 個を同時に起動すれば、コーパスを分担して実行できます。
+
+```bash
+for i in 1 2 3; do OV_PORT_BASE=$((5170 + i * 100)) node corpus/run.mjs --shard=$i/3 & done; wait
+```
+
 結果は `corpus/results/port/`（既定の移植版ランタイム）に、`--legacy` のときは `corpus/results/` に書き込みます。次のパスの `[/port]` は、この違いを表します。
 
 - `corpus/results[/port]/results.json`: `{ "<id>": { id, astro, install, build, ms, error } }`。`install`／`build` は真偽値で、インストールに失敗したときは `build` が `null` のままです。`error` には、ビルドの出力の空でない最後の 12 行、またはインストールの出力の最後の 8 行が入ります。
 - `corpus/results[/port]/logs/<id>.log`: `$ <pm> install`・その出力・`[exit <code> <ms>ms]` に続けて、ビルドについて同じものが入ります。
 
-`results.json` の既存の項目は残し、サイトごとに上書きします。サイトごとに `[<i>/<n>] OK|FAIL|INST <id> (<s>s)`（FAIL はビルドの失敗、INST はインストールの失敗）と最後のエラーの行を表示し、最後に `build ok: <x>/<total>, install ok: <y>` と表示します。`corpus/results/logs/` と `corpus/results/port/` は git の管理外です。
+`results.json` の既存の項目は残し、サイトごとに上書きします。書き込みのたびにファイルを読み直してから置き換える（アトミックに置き換える）ので、同時に実行したシャードの結果は 1 つのファイルにまとまります。サイトごとに `[<i>/<n>] OK|FAIL|INST <id> (<s>s)`（FAIL はビルドの失敗、INST はインストールの失敗）と最後のエラーの行を表示し、最後に `build ok: <x>/<total>, install ok: <y>` と表示します。`corpus/results/logs/` と `corpus/results/port/` は git の管理外です。
 
 ## テストの追加
 
