@@ -15,6 +15,8 @@ export interface RsaKey {
   dp?: bigint;
   dq?: bigint;
   qi?: bigint;
+  /** RFC 8017 multi-prime keys: the primes beyond p and q (r_i, d_i, t_i) */
+  others?: { r: bigint; d: bigint; t: bigint }[];
 }
 
 export const rsaErr = {
@@ -87,7 +89,8 @@ function publicOp(k: RsaKey, m: bigint): bigint {
 }
 
 function privateOp(k: RsaKey, c: bigint): bigint {
-  if (k.p && k.q && k.dp !== undefined && k.dq !== undefined && k.qi !== undefined) {
+  // (multi-prime keys go through d)
+  if (!k.others?.length && k.p && k.q && k.dp !== undefined && k.dq !== undefined && k.qi !== undefined) {
     const m1 = modPow(c, k.dp, k.p);
     const m2 = modPow(c, k.dq, k.q);
     let h = (k.qi * (m1 - m2)) % k.p;

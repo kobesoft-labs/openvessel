@@ -233,7 +233,10 @@ export function rsaPublicDer(k: RsaKey) {
 }
 
 export function rsaPrivateDer(k: RsaKey) {
-  return der.seq(der.int(0), der.int(k.n), der.int(k.e), der.int(k.d!), der.int(k.p!), der.int(k.q!), der.int(k.dp!), der.int(k.dq!), der.int(k.qi!));
+  const f = [der.int(k.n), der.int(k.e), der.int(k.d!), der.int(k.p!), der.int(k.q!), der.int(k.dp!), der.int(k.dq!), der.int(k.qi!)];
+  // version 1 with OtherPrimeInfos for a multi-prime key
+  if (k.others?.length) return der.seq(der.int(1), ...f, der.seq(...k.others.map((o) => der.seq(der.int(o.r), der.int(o.d), der.int(o.t)))));
+  return der.seq(der.int(0), ...f);
 }
 
 /** ECParameters (RFC 3279) for paramEncoding 'explicit': prime field, a, b, base point, order, cofactor. */
@@ -331,19 +334,69 @@ function readPssParams(n: der.Node | undefined): PssParams | null {
   return { hash, mgf1, saltLength };
 }
 
+/**
+ * One BER element (d2i's leniency for RSAPublicKey: indefinite lengths ended by 00 00, non-minimal
+ * length encodings): [tag, children or body, end offset].
+ */
+function berElement(b: Uint8Array, off: number): { tag: number; body: Uint8Array; parts: ReturnType<typeof berElement>[] | null; end: number } {
+  if (off + 2 > b.length) throw new der.DerError('truncated');
+  const tag = b[off];
+  let p = off + 2;
+  const first = b[off + 1];
+  if (first === 0x80) {
+    // indefinite: constructed only, children up to the end-of-contents octets
+    if (!(tag & 0x20)) throw new der.DerError('indefinite primitive');
+    const parts: ReturnType<typeof berElement>[] = [];
+    for (;;) {
+      if (p + 2 > b.length) throw new der.DerError('missing end-of-contents');
+      if (b[p] === 0 && b[p + 1] === 0) return { tag, body: b.subarray(off + 2, p), parts, end: p + 2 };
+      const c = berElement(b, p);
+      parts.push(c);
+      p = c.end;
+    }
+  }
+  let len = first;
+  if (first & 0x80) {
+    const n = first & 0x7f;
+    if (n > 4 || p + n > b.length) throw new der.DerError('bad length');
+    len = 0;
+    for (let i = 0; i < n; i++) len = len * 256 + b[p++];
+  }
+  if (p + len > b.length) throw new der.DerError('truncated');
+  const body = b.subarray(p, p + len);
+  let parts: ReturnType<typeof berElement>[] | null = null;
+  if (tag & 0x20) {
+    parts = [];
+    for (let q = 0; q < body.length; ) {
+      const c = berElement(body, q);
+      parts.push(c);
+      q = c.end;
+    }
+  }
+  return { tag, body, parts, end: p + len };
+}
+
 function readRsaPublic(b: Uint8Array): RsaKey {
-  // d2i_RSAPublicKey reads one RSAPublicKey and ignores what follows it
-  const parts = der.children(der.expect(der.read(b), 0x30));
-  if (parts.length !== 2) throw new der.DerError('not an RSAPublicKey');
-  const [n, e] = parts.map((x) => der.readInt(der.expect(x, 0x02)));
+  // d2i_RSAPublicKey reads one RSAPublicKey (BER) and ignores what follows it
+  const seq = berElement(b, 0);
+  if (seq.tag !== 0x30 || !seq.parts || seq.parts.length !== 2) throw new der.DerError('not an RSAPublicKey');
+  const [n, e] = seq.parts.map((x) => {
+    if (x.tag !== 0x02) throw new der.DerError('wrong tag');
+    return bytesToBigInt(x.body);
+  });
   return { n, e };
 }
 
 function readRsaPrivate(b: Uint8Array): RsaKey {
-  const f = der.children(der.expect(der.parse(b), 0x30)).map((x) => der.readInt(x));
-  if (f.length < 9) throw new der.DerError('short');
-  const [, n, e, d, p, q, dp, dq, qi] = f;
-  return completeRsa({ n, e, d, p, q, dp, dq, qi });
+  const nodes = der.children(der.expect(der.parse(b), 0x30));
+  if (nodes.length < 9) throw new der.DerError('short');
+  const [, n, e, d, p, q, dp, dq, qi] = nodes.slice(0, 9).map((x) => der.readInt(x));
+  const k: RsaKey = { n, e, d, p, q, dp, dq, qi };
+  if (nodes[9]) k.others = der.children(der.expect(nodes[9], 0x30)).map((o) => {
+    const [r, od, t] = der.children(o).map((x) => der.readInt(x));
+    return { r, d: od, t };
+  });
+  return completeRsa(k);
 }
 
 export function isRsaPrivateDer(b: Uint8Array): boolean {
@@ -724,6 +777,7 @@ export function exportJwk(a: Asym, isPrivate: boolean, target: any, handleRsaPss
       target.dp = bigB64(k.dp!);
       target.dq = bigB64(k.dq!);
       target.qi = bigB64(k.qi!);
+      if (k.others?.length) target.oth = k.others.map((o) => ({ r: bigB64(o.r), d: bigB64(o.d), t: bigB64(o.t) }));
     }
     return;
   }
@@ -759,8 +813,14 @@ export function importJwk(jwk: any, kty: string, namedCurve: unknown): KeyData {
     for (const f of ['d', 'p', 'q', 'dp', 'dq', 'qi']) if (typeof jwk[f] !== 'string') throw bad();
     Object.assign(rsa, { d: big(jwk.d), p: big(jwk.p), q: big(jwk.q), dp: big(jwk.dp), dq: big(jwk.dq), qi: big(jwk.qi) });
     // Node 24+ has OpenSSL check the key: the modulus must be the product of the primes
-    // (multi-prime keys, with "oth", are not implemented here)
-    if (jwk.oth !== undefined || rsa.p! * rsa.q! !== rsa.n) throw bad();
+    if (jwk.oth !== undefined) {
+      if (!Array.isArray(jwk.oth) || jwk.oth.length === 0) throw bad();
+      rsa.others = jwk.oth.map((o: any) => {
+        if (!o || typeof o.r !== 'string' || typeof o.d !== 'string' || typeof o.t !== 'string') throw bad();
+        return { r: big(o.r), d: big(o.d), t: big(o.t) };
+      });
+    }
+    if ((rsa.others ?? []).reduce((acc, o) => acc * o.r, rsa.p! * rsa.q!) !== rsa.n) throw bad();
     return { type: 2, asym: { kind: 'rsa', rsa } };
   }
   if (kty === 'EC') {
