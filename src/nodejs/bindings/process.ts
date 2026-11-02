@@ -567,6 +567,8 @@ export function createTraceEvents() {
     getCategoryEnabledBuffer: () => new Uint8Array(1),
     isTraceCategoryEnabled: () => false,
     trace: () => {},
+    // Node 26: no tracing agent (node:trace_events refuses to load then, as in a worker)
+    hasAgent: () => false,
     CategorySet: class CategorySet {
       enable() {}
       disable() {}

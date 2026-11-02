@@ -125,8 +125,10 @@ function apply(values: Record<string, unknown>, arg: string, next: string | unde
       case T.kV8Option:
         break;
       case T.kBoolean:
-        values[name] = !negated;
-        if (('--no-' + name.slice(2)) in values) values['--no-' + name.slice(2)] = negated;
+        for (const n of [name, ...(SHARED_FIELD.get(name) ?? [])]) {
+          values[n] = !negated;
+          if (('--no-' + n.slice(2)) in values) values['--no-' + n.slice(2)] = negated;
+        }
         break;
       default: {
         let v = isLast ? value : undefined;
@@ -264,10 +266,15 @@ const IMPLICATIONS = new Map<string, string[]>([
   ['--trace-env-native-stack', ['--trace-env']],
   ['--watch-path', ['--watch']],
   ['--eval', ['[has_eval_string]']],
-  ['--experimental-strip-types', ['--experimental-detect-module']],
-  ['--experimental-transform-types', ['--experimental-strip-types', '--experimental-detect-module', '--enable-source-maps']],
+  ['--experimental-require-module', ['--require-module']],
   ['--report-signal', ['--report-on-signal']],
   ['--node-memory-debug', ['--debug-arraybuffer-allocations', '--verify-base-objects']],
+]);
+
+/** Option names that set the same field in node_options.cc (BOOL_FIELD(require_module) twice), so --no- of either clears both. */
+const SHARED_FIELD = new Map<string, string[]>([
+  ['--experimental-require-module', ['--require-module']],
+  ['--require-module', ['--experimental-require-module']],
 ]);
 
 const isPowerOf2 = (n: number) => n > 0 && (n & (n - 1)) === 0;

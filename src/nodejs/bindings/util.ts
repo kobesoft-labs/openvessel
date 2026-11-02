@@ -368,7 +368,8 @@ export function createUtil() {
     getExternalValue: () => 0n,
     getCallSites,
     sleep: (ms: number) => void Atomics.wait(sleepCell, 0, 0, ms),
-    parseEnv,
+    // Node 26: util.parseEnv() gives a null-prototype object
+    parseEnv: (content: string) => Object.assign(Object.create(null), parseEnv(content)),
     arrayBufferViewHasBuffer: () => true,
     // Node 26
     constructSharedArrayBuffer: (length: number) => new SharedArrayBuffer(length),

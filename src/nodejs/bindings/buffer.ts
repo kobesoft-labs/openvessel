@@ -48,12 +48,32 @@ function bytesOf(v: ArrayBufferView | ArrayBufferLike): Uint8Array {
   return new Uint8Array(v as ArrayBuffer);
 }
 
-function notDetached(v: ArrayBufferView | ArrayBufferLike) {
-  const ab = (ArrayBuffer.isView(v) ? v.buffer : v) as ArrayBuffer & { detached?: boolean };
-  if (ab.detached) {
-    const e = new Error('Cannot validate on a detached buffer') as Error & { code: string };
-    e.code = 'ERR_INVALID_STATE';
-    throw e;
+/** Node 26: a detached buffer is empty (valid ASCII and UTF-8), no longer an error */
+function isDetached(v: ArrayBufferView | ArrayBufferLike): boolean {
+  return !!((ArrayBuffer.isView(v) ? v.buffer : v) as ArrayBuffer & { detached?: boolean }).detached;
+}
+
+const undetachable = new WeakSet<ArrayBuffer>();
+let detachGuard = false;
+/** transfer()/transferToFixedLength() throw for an ArrayBuffer with a detach key, as in V8. */
+function installDetachGuard() {
+  if (detachGuard) return;
+  detachGuard = true;
+  const proto = ArrayBuffer.prototype as any;
+  for (const name of ['transfer', 'transferToFixedLength']) {
+    const orig = proto[name];
+    if (typeof orig !== 'function') continue;
+    Object.defineProperty(proto, name, {
+      value: {
+        [name](this: ArrayBuffer, ...args: unknown[]) {
+          if (undetachable.has(this)) throw new TypeError('ArrayBuffer is not detachable and could not be cloned.');
+          return orig.apply(this, args);
+        },
+      }[name],
+      writable: true,
+      configurable: true,
+      enumerable: false,
+    });
   }
 }
 
@@ -304,13 +324,30 @@ function search(hay: Uint8Array, needle: Uint8Array, offset: number, forward: bo
   return -1;
 }
 
-function indexOfBytes(hay: Uint8Array, needle: Uint8Array, byteOffset: number, forward: boolean, step = 1): number {
-  let off = indexOfOffset(hay.length, Math.trunc(byteOffset), needle.length, forward);
-  if (needle.length === 0) return off;
-  if (hay.length === 0 || off <= -1) return -1;
-  if ((forward && needle.length + off > hay.length) || needle.length > hay.length) return -1;
-  if (step === 2 && forward && off % 2) off++;
-  return search(hay, needle, off, forward, step);
+/** The exclusive end of the searched range (Node 26's `end` argument), clamped to the buffer. */
+function searchEnd(length: number, end: unknown, step: number): number {
+  let e = end === undefined ? length : Math.min(Math.max(Math.trunc(Number(end)) || 0, 0), length);
+  if (step === 2) e -= e % 2;
+  return e;
+}
+
+function indexOfBytes(hay: Uint8Array, needle: Uint8Array, byteOffset: number, forward: boolean, step = 1, end?: unknown): number {
+  const length = step === 2 ? hay.length - (hay.length % 2) : hay.length;
+  const stop = searchEnd(length, end, step);
+  let off = indexOfOffset(length, Math.trunc(byteOffset), needle.length, forward);
+  if (needle.length === 0) return Math.min(off, stop);
+  if (length === 0 || off <= -1) return -1;
+  // node_buffer.cc IndexOfString: the start is clamped into [0, end)
+  if (!forward && off >= stop) {
+    if (stop === 0) return -1;
+    off = stop - 1;
+  } else if (forward && off >= stop) return -1;
+  if (step === 2 && forward && off % 2) {
+    off++;
+    if (off >= stop) return -1;
+  }
+  if ((forward && needle.length + off > stop) || needle.length > stop) return -1;
+  return search(hay.subarray(0, stop), needle, off, forward, step);
 }
 
 // -----------------------------------------------------------------------------
@@ -404,29 +441,36 @@ export function createBuffer() {
       for (let i = start; i < end; i += bytes.length) buf.set(bytes.subarray(0, Math.min(bytes.length, end - i)), i);
       return undefined;
     },
-    indexOfString(buf: Uint8Array, needle: string, byteOffset: number, encoding: number, forward: boolean) {
+    // Node 26 adds `end` (exclusive) after the direction
+    indexOfString(buf: Uint8Array, needle: string, byteOffset: number, encoding: number, forward: boolean, end?: number) {
       const enc = encoding as Enc;
       const bytes = encode(needle, enc);
       if (enc === Enc.UCS2) {
-        if (buf.length < 2 || bytes.length < 2) return needle.length === 0 ? indexOfOffset(buf.length, byteOffset, 0, forward) : -1;
-        return indexOfBytes(buf, bytes, byteOffset, forward, 2);
+        if (buf.length < 2 || bytes.length < 2) return needle.length === 0 ? Math.min(indexOfOffset(buf.length, byteOffset, 0, forward), searchEnd(buf.length, end, 2)) : -1;
+        return indexOfBytes(buf, bytes, byteOffset, forward, 2, end);
       }
-      return indexOfBytes(buf, bytes, byteOffset, forward);
+      return indexOfBytes(buf, bytes, byteOffset, forward, 1, end);
     },
-    indexOfBuffer(buf: Uint8Array, needle: Uint8Array, byteOffset: number, encoding: number, forward: boolean) {
+    indexOfBuffer(buf: Uint8Array, needle: Uint8Array, byteOffset: number, encoding: number, forward: boolean, end?: number) {
       const n = bytesOf(needle);
       if ((encoding as Enc) === Enc.UCS2) {
-        if (buf.length < 2 || n.length < 2) return n.length === 0 ? indexOfOffset(buf.length, byteOffset, 0, forward) : -1;
-        return indexOfBytes(buf, n, byteOffset, forward, 2);
+        if (buf.length < 2 || n.length < 2) return n.length === 0 ? Math.min(indexOfOffset(buf.length, byteOffset, 0, forward), searchEnd(buf.length, end, 2)) : -1;
+        return indexOfBytes(buf, n, byteOffset, forward, 2, end);
       }
-      return indexOfBytes(buf, n, byteOffset, forward);
+      return indexOfBytes(buf, n, byteOffset, forward, 1, end);
     },
-    indexOfNumber(buf: Uint8Array, num: number, byteOffset: number, forward: boolean) {
-      const off = indexOfOffset(buf.length, Math.trunc(byteOffset), 1, forward);
+    indexOfNumber(buf: Uint8Array, num: number, byteOffset: number, forward: boolean, end?: number) {
+      const stop = searchEnd(buf.length, end, 1);
+      let off = indexOfOffset(buf.length, Math.trunc(byteOffset), 1, forward);
       if (off <= -1 || buf.length === 0) return -1;
+      if (!forward && off >= stop) {
+        if (stop === 0) return -1;
+        off = stop - 1;
+      } else if (forward && off >= stop) return -1;
       const v = num & 0xff;
       // (not buf.indexOf: that is Buffer.prototype.indexOf, which calls back here)
-      return forward ? Uint8Array.prototype.indexOf.call(buf, v, off) : Uint8Array.prototype.lastIndexOf.call(buf, v, off);
+      const hay = buf.subarray(0, stop);
+      return forward ? Uint8Array.prototype.indexOf.call(hay, v, off) : Uint8Array.prototype.lastIndexOf.call(hay, v, off);
     },
     swap16(buf: Uint8Array) {
       for (let i = 0; i + 1 < buf.length; i += 2) {
@@ -449,7 +493,7 @@ export function createBuffer() {
       for (let i = 0; i + 7 < buf.length; i += 8) buf.subarray(i, i + 8).reverse();
     },
     isUtf8(v: ArrayBufferView | ArrayBuffer) {
-      notDetached(v);
+      if (isDetached(v)) return true;
       try {
         utf8Strict.decode(unshared(bytesOf(v)));
         return true;
@@ -458,7 +502,7 @@ export function createBuffer() {
       }
     },
     isAscii(v: ArrayBufferView | ArrayBuffer) {
-      notDetached(v);
+      if (isDetached(v)) return true;
       const x = bytesOf(v);
       for (let i = 0; i < x.length; i++) if (x[i] > 0x7f) return false;
       return true;
@@ -482,8 +526,11 @@ export function createBuffer() {
     // seen, but V8 allocates backing stores at least 16-byte aligned, as malloc does; above that, the
     // padding lib allocates keeps any offset inside the buffer.
     arrayBufferAlignedOffset: () => 0,
-    // ArrayBuffer#detach keys don't exist in JS; untransferability is the private symbol lib also sets
-    setDetachKey: () => {},
+    // V8's detach key makes an ArrayBuffer non-detachable: ArrayBuffer#transfer() refuses it
+    setDetachKey: (ab: ArrayBuffer) => {
+      installDetachGuard();
+      undetachable.add(ab);
+    },
     isLatin1(input: string) {
       for (let i = 0; i < input.length; i++) if (input.charCodeAt(i) > 0xff) return false;
       return true;
@@ -496,7 +543,7 @@ export function createBuffer() {
       for (let i = 0; i < x.length; i++) {
         const b = x[i];
         if ((b & 0xc0) !== 0x80) n++;
-        if (b >= 0xf0) n++;
+        if (b >= 0xf0 && b <= 0xf4) n++;
       }
       return n;
     },
