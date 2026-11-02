@@ -5,7 +5,7 @@ import { run } from '../fixtures-gen/histogram.cases.mjs';
 import fixture from './fixtures/performance.json';
 import { compareFixtures } from './binding-fixtures.ts';
 
-test("internalBinding('performance').Histogram matches Node 22", () => {
+test("internalBinding('performance').Histogram matches Node", () => {
   const total = compareFixtures(run({ Histogram }) as any, fixture.results as any);
   console.log(`${total} cases`);
 });

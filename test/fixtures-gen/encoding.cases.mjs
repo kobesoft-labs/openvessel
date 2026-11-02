@@ -100,7 +100,7 @@ const domains = [
 ];
 
 export function run(binding) {
-  const out = { encodeInto: [], encodeUtf8String: [], decodeUTF8: [], decodeWindows1252: [], toASCII: [], toUnicode: [], errors: [] };
+  const out = { encodeInto: [], encodeUtf8String: [], decodeUTF8: [], toASCII: [], toUnicode: [], errors: [] };
   for (const s of strings) {
     out.encodeUtf8String.push({ args: [s], r: [...binding.encodeUtf8String(s)] });
     for (const size of [0, 1, 2, 3, 4, 5, 8, 64]) {
@@ -120,7 +120,6 @@ export function run(binding) {
           }
         };
         out.decodeUTF8.push({ args: [bytes, ignoreBOM, fatal], r: call(() => binding.decodeUTF8(Uint8Array.from(bytes), ignoreBOM, fatal)) });
-        out.decodeWindows1252.push({ args: [bytes, ignoreBOM, fatal], r: call(() => binding.decodeWindows1252(Uint8Array.from(bytes), ignoreBOM, fatal)) });
       }
     }
     // other buffer sources
@@ -128,12 +127,12 @@ export function run(binding) {
     out.decodeUTF8.push({ args: [bytes, 'DataView'], r: binding.decodeUTF8(new DataView(Uint8Array.from([0x41, ...bytes]).buffer, 1), false, false) });
     const sab = new SharedArrayBuffer(bytes.length);
     new Uint8Array(sab).set(bytes);
-    out.decodeWindows1252.push({ args: [bytes, 'SharedArrayBuffer'], r: binding.decodeWindows1252(sab, false, false) });
+    out.decodeUTF8.push({ args: [bytes, 'SharedArrayBuffer'], r: binding.decodeUTF8(sab, false, false) });
   }
   for (const [name, f] of [
     ['decodeUTF8', () => binding.decodeUTF8('str')],
     ['decodeUTF8', () => binding.decodeUTF8(null)],
-    ['decodeWindows1252', () => binding.decodeWindows1252({})],
+    ['decodeUTF8', () => binding.decodeUTF8({})],
   ]) {
     try {
       f();

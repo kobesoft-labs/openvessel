@@ -6,7 +6,7 @@ import { compareFixtures } from './binding-fixtures.ts';
 
 const arg = (item: { args: unknown[] }) => item.args[0] as string;
 
-test("internalBinding('encoding_binding') matches Node 22", () => {
+test("internalBinding('encoding_binding') matches Node", () => {
   compareFixtures(run(createEncodingBinding()), fixture.results as any, {
     // Non-ASCII labels are mapped through the platform URL host parser (a newer ada in the test
     // runner) where Node 22 uses ada 2.9.2: empty punycode labels and the bidi rule differ.

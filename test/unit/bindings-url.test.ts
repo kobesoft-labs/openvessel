@@ -26,7 +26,7 @@ const platformDomainMapping = (_s: string, item: { args: unknown[] }) => {
   );
 };
 
-test("internalBinding('url') matches Node 22", () => {
+test("internalBinding('url') matches Node", () => {
   compareFixtures(run(createUrl()), fixture.results as any, {
     'the URL Standard differs from ada 2.9.2': standardVsAda,
     'the platform domain mapping differs from ada 2.9.2': platformDomainMapping,
