@@ -533,3 +533,36 @@ export function triggerUncaughtException(err: unknown, fromPromise: boolean) {
   const f = exitInfo();
   reallyExit(f[2] ? f[1] : 1); // env->exit_code(kGenericUserError): an exit handler may have set it
 }
+
+/**
+ * V8 compiles WebAssembly in the background and posts the result to the embedder's platform, which
+ * keeps Node's loop alive meanwhile (`await WebAssembly.compile(bytes)` at the top level finishes).
+ * The browser's compile is invisible to this loop, so each pending compile/instantiate holds a
+ * request until it settles.
+ */
+export function installWasmTracking() {
+  const W = WebAssembly as any;
+  for (const name of ['compile', 'instantiate', 'compileStreaming', 'instantiateStreaming']) {
+    const orig = W[name];
+    if (typeof orig !== 'function') continue;
+    Object.defineProperty(W, name, {
+      value: {
+        [name](...args: unknown[]) {
+          const done = startReq('WasmCompile');
+          let p: Promise<unknown>;
+          try {
+            p = orig.apply(W, args);
+          } catch (e) {
+            done();
+            throw e;
+          }
+          p.then(done, done);
+          return p;
+        },
+      }[name],
+      writable: true,
+      configurable: true,
+      enumerable: false,
+    });
+  }
+}

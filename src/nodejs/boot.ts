@@ -458,6 +458,7 @@ function boot(init: InitMsg) {
   installProxyTracking();
   installIteratorTracking();
   loop.installThenTracking();
+  loop.installWasmTracking();
   // per-context scripts (node_realm / node_context_data)
   const util = getInternalBinding('util');
   const symbols = getInternalBinding('symbols');
@@ -547,8 +548,9 @@ function boot(init: InitMsg) {
 
   shapeGlobal();
   // V8 has WebAssembly.compileStreaming/instantiateStreaming only when the embedder handles wasm
-  // streaming, which Node sets up with fetch (setupFetch in pre_execution)
-  if (!S.optionValues['--experimental-fetch']) {
+  // streaming, which Node sets up with fetch (setupFetch in pre_execution). Node 22 could turn fetch
+  // off (--no-experimental-fetch); Node 26 has no such option, so they stay.
+  if (S.optionValues['--experimental-fetch'] === false) {
     delete (WebAssembly as any).compileStreaming;
     delete (WebAssembly as any).instantiateStreaming;
   }
