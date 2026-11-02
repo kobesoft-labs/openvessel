@@ -18,6 +18,7 @@ const kReadBytesOrError = 0;
 const kArrayBufferOffset = 1;
 const kBytesWritten = 2;
 const kLastWriteWasAsync = 3;
+const kLastWriteErr = 4;
 
 function errno(code: string): number {
   return S.internalBinding('uv')[`UV_${code}`] ?? -1;
@@ -246,9 +247,16 @@ export class LibuvStreamWrap extends HandleWrap {
     return this._fd >= 0 ? { type: 'pipe', fd: this._fd } : null;
   }
 
-  #write(req: unknown, bytes: Uint8Array, handle?: unknown): number {
+  /**
+   * StreamBase::Write. Node 26 passes no request (null) from stream_base_commons: a write that is
+   * done (or failed) at once returns its status, one that has to wait returns the WriteWrap the
+   * binding made for it. With a request (IPC, older callers) the status is returned either way.
+   */
+  #write(req: unknown, bytes: Uint8Array, handle?: unknown): number | WriteWrap {
     streamBaseState[kLastWriteWasAsync] = 0;
     streamBaseState[kBytesWritten] = 0;
+    if (streamBaseState.length > kLastWriteErr) streamBaseState[kLastWriteErr] = 0;
+    let made: WriteWrap | null = null;
     if (this._fd < 0) return errno('EBADF');
     let sendHandle: HandleDescriptor | undefined;
     if (handle) {
@@ -276,6 +284,7 @@ export class LibuvStreamWrap extends HandleWrap {
       if (off < bytes.length) {
         // uv_write: the rest is queued and completes later (req.oncomplete); only such a write
         // has a native WriteWrap (StreamBase::Write tries the write first)
+        if (req === null || req === undefined) req = made = new WriteWrap();
         reqInit(req, 'WRITEWRAP', this);
         this.#queue.push({ req: req as QueuedWrite['req'], data: bytes.slice(off), done: loop.startReq('WriteWrap', req as object), sendHandle: entry.sendHandle });
         this.writeQueueSize += bytes.length - off;
@@ -285,7 +294,7 @@ export class LibuvStreamWrap extends HandleWrap {
     }
     this.bytesWritten += bytes.length;
     streamBaseState[kBytesWritten] = bytes.length;
-    return 0;
+    return made ?? 0;
   }
 
   /** Writes what the kernel buffer takes now; returns the byte count. */
@@ -606,6 +615,9 @@ export class ReqWrap {
 }
 
 class WriteWrap extends ReqWrap {
+  /** Node 26: the status of a write that finished before lib attached oncomplete (never, here) */
+  writeStatus: number | null = null;
+  error: unknown = undefined;
   handle: unknown = null;
   oncomplete: unknown = null;
   async = false;
