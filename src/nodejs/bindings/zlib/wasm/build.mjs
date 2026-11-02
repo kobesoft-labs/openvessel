@@ -3,10 +3,10 @@
 //
 // The outputs are committed; run this only to change library versions or build flags:
 //   node src/nodejs/bindings/zlib/wasm/build.mjs
-// Needs LLVM with the wasm32 target and wasm-ld (Homebrew: `brew install llvm lld`).
-// Override with CLANG=/path/to/clang WASM_LD=/path/to/wasm-ld.
+// Needs LLVM with the wasm32 target and wasm-ld (Homebrew: `brew install llvm lld`; Debian:
+// `apt-get install clang lld`). Override with CLANG=/path/to/clang WASM_LD=/path/to/wasm-ld.
 //
-// Library versions match Node v22.23.4 (process.versions.brotli / process.versions.zstd); brotli gets
+// Library versions match Node v26.13.0 (process.versions.brotli / process.versions.zstd); brotli gets
 // node-brotli.patch, the decoder change Node carries in deps/brotli.
 
 import { execFileSync } from 'node:child_process';
@@ -26,10 +26,10 @@ const WASM_LD = process.env.WASM_LD ?? (existsSync('/opt/homebrew/bin/wasm-ld') 
 
 const SOURCES = {
   brotli: {
-    version: '1.1.0',
-    url: 'https://github.com/google/brotli/archive/refs/tags/v1.1.0.tar.gz',
-    sha256: 'e720a6ca29428b803f4ad165371771f5398faba397edf6778837a18599ea13ff',
-    dir: 'brotli-1.1.0',
+    version: '1.2.0',
+    url: 'https://github.com/google/brotli/archive/refs/tags/v1.2.0.tar.gz',
+    sha256: '816c96e8e8f193b40151dad7e8ff37b1221d019dbcb9c35cd3fadbfe6477dfec',
+    dir: 'brotli-1.2.0',
     patch: 'node-brotli.patch',
     license: 'MIT',
   },

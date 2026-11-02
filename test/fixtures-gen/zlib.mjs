@@ -97,6 +97,12 @@ derived.zstd = u8(zlib.zstdCompressSync(raw.text));
 derived.zstdChecksum = u8(zlib.zstdCompressSync(raw.mixed, { params: { [C.ZSTD_c_checksumFlag]: 1, [C.ZSTD_c_compressionLevel]: 19 } }));
 derived.zstdDict = u8(zlib.zstdCompressSync(raw.text2, { dictionary: raw.dict }));
 derived.zstdTrunc = derived.zstd.slice(0, derived.zstd.length >> 1);
+derived.zstdMulti = u8(Buffer.concat([zlib.zstdCompressSync(raw.small), zlib.zstdCompressSync(raw.text2)]));
+// a skippable frame (magic 0x184D2A5?, little-endian size, payload) before a zstd frame
+derived.zstdSkippable = u8(Buffer.concat([Buffer.from([0x53, 0x2a, 0x4d, 0x18, 3, 0, 0, 0]), Buffer.from('abc'), zlib.zstdCompressSync(raw.small)]));
+derived.zstdGarbage = u8(Buffer.concat([zlib.zstdCompressSync(raw.small), Buffer.from('garbage!')]));
+derived.zstdPartialMagic = u8(Buffer.concat([zlib.zstdCompressSync(raw.small), Buffer.from([0x28, 0xb5])]));
+derived.brotliDict = u8(zlib.brotliCompressSync(raw.text2, { dictionary: raw.dict }));
 derived.zstdBadChecksum = (() => {
   const b = derived.zstdChecksum.slice();
   b[b.length - 1] ^= 0xff;
@@ -186,6 +192,8 @@ add('DEFLATE params without flush', {
   steps: [{ op: 'write', flush: C.Z_NO_FLUSH, input: 'text' }, { op: 'params', level: 1, strategy: 0 }, fin('text2')],
 });
 add('DEFLATE params before write', { ...Z(C.DEFLATE), steps: [{ op: 'params', level: 1, strategy: 0 }, fin('text2')] });
+add('GZIP reset after finish', { ...Z(C.GZIP), steps: [fin('small'), { op: 'reset' }, fin('text2')] });
+add('GZIP reset after flush', { ...Z(C.GZIP), steps: [{ op: 'write', flush: C.Z_SYNC_FLUSH, input: 'small' }, { op: 'reset' }, fin('text2')] });
 for (const [mn, mode] of Object.entries(DEFLATES))
   add(`${mn} reset`, {
     ...Z(mode),
@@ -250,6 +258,17 @@ add('GUNZIP zero padding', { ...INF(C.GUNZIP), steps: [fin('gzipZeroPad')] });
 add('GUNZIP trailing garbage', { ...INF(C.GUNZIP), steps: [fin('gzipGarbage')] });
 add('UNZIP trailing garbage', { ...INF(C.UNZIP), steps: [fin('gzipGarbage')] });
 add('INFLATE trailing garbage', { ...INF(C.INFLATE), steps: [fin('deflateGarbage')] });
+// rejectGarbageAfterEnd (Node 26): gunzip stops after the member and leaves the rest for zlib.js
+const INFR = (mode, rejectGarbageAfterEnd) => {
+  const z = INF(mode);
+  return { ...z, init: { ...z.init, rejectGarbageAfterEnd } };
+};
+for (const reject of [false, true]) {
+  add(`GUNZIP trailing garbage reject=${reject}`, { ...INFR(C.GUNZIP, reject), steps: [fin('gzipGarbage')] });
+  add(`GUNZIP multi-member reject=${reject}`, { ...INFR(C.GUNZIP, reject), steps: [fin('multiGzip')] });
+  add(`UNZIP trailing garbage reject=${reject}`, { ...INFR(C.UNZIP, reject), steps: [fin('gzipGarbage')] });
+  add(`INFLATE trailing garbage reject=${reject}`, { ...INFR(C.INFLATE, reject), steps: [fin('deflateGarbage')] });
+}
 for (const async of [false, true]) {
   const s = async ? ' async' : '';
   add('INFLATE truncated' + s, { ...INF(C.INFLATE), steps: [fin('truncated', { async })] });
@@ -298,6 +317,15 @@ for (const async of [false, true])
       bfin('text2', { async }),
     ],
   });
+add('BROTLI dictionary', { ...BE({}), init: { ...BE().init, dictionary: 'dict' }, steps: [bfin('text2')] });
+add('BROTLI dictionary reset', {
+  ...BE({ [C.BROTLI_PARAM_QUALITY]: 5 }),
+  init: { ...BE({ [C.BROTLI_PARAM_QUALITY]: 5 }).init, dictionary: 'dict' },
+  steps: [bfin('text2'), { op: 'reset' }, bfin('text2')],
+});
+add('BROTLI dictionary empty', { ...BE({}), init: { ...BE().init, dictionary: 'empty' }, steps: [bfin('small')] });
+add('BROTLI dictionary bad type', { ...BE({}), init: { ...BE().init, dictionary: 42 }, steps: [] });
+add('BROTLI dictionary undefined', { ...BE({}), init: { ...BE().init, dictionary: undefined }, steps: [bfin('small')] });
 add('BROTLI reset', { ...BE({ [C.BROTLI_PARAM_QUALITY]: 3 }), steps: [{ op: 'write', flush: 0, input: 'text2' }, { op: 'reset' }, bfin('small')] });
 for (const chunkSize of [64, 16384])
   for (const async of [false, true]) {
@@ -325,6 +353,14 @@ add('UNBROTLI pieces', {
     bfin({ b64: Buffer.from(derived.brotli.slice(500)).toString('base64') }),
   ],
 });
+add('UNBROTLI dictionary', { ...BD(), init: { ...BD().init, dictionary: 'dict' }, steps: [bfin('brotliDict')] });
+add('UNBROTLI dictionary reset', { ...BD(), init: { ...BD().init, dictionary: 'dict' }, steps: [bfin('brotliDict'), { op: 'reset' }, bfin('brotliDict')] });
+add('UNBROTLI missing dictionary', { ...BD(), steps: [bfin('brotliDict')] });
+add('UNBROTLI wrong dictionary', { ...BD(), init: { ...BD().init, dictionary: 'dict2' }, steps: [bfin('brotliDict')] });
+add('UNBROTLI reset keeps params', {
+  ...BD({ [C.BROTLI_DECODER_PARAM_LARGE_WINDOW]: 1 }),
+  steps: [bfin('brotliLarge'), { op: 'reset' }, bfin('brotliLarge')],
+});
 add('UNBROTLI reset', { ...BD(), steps: [bfin('brotli'), { op: 'reset' }, bfin('brotliQ1')] });
 
 // zstd
@@ -340,6 +376,20 @@ add('ZSTD long distance', { ...ZC({ [C.ZSTD_c_enableLongDistanceMatching]: 1 }),
 add('ZSTD pledged', { ...ZC({}, { pledgedSrcSize: raw.text2.length }), steps: [zfin('text2')] });
 add('ZSTD pledged wrong', { ...ZC({}, { pledgedSrcSize: 10 }), steps: [zfin('text2')] });
 add('ZSTD pledged negative', { ...ZC({}, { pledgedSrcSize: -1 }), steps: [] });
+add('ZSTD pledged not a number', { ...ZC({}, { pledgedSrcSize: '5' }), steps: [] });
+add('ZSTD pledged fraction', { ...ZC({}, { pledgedSrcSize: 1.5 }), steps: [] });
+add('ZSTD pledged unsafe', { ...ZC({}, { pledgedSrcSize: 2 ** 53 }), steps: [] });
+add('ZSTD pledged in pieces', {
+  ...ZC({}, { pledgedSrcSize: raw.text2.length }),
+  steps: [{ op: 'write', flush: C.ZSTD_e_continue, input: 'text2' }, zfin('empty')],
+});
+add('ZSTD pledged short in pieces', {
+  ...ZC({}, { pledgedSrcSize: raw.text2.length + 1 }),
+  steps: [{ op: 'write', flush: C.ZSTD_e_continue, input: 'text2' }, zfin('empty')],
+});
+add('ZSTD pledged reset', { ...ZC({}, { pledgedSrcSize: raw.small.length }), steps: [zfin('small'), { op: 'reset' }, zfin('small'), { op: 'reset' }, zfin('text2')] });
+add('ZSTD reset after flush', { ...ZC(), steps: [{ op: 'write', flush: C.ZSTD_e_flush, input: 'text2' }, { op: 'reset' }, zfin('small')] });
+add('ZSTD reset after end', { ...ZC({ [C.ZSTD_c_checksumFlag]: 1 }), steps: [zfin('text2'), { op: 'reset' }, zfin('small')] });
 add('ZSTD dictionary', { ...ZC({}, { dictionary: 'dict' }), steps: [zfin('text2')] });
 add('ZSTD dictionary bad type', { ...ZC({}, { dictionary: 42 }), steps: [] });
 add('ZSTD bad param value', { ...ZC({ [C.ZSTD_c_windowLog]: 99 }), steps: [] });
@@ -374,6 +424,27 @@ for (const async of [false, true]) {
   add('UNZSTD bad checksum' + s, { ...ZD(), steps: [zfin('zstdBadChecksum', { async })] });
   add('UNZSTD not zstd' + s, { ...ZD(), steps: [zfin('text2', { async })] });
 }
+for (const reject of [false, true]) {
+  const R = () => ZD({}, { rejectGarbageAfterEnd: reject });
+  add(`UNZSTD multi-frame reject=${reject}`, { ...R(), steps: [zfin('zstdMulti')] });
+  add(`UNZSTD multi-frame small chunks reject=${reject}`, { ...R(), chunkSize: 64, steps: [zfin('zstdMulti', { async: true })] });
+  add(`UNZSTD skippable frame reject=${reject}`, { ...R(), steps: [zfin('zstdSkippable')] });
+  add(`UNZSTD trailing garbage reject=${reject}`, { ...R(), steps: [zfin('zstdGarbage')] });
+  add(`UNZSTD partial magic reject=${reject}`, { ...R(), steps: [zfin('zstdPartialMagic')] });
+  add(`UNZSTD trailing garbage continue reject=${reject}`, { ...R(), steps: [{ op: 'write', flush: C.ZSTD_e_continue, input: 'zstdGarbage' }, zfin('small')] });
+}
+add('UNZSTD pieces', {
+  ...ZD(),
+  chunkSize: 1000,
+  steps: [
+    { op: 'write', flush: 0, input: { b64: Buffer.from(derived.zstdMulti.slice(0, 3)).toString('base64') } },
+    { op: 'write', flush: 0, input: { b64: Buffer.from(derived.zstdMulti.slice(3, 40)).toString('base64') } },
+    { op: 'write', flush: 0, input: { b64: Buffer.from(derived.zstdMulti.slice(40, 42)).toString('base64') } },
+    zfin({ b64: Buffer.from(derived.zstdMulti.slice(42)).toString('base64') }),
+  ],
+});
+add('UNZSTD reset keeps dictionary', { ...ZD({}, { dictionary: 'dict' }), steps: [zfin('zstdDict'), { op: 'reset' }, zfin('zstdDict')] });
+add('UNZSTD reset after garbage', { ...ZD(), steps: [zfin('zstdGarbage'), { op: 'reset' }, zfin('zstd')] });
 add('UNZSTD reset', { ...ZD(), steps: [zfin('zstd'), { op: 'reset' }, zfin('zstdChecksum')] });
 
 // ---------------------------------------------------------------------------- run

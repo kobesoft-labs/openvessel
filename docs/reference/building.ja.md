@@ -115,7 +115,7 @@ export const sources = { 'fs': '…ソースの文字列…', /* … */ };
 | `scripts/gen-builtins.mjs` | 固定したバージョンの `module.builtinModules`、`node:` 付きでのみ使えるモジュール（`sea`・`sqlite`・`test`・`test/reporters`）、各モジュールの export 名。`gen-node-data.mjs` と同様に公式の `node:<version>-bookworm-slim` イメージ（linux/amd64、Docker）の Node から取得する | `src/shared/builtin-exports.json`（組み込みモジュールのファサードの名前付き export。旧ランタイム向けにカーネルの ESM サービスが使う） | Node のアップグレード後 |
 | `scripts/vendor-node-path.mjs [lib/path.js のパス]` | Node の `lib/path.js`（既定は `gen-node-data.mjs` が書き出す、固定したバージョンの `vendor/node/lib/path.js`） | `src/shared/node-path.ts`（primordials を通常の呼び出しに置き換え、`process.cwd()`／`process.env` と `glob` を OpenVessel に接続する） | Node のアップグレードで `lib/path.js` が変わったとき |
 | `scripts/regen-fixtures.mjs [name…]` | 固定したバージョンの実際の Node（`npx -y node@<version>`） | `test/unit/fixtures/*.json`、`src/nodejs/bindings/icu.ts` 内の ICU の文字幅テーブル、`src/nodejs/bindings/crypto/tables.ts` | Node のアップグレード後（[テスト](testing.ja.md)） |
-| `src/nodejs/bindings/zlib/wasm/build.mjs` | brotli 1.1.0 と zstd 1.5.7 のリリース tarball（sha256 を検証する）、`node-brotli.patch` | `src/nodejs/bindings/zlib/brotli-wasm.ts`・`zstd-wasm.ts`（raw deflate したうえで base64。git にコミットする） | ライブラリのバージョンやビルドフラグを変えるときのみ。`clang`／`wasm-ld` が必要。`CLANG`・`WASM_LD` で上書きできる。作業ディレクトリは `WORK_DIR`（既定は `<tmp>/ov-zlib-wasm`） |
+| `src/nodejs/bindings/zlib/wasm/build.mjs` | brotli 1.2.0 と zstd 1.5.7 のリリース tarball（sha256 を検証する）、`node-brotli.patch` | `src/nodejs/bindings/zlib/brotli-wasm.ts`・`zstd-wasm.ts`（raw deflate したうえで base64。git にコミットする） | ライブラリのバージョンやビルドフラグを変えるときのみ。`clang`／`wasm-ld` が必要。`CLANG`・`WASM_LD` で上書きできる。作業ディレクトリは `WORK_DIR`（既定は `<tmp>/ov-zlib-wasm`） |
 
 ## 互換パッケージ
 

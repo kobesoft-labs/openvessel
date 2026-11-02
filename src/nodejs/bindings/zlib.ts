@@ -1,7 +1,7 @@
 // internalBinding('zlib') — node_zlib.cc in JS.
 //
 //   Zlib            pako's z_stream port of zlib (byte-identical deflate output to Node's zlib)
-//   BrotliEncoder/Decoder   brotli 1.1.0 compiled to wasm (zlib/wasm/build.mjs)
+//   BrotliEncoder/Decoder   brotli 1.2.0 compiled to wasm (zlib/wasm/build.mjs)
 //   ZstdCompress/Decompress zstd 1.5.7 compiled to wasm
 //   crc32           table-driven
 //
@@ -204,7 +204,7 @@ class Zlib extends CompressionStream<ZlibContext> {
     super(new ZlibContext(mode as Mode));
   }
 
-  // init(windowBits, level, memLevel, strategy, writeResult, writeCallback, dictionary)
+  // init(windowBits, level, memLevel, strategy, writeResult, writeCallback, dictionary[, rejectGarbageAfterEnd])
   init(...args: unknown[]) {
     if (args.length === 5) {
       console.error(
@@ -215,14 +215,15 @@ class Zlib extends CompressionStream<ZlibContext> {
           'that is compatible with Node.js 9 and above.',
       );
     }
-    check(args.length === 7, 'init(windowBits, level, memLevel, strategy, writeResult, writeCallback, dictionary)');
+    check(args.length === 7 || args.length === 8, 'init(windowBits, level, memLevel, strategy, writeResult, writeCallback, dictionary[, rejectGarbageAfterEnd])');
     const windowBits = Number(args[0]) >>> 0;
     const level = Number(args[1]) | 0;
     const memLevel = Number(args[2]) >>> 0;
     const strategy = Number(args[3]) >>> 0;
     const dict = isView(args[6]) ? bytesOf(args[6]).slice() : new Uint8Array(0);
+    if (args.length === 8) check(typeof args[7] === 'boolean', 'rejectGarbageAfterEnd must be a boolean');
     this.initStream(args[4], args[5]);
-    this.ctx.init(level, windowBits, memLevel, strategy, dict);
+    this.ctx.init(level, windowBits, memLevel, strategy, args[7] === true, dict);
   }
 
   params(...args: unknown[]) {
@@ -236,11 +237,16 @@ class Zlib extends CompressionStream<ZlibContext> {
 // Brotli
 
 abstract class BrotliStream<C extends BrotliEncoderContext | BrotliDecoderContext> extends CompressionStream<C> {
-  // init(params, writeResult, writeCallback)
+  // init(params, writeResult, writeCallback[, dictionary])
   init(...args: unknown[]) {
-    check(args.length === 3, 'init(params, writeResult, writeCallback)');
+    check(args.length === 3 || args.length === 4, 'init(params, writeResult, writeCallback[, dictionary])');
     this.initStream(args[1], args[2]);
-    let err = this.ctx.init();
+    let dictionary: Uint8Array | undefined;
+    if (args.length === 4 && args[3] !== undefined) {
+      if (!isView(args[3])) throw nodeError(TypeError, 'ERR_INVALID_ARG_TYPE', 'dictionary must be an ArrayBufferView if provided');
+      dictionary = realBytes(args[3]).slice();
+    }
+    let err = this.ctx.init(dictionary);
     if (err) {
       this.emitError(err);
       throw nodeError(Error, 'ERR_ZLIB_INITIALIZATION_FAILED', 'Initialization failed');
@@ -281,25 +287,35 @@ class BrotliDecoder extends BrotliStream<BrotliDecoderContext> {
 // Zstd
 
 abstract class ZstdStream<C extends ZstdCompressContext | ZstdDecompressContext> extends CompressionStream<C> {
-  // init(params, pledgedSrcSize, writeResult, writeCallback[, dictionary])
+  // init(params, pledgedSrcSize, writeResult, writeCallback[, dictionary[, rejectGarbageAfterEnd]])
   init(...args: unknown[]) {
-    check(args.length === 4 || args.length === 5, 'init(params, pledgedSrcSize, writeResult, writeCallback[, dictionary])');
+    check(
+      args.length >= 4 && args.length <= 6,
+      'init(params, pledgedSrcSize, writeResult, writeCallback[, dictionary[, rejectGarbageAfterEnd]])',
+    );
     this.initStream(args[2], args[3]);
 
     let pledged = ZSTD_CONTENTSIZE_UNKNOWN;
-    if (typeof args[1] === 'number') {
-      const n = Number.isFinite(args[1]) ? Math.trunc(args[1]) : Number.isNaN(args[1]) ? 0 : args[1] > 0 ? 2 ** 63 - 1 : -(2 ** 63);
-      if (n < 0) throw nodeError(TypeError, 'ERR_INVALID_ARG_VALUE', 'pledgedSrcSize may not be negative');
-      pledged = BigInt(Math.min(n, 2 ** 63 - 1));
+    if (args[1] !== undefined) {
+      if (typeof args[1] !== 'number') throw nodeError(TypeError, 'ERR_INVALID_ARG_TYPE', 'pledgedSrcSize must be a number');
+      if (!Number.isSafeInteger(args[1])) throw nodeError(RangeError, 'ERR_OUT_OF_RANGE', 'pledgedSrcSize must be a safe integer');
+      if (args[1] < 0) throw nodeError(RangeError, 'ERR_OUT_OF_RANGE', 'pledgedSrcSize must be non-negative');
+      pledged = BigInt(args[1]);
     }
 
     let dictionary: Uint8Array | undefined;
-    if (args.length === 5 && args[4] !== undefined) {
+    if (args.length >= 5 && args[4] !== undefined) {
       if (!isView(args[4])) throw nodeError(TypeError, 'ERR_INVALID_ARG_TYPE', 'dictionary must be an ArrayBufferView if provided');
       dictionary = bytesOf(args[4]);
     }
 
-    const err = this.ctx.init(pledged, dictionary);
+    let rejectGarbageAfterEnd = false;
+    if (args.length === 6) {
+      check(typeof args[5] === 'boolean', 'rejectGarbageAfterEnd must be a boolean');
+      rejectGarbageAfterEnd = args[5];
+    }
+
+    const err = this.ctx.init(pledged, dictionary, rejectGarbageAfterEnd);
     if (err) {
       this.emitError(err);
       throw nodeError(Error, 'ERR_ZLIB_INITIALIZATION_FAILED', err.message);

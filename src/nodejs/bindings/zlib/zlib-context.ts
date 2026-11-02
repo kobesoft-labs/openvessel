@@ -160,12 +160,18 @@ export class ZlibContext implements CompressionContext {
   private strategy = 0;
   private windowBits = 0;
   private gzipIdBytesRead = 0;
+  private rejectGarbageAfterEnd = false;
   private dictionary: Uint8Array = EMPTY;
+  // gzip emits its header on the first deflate() call. Once those bytes have left the compressor, a
+  // reset would start a new member after the fragment, which gunzip rejects, so Node refuses it.
+  // A member is complete once deflate() with Z_FINISH has returned Z_STREAM_END.
+  private streamComplete = true;
+  private outputEmitted = false;
   private strm: any = new ZStream();
 
   constructor(private mode: Mode) {}
 
-  init(level: number, windowBits: number, memLevel: number, strategy: number, dictionary: Uint8Array) {
+  init(level: number, windowBits: number, memLevel: number, strategy: number, rejectGarbageAfterEnd: boolean, dictionary: Uint8Array) {
     const m = this.mode;
     if (!(windowBits === 0 && (m === Mode.INFLATE || m === Mode.GUNZIP || m === Mode.UNZIP))) {
       if (!(windowBits >= 8 && windowBits <= 15)) throw new Error('invalid windowBits');
@@ -178,8 +184,11 @@ export class ZlibContext implements CompressionContext {
     this.windowBits = windowBits;
     this.memLevel = memLevel;
     this.strategy = strategy;
+    this.rejectGarbageAfterEnd = rejectGarbageAfterEnd;
     this.flush = Z_NO_FLUSH;
     this.err = Z_OK;
+    this.streamComplete = true;
+    this.outputEmitted = false;
     if (m === Mode.GZIP || m === Mode.GUNZIP) this.windowBits += 16;
     if (m === Mode.UNZIP) this.windowBits += 32;
     if (m === Mode.DEFLATERAW || m === Mode.INFLATERAW) this.windowBits *= -1;
@@ -257,9 +266,18 @@ export class ZlibContext implements CompressionContext {
     switch (this.mode) {
       case Mode.DEFLATE:
       case Mode.GZIP:
-      case Mode.DEFLATERAW:
+      case Mode.DEFLATERAW: {
+        const outBefore = strm.avail_out;
         this.err = deflate(strm, this.flush);
+        if (outBefore > strm.avail_out) this.outputEmitted = true;
+        if (this.err === Z_STREAM_END) {
+          this.streamComplete = true;
+          this.outputEmitted = false;
+        } else if (this.err === Z_OK || this.err === Z_BUF_ERROR) {
+          this.streamComplete = false;
+        }
         return;
+      }
       case Mode.UNZIP: {
         let next = strm.avail_in > 0 ? strm.next_in : -1;
         if (this.gzipIdBytesRead === 0) {
@@ -317,8 +335,9 @@ export class ZlibContext implements CompressionContext {
         this.err = Z_NEED_DICT;
       }
     }
-    while (strm.avail_in > 0 && this.mode === Mode.GUNZIP && this.err === Z_STREAM_END && strm.input[strm.next_in] !== 0x00) {
+    while (strm.avail_in > 0 && this.mode === Mode.GUNZIP && this.err === Z_STREAM_END && !this.rejectGarbageAfterEnd && strm.input[strm.next_in] !== 0x00) {
       // Bytes remain: another gzip member, or trailing garbage. Trailing zero bytes are padding.
+      // With rejectGarbageAfterEnd, zlib.js sees the leftover input and throws instead.
       this.resetStream();
       this.err = zlibInflate(strm, this.flush as any);
     }
@@ -344,6 +363,15 @@ export class ZlibContext implements CompressionContext {
   }
 
   resetStream(): CompressionError | null {
+    // Raw deflate has no header (flush + reset still concatenates) and zlib-wrapped deflate callers
+    // discard the first member, so only gzip is refused.
+    if (this.mode === Mode.GZIP && !this.streamComplete && this.outputEmitted) {
+      return compressionError(
+        'Cannot reset a gzip stream with an incomplete member; end the stream or start a new gzip compressor',
+        'ERR_ZLIB_INCOMPLETE_FRAME',
+        Z_STREAM_ERROR,
+      );
+    }
     const first = this.initZlib();
     if (first && this.err !== Z_OK) return this.errorForMessage('Failed to init stream before reset');
     this.err = Z_OK;
@@ -361,6 +389,8 @@ export class ZlibContext implements CompressionContext {
         break;
     }
     if (this.err !== Z_OK) return this.errorForMessage('Failed to reset stream');
+    this.streamComplete = true;
+    this.outputEmitted = false;
     return this.setDictionary();
   }
 

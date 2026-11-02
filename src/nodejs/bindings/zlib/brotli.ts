@@ -1,6 +1,9 @@
-// BrotliEncoderContext / BrotliDecoderContext from node_zlib.cc, over Google's brotli 1.1.0 (the
-// version Node 22.20.0 ships) compiled to wasm by wasm/build.mjs. All encoder/decoder parameters
+// BrotliEncoderContext / BrotliDecoderContext from node_zlib.cc, over Google's brotli 1.2.0 (the
+// version Node 26.13.0 ships) compiled to wasm by wasm/build.mjs. All encoder/decoder parameters
 // are passed straight to BrotliEncoderSetParameter / BrotliDecoderSetParameter.
+//
+// As in Node 26, a stream can have a raw (custom) dictionary, and reset() starts over with the same
+// dictionary and the parameters that were last set successfully.
 
 import * as brotliWasm from './brotli-wasm.ts';
 import { type CompressionContext, type CompressionError, compressionError, InputCache, Mode } from './common.ts';
@@ -101,30 +104,83 @@ abstract class BrotliContext implements CompressionContext {
     return [this.availIn, this.availOut];
   }
 
-  abstract init(): CompressionError | null;
+  /** The dictionary bytes, copied into the heap: brotli keeps pointing at them. */
+  protected dictPtr = 0;
+  protected dictionary: Uint8Array | null = null;
+  // Last successful parameters (RecordBrotliParam), replayed by resetStream.
+  protected params = new Map<number, number>();
+
+  protected copyDictionary(dictionary: Uint8Array): number {
+    const w = this.wasm();
+    const p = w.malloc(dictionary.length);
+    if (!p) throw new RangeError('wasm: out of memory');
+    new Uint8Array(w.memory.buffer, p, dictionary.length).set(dictionary);
+    this.dictPtr = p;
+    this.dictionary = dictionary;
+    return p;
+  }
+
+  /** Frees the dictionary (after whatever references it is gone) and forgets the parameters. */
+  protected dropDictionary() {
+    if (this.dictPtr) this.w!.free(this.dictPtr);
+    this.dictPtr = 0;
+    this.dictionary = null;
+    this.params.clear();
+  }
+
+  abstract init(dictionary?: Uint8Array): CompressionError | null;
   abstract setParams(key: number, value: number): CompressionError | null;
   abstract work(): void;
   abstract errorInfo(): CompressionError | null;
   abstract close(): void;
 
   resetStream(): CompressionError | null {
-    return this.init();
+    const dictionary = this.dictionary ?? undefined;
+    const params = [...this.params];
+    let err = this.init(dictionary);
+    if (err) return err;
+    for (const [key, value] of params) {
+      err = this.setParams(key, value);
+      if (err) return err;
+    }
+    return null;
   }
 }
 
 export class BrotliEncoderContext extends BrotliContext {
   private lastResult = false;
+  private preparedDictionary = 0;
 
-  init(): CompressionError | null {
-    const w = this.wasm();
+  /** Destroys the state, then the prepared dictionary it uses, then the dictionary bytes. */
+  private destroyState() {
+    const w = this.w;
+    if (!w) return;
     if (this.state) w.enc_destroy(this.state);
+    this.state = 0;
+    if (this.preparedDictionary) w.enc_destroy_dict(this.preparedDictionary);
+    this.preparedDictionary = 0;
+    this.dropDictionary();
+  }
+
+  init(dictionary?: Uint8Array): CompressionError | null {
+    const w = this.wasm();
+    this.destroyState();
     this.state = w.enc_create();
     if (!this.state) return compressionError('Could not initialize Brotli instance', 'ERR_ZLIB_INITIALIZATION_FAILED', -1);
+    if (dictionary?.length) {
+      const p = this.copyDictionary(dictionary);
+      this.preparedDictionary = w.enc_prepare_dict(p, dictionary.length);
+      if (!this.preparedDictionary) return compressionError('Failed to prepare brotli dictionary', 'ERR_ZLIB_DICTIONARY_LOAD_FAILED', -1);
+      if (!w.enc_attach_dict(this.state, this.preparedDictionary)) {
+        return compressionError('Failed to attach brotli dictionary', 'ERR_ZLIB_DICTIONARY_LOAD_FAILED', -1);
+      }
+    }
     return null;
   }
 
   setParams(key: number, value: number): CompressionError | null {
     if (!this.wasm().enc_set(this.state, key, value >>> 0)) return compressionError('Setting parameter failed', 'ERR_BROTLI_PARAM_SET_FAILED', -1);
+    this.params.set(key, value);
     return null;
   }
 
@@ -139,8 +195,7 @@ export class BrotliEncoderContext extends BrotliContext {
   }
 
   close() {
-    if (this.state) this.w!.enc_destroy(this.state);
-    this.state = 0;
+    this.destroyState();
     this.mode = Mode.NONE;
     this.releaseWasm();
   }
@@ -151,16 +206,30 @@ export class BrotliDecoderContext extends BrotliContext {
   private error = BROTLI_DECODER_NO_ERROR;
   private errorString = '';
 
-  init(): CompressionError | null {
+  private destroyState() {
+    if (!this.w) return;
+    if (this.state) this.w.dec_destroy(this.state);
+    this.state = 0;
+    this.dropDictionary();
+  }
+
+  init(dictionary?: Uint8Array): CompressionError | null {
     const w = this.wasm();
-    if (this.state) w.dec_destroy(this.state);
+    this.destroyState();
     this.state = w.dec_create();
     if (!this.state) return compressionError('Could not initialize Brotli instance', 'ERR_ZLIB_INITIALIZATION_FAILED', -1);
+    if (dictionary?.length) {
+      const p = this.copyDictionary(dictionary);
+      if (!w.dec_attach_dict(this.state, p, dictionary.length)) {
+        return compressionError('Failed to attach brotli dictionary', 'ERR_ZLIB_DICTIONARY_LOAD_FAILED', -1);
+      }
+    }
     return null;
   }
 
   setParams(key: number, value: number): CompressionError | null {
     if (!this.wasm().dec_set(this.state, key, value >>> 0)) return compressionError('Setting parameter failed', 'ERR_BROTLI_PARAM_SET_FAILED', -1);
+    this.params.set(key, value);
     return null;
   }
 
@@ -184,8 +253,7 @@ export class BrotliDecoderContext extends BrotliContext {
   }
 
   close() {
-    if (this.state) this.w!.dec_destroy(this.state);
-    this.state = 0;
+    this.destroyState();
     this.mode = Mode.NONE;
     this.releaseWasm();
   }

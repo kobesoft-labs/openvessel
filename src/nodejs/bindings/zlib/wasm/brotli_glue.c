@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <brotli/decode.h>
 #include <brotli/encode.h>
+#include <brotli/shared_dictionary.h>
 
 size_t *ov_io(void);
 
@@ -25,11 +26,26 @@ EXPORT(enc_stream) int enc_stream(void *s, int op) {
   io[3] = (size_t)next_out;
   return r;
 }
+/* Raw (custom) dictionaries, as node_zlib.cc attaches them. The caller keeps the dictionary bytes
+ * alive while the prepared dictionary / decoder uses them. */
+EXPORT(enc_prepare_dict) void *enc_prepare_dict(const uint8_t *data, size_t size) {
+  return BrotliEncoderPrepareDictionary(BROTLI_SHARED_DICTIONARY_RAW, size, data, BROTLI_MAX_QUALITY, NULL, NULL,
+                                        NULL);
+}
+EXPORT(enc_destroy_dict) void enc_destroy_dict(void *d) {
+  BrotliEncoderDestroyPreparedDictionary((BrotliEncoderPreparedDictionary *)d);
+}
+EXPORT(enc_attach_dict) int enc_attach_dict(void *s, const void *d) {
+  return BrotliEncoderAttachPreparedDictionary((BrotliEncoderState *)s, (const BrotliEncoderPreparedDictionary *)d);
+}
 
 EXPORT(dec_create) void *dec_create(void) { return BrotliDecoderCreateInstance(NULL, NULL, NULL); }
 EXPORT(dec_destroy) void dec_destroy(void *s) { BrotliDecoderDestroyInstance((BrotliDecoderState *)s); }
 EXPORT(dec_set) int dec_set(void *s, int key, uint32_t value) {
   return BrotliDecoderSetParameter((BrotliDecoderState *)s, (BrotliDecoderParameter)key, value);
+}
+EXPORT(dec_attach_dict) int dec_attach_dict(void *s, const uint8_t *data, size_t size) {
+  return BrotliDecoderAttachDictionary((BrotliDecoderState *)s, BROTLI_SHARED_DICTIONARY_RAW, size, data);
 }
 EXPORT(dec_stream) int dec_stream(void *s) {
   size_t *io = ov_io();

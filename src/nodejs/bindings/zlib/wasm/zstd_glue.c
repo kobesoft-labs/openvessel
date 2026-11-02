@@ -21,6 +21,8 @@ EXPORT(zc_pledge) size_t zc_pledge(void *c, unsigned long long n) {
 EXPORT(zc_set) size_t zc_set(void *c, int key, int value) {
   return ZSTD_CCtx_setParameter((ZSTD_CCtx *)c, (ZSTD_cParameter)key, value);
 }
+/* ZSTD_reset_session_only: a new frame that keeps the parameters and the dictionary. */
+EXPORT(zc_reset) size_t zc_reset(void *c) { return ZSTD_CCtx_reset((ZSTD_CCtx *)c, ZSTD_reset_session_only); }
 EXPORT(zc_stream) size_t zc_stream(void *c, int end) {
   size_t *io = ov_io();
   return ZSTD_compressStream2((ZSTD_CCtx *)c, (ZSTD_outBuffer *)&io[3], (ZSTD_inBuffer *)&io[0],
@@ -35,6 +37,7 @@ EXPORT(zd_load_dict) size_t zd_load_dict(void *d, const void *p, size_t n) {
 EXPORT(zd_set) size_t zd_set(void *d, int key, int value) {
   return ZSTD_DCtx_setParameter((ZSTD_DCtx *)d, (ZSTD_dParameter)key, value);
 }
+EXPORT(zd_reset) size_t zd_reset(void *d) { return ZSTD_DCtx_reset((ZSTD_DCtx *)d, ZSTD_reset_session_only); }
 EXPORT(zd_stream) size_t zd_stream(void *d) {
   size_t *io = ov_io();
   return ZSTD_decompressStream((ZSTD_DCtx *)d, (ZSTD_outBuffer *)&io[3], (ZSTD_inBuffer *)&io[0]);

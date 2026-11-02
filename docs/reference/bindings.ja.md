@@ -177,7 +177,7 @@ Node の `lib/` は、`internalBinding(name)` を通して C++ 側の実装を�
 | クラス・関数 | 実装 |
 |---|---|
 | `Zlib`（deflate・inflate・gzip・gunzip・raw・unzip） | `zlib/zlib-context.ts`。pako 3 による zlib の `z_stream` の移植を使う。pako は Node の（Chromium の）zlib と同じハッシュを使うので、deflate の出力は Node とバイト単位で一致する |
-| `BrotliEncoder`・`BrotliDecoder` | `zlib/brotli.ts`。brotli 1.1.0 を WebAssembly にコンパイルしたもの（Node が当てているデコーダーのパッチを含む）を、raw deflate で圧縮して base64 にし、`zlib/brotli-wasm.ts` に埋め込んでいる。パラメーターはすべて `BrotliEncoderSetParameter`／`BrotliDecoderSetParameter` に渡す |
+| `BrotliEncoder`・`BrotliDecoder` | `zlib/brotli.ts`。brotli 1.2.0 を WebAssembly にコンパイルしたもの（Node が当てているデコーダーのパッチを含む）を、raw deflate で圧縮して base64 にし、`zlib/brotli-wasm.ts` に埋め込んでいる。パラメーターはすべて `BrotliEncoderSetParameter`／`BrotliDecoderSetParameter` に渡す |
 | `ZstdCompress`・`ZstdDecompress` | `zlib/zstd.ts`。zstd 1.5.7 を WebAssembly にコンパイルしたもの（`zlib/zstd-wasm.ts`）。シングルスレッドで動く（マルチスレッドでないビルドと同じく、`ZSTD_c_nbWorkers > 0` は拒否する） |
 | `crc32` | テーブル参照 |
 

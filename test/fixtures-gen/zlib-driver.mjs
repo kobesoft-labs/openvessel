@@ -78,13 +78,20 @@ export async function runSpec(binding, spec, inputs) {
       p?.();
     };
     const i = spec.init;
+    const dictionary = () => (typeof i.dictionary === 'string' ? getInput(i.dictionary) : i.dictionary);
+    // optional trailing arguments are passed only when the spec has them, as older callers do
     if (spec.cls === 'Zlib') {
-      handle.init(i.windowBits, i.level, i.memLevel, i.strategy, writeState, processCallback, i.dictionary ? getInput(i.dictionary) : undefined);
+      const args = [i.windowBits, i.level, i.memLevel, i.strategy, writeState, processCallback, i.dictionary ? getInput(i.dictionary) : undefined];
+      if ('rejectGarbageAfterEnd' in i) args.push(i.rejectGarbageAfterEnd);
+      handle.init(...args);
     } else if (spec.cls.startsWith('Brotli')) {
-      handle.init(paramsArray(i.paramsLength, i.params), writeState, processCallback);
+      const args = [paramsArray(i.paramsLength, i.params), writeState, processCallback];
+      if ('dictionary' in i) args.push(dictionary());
+      handle.init(...args);
     } else {
       const args = [paramsArray(i.paramsLength, i.params), i.pledgedSrcSize, writeState, processCallback];
-      if ('dictionary' in i) args.push(typeof i.dictionary === 'string' ? getInput(i.dictionary) : i.dictionary);
+      if ('dictionary' in i || 'rejectGarbageAfterEnd' in i) args.push(dictionary());
+      if ('rejectGarbageAfterEnd' in i) args.push(i.rejectGarbageAfterEnd);
       handle.init(...args);
     }
   } catch (e) {

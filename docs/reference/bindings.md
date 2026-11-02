@@ -196,7 +196,7 @@ Also in `crypto.ts`: `timingSafeEqual`; certificate stores are empty (`getBundle
 | Class / function | Backed by |
 |---|---|
 | `Zlib` (deflate, inflate, gzip, gunzip, raw, unzip) | `zlib/zlib-context.ts` on pako 3's port of zlib's `z_stream`; pako uses the same hash as Node's (Chromium's) zlib, so deflate output is byte-identical to Node's |
-| `BrotliEncoder`, `BrotliDecoder` | `zlib/brotli.ts`: brotli 1.1.0 compiled to WebAssembly (with the decoder patch Node carries), embedded raw-deflated and base64-encoded in `zlib/brotli-wasm.ts`; every parameter is passed to `BrotliEncoderSetParameter`/`BrotliDecoderSetParameter` |
+| `BrotliEncoder`, `BrotliDecoder` | `zlib/brotli.ts`: brotli 1.2.0 compiled to WebAssembly (with the decoder patch Node carries), embedded raw-deflated and base64-encoded in `zlib/brotli-wasm.ts`; every parameter is passed to `BrotliEncoderSetParameter`/`BrotliDecoderSetParameter` |
 | `ZstdCompress`, `ZstdDecompress` | `zlib/zstd.ts`: zstd 1.5.7 compiled to WebAssembly (`zlib/zstd-wasm.ts`), single-threaded (`ZSTD_c_nbWorkers > 0` is rejected, as in a non-multithreaded build) |
 | `crc32` | table-driven |
 
