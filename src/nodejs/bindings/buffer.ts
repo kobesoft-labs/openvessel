@@ -535,17 +535,9 @@ export function createBuffer() {
       for (let i = 0; i < input.length; i++) if (input.charCodeAt(i) > 0xff) return false;
       return true;
     },
-    // UTF-16 code units of the decoded text (simdutf utf16_length_from_utf8): one per lead byte, two
-    // for a 4-byte sequence
+    // UTF-16 code units of the decoded text, invalid sequences counted as U+FFFD (what toString gives)
     stringLengthUtf8(v: ArrayBufferView | ArrayBuffer) {
-      const x = bytesOf(v);
-      let n = 0;
-      for (let i = 0; i < x.length; i++) {
-        const b = x[i];
-        if ((b & 0xc0) !== 0x80) n++;
-        if (b >= 0xf0 && b <= 0xf4) n++;
-      }
-      return n;
+      return utf8Dec.decode(unshared(bytesOf(v))).length;
     },
     // RFC 6455 masking: output[offset + i] = source[i] ^ key byte (i % 4); false for an immutable buffer
     mask(source: ArrayBufferView, output: ArrayBufferView, offset: number, length: number, key: number) {

@@ -1,3 +1,3 @@
 {
-  "test-buffer-tostring-4gb.js": "Allocates a Buffer larger than 4 GiB, more memory than a browser tab can hand to one ArrayBuffer."
+  "test-buffer-copy-immutable.js": "Runs with --js-immutable-arraybuffer (ArrayBuffer.prototype.transferToImmutable); Chrome doesn't ship immutable ArrayBuffers and its V8 flags can't be set from a page, so the test skips itself."
 }
