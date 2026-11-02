@@ -3,7 +3,9 @@
 
 import { GHASH } from '@noble/ciphers/_polyval.js';
 import { Poly1305 } from '@noble/ciphers/_poly1305.js';
+import { aessiv, gcmsiv } from '@noble/ciphers/aes.js';
 import { aes, desEde, type BlockCipher } from './blockcipher.ts';
+import { sm4 } from './sm4.ts';
 import { ChaChaStream } from './chacha.ts';
 import { sha1 } from '@noble/hashes/legacy.js';
 import { CIPHERS, SSL_CIPHERS, type CipherInfo } from './tables.ts';
@@ -28,6 +30,8 @@ interface AeadEngine extends Engine {
   setLength?(len: number): boolean;
   tag(len: number): Uint8Array;
   expectTag(tag: Uint8Array): void;
+  /** SIV modes: setAuthTag() only before the text */
+  acceptsTag?(): boolean;
 }
 
 // -----------------------------------------------------------------------------
@@ -627,6 +631,202 @@ class WrapMode implements Engine {
 }
 
 // -----------------------------------------------------------------------------
+// XTS (IEEE 1619, and GB/T 17964 for sm4-xts by default): one update() of at least a block, with
+// ciphertext stealing for a partial last block. A failed update() leaves the context usable.
+
+/** The tweak times α: IEEE little-endian (0x87), GB big-endian bit-reflected (0xe1). */
+function xtsMulIEEE(t: Uint8Array) {
+  let c = 0;
+  for (let i = 0; i < 16; i++) {
+    const n = t[i] >>> 7;
+    t[i] = ((t[i] << 1) | c) & 0xff;
+    c = n;
+  }
+  if (c) t[0] ^= 0x87;
+}
+function xtsMulGB(t: Uint8Array) {
+  let c = 0;
+  for (let i = 0; i < 16; i++) {
+    const n = t[i] & 1;
+    t[i] = (t[i] >>> 1) | (c << 7);
+    c = n;
+  }
+  if (c) t[0] ^= 0xe1;
+}
+
+class XtsMode implements Engine {
+  private done: Uint8Array | null = null;
+  constructor(
+    private k1: BlockCipher,
+    private k2: BlockCipher,
+    private enc: boolean,
+    private iv: Uint8Array,
+    private gb: boolean,
+  ) {}
+  update(data: Uint8Array): Uint8Array | null {
+    if (this.done || data.length < 16) return null;
+    this.done = this.run(data);
+    return this.done;
+  }
+  final() {
+    if (!this.done) throw FAIL;
+    return new Uint8Array(0);
+  }
+  private run(data: Uint8Array): Uint8Array {
+    const mul = this.gb ? xtsMulGB : xtsMulIEEE;
+    const t = new Uint8Array(16);
+    this.k2.encrypt(this.iv, 0, t, 0);
+    const out = new Uint8Array(data.length);
+    const n = Math.floor(data.length / 16);
+    const r = data.length % 16;
+    const blk = new Uint8Array(16);
+    const one = (src: Uint8Array, so: number, dst: Uint8Array, d: number, tw: Uint8Array) => {
+      for (let j = 0; j < 16; j++) blk[j] = src[so + j] ^ tw[j];
+      if (this.enc) this.k1.encrypt(blk, 0, blk, 0);
+      else this.k1.decrypt(blk, 0, blk, 0);
+      for (let j = 0; j < 16; j++) dst[d + j] = blk[j] ^ tw[j];
+    };
+    const full = r ? n - 1 : n;
+    for (let i = 0; i < full; i++) {
+      one(data, 16 * i, out, 16 * i, t);
+      mul(t);
+    }
+    if (r) {
+      // ciphertext stealing: decryption takes the last two tweaks in the other order
+      const o = 16 * (n - 1);
+      let t1 = t;
+      let t2 = t.slice();
+      mul(t2);
+      if (!this.enc) [t1, t2] = [t2, t1];
+      const cc = new Uint8Array(16);
+      one(data, o, cc, 0, t1);
+      const pp = new Uint8Array(16);
+      pp.set(data.subarray(o + 16));
+      pp.set(cc.subarray(r), r);
+      out.set(cc.subarray(0, r), o + 16);
+      one(pp, 0, out, o, t2);
+    }
+    return out;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// AES-SIV (RFC 5297) and AES-GCM-SIV (RFC 8452), as OpenSSL 3.2+ runs them: the whole message in
+// one update(), the 16-byte tag separate. Encryption is @noble/ciphers'; decryption runs the CTR
+// part with whatever tag was set (OpenSSL hands out that plaintext even unauthenticated) and then
+// verifies by encrypting the result again.
+
+const MAX_SIV_AAD = 126;
+
+abstract class SivBase implements AeadEngine {
+  protected aads: Uint8Array[] = [];
+  protected tagValue: Uint8Array | null = null;
+  protected expected: Uint8Array | null = null;
+  protected updated = false;
+  protected verified = false;
+  constructor(
+    protected key: Uint8Array,
+    protected enc: boolean,
+    protected iv: Uint8Array,
+  ) {}
+  aad(data: Uint8Array): boolean {
+    if (this.updated || this.aads.length >= MAX_SIV_AAD) return false;
+    this.aads.push(data.slice());
+    return true;
+  }
+  expectTag(tag: Uint8Array) {
+    this.expected = tag;
+  }
+  /** setAuthTag: only before the text */
+  acceptsTag() {
+    return !this.updated;
+  }
+  tag(): Uint8Array {
+    return this.tagValue!;
+  }
+  update(data: Uint8Array): Uint8Array | null {
+    if (this.updated) return null;
+    this.updated = true;
+    if (this.enc) {
+      const [ct, tag] = this.seal(data);
+      this.tagValue = tag;
+      return ct;
+    }
+    const tag = this.expected ?? new Uint8Array(16);
+    const pt = this.ctr(tag, data);
+    this.verified = !!this.expected && equalBytes(this.seal(pt)[1], this.expected);
+    return this.revealUnverified || this.verified ? pt : new Uint8Array(0);
+  }
+  /** GCM-SIV hands out the plaintext before final() authenticates it; SIV only once verified */
+  protected revealUnverified = false;
+  final() {
+    if (!this.updated || (!this.enc && !this.verified)) throw FAIL;
+    return new Uint8Array(0);
+  }
+  /** encrypt: [ciphertext, tag] */
+  protected abstract seal(pt: Uint8Array): [Uint8Array, Uint8Array];
+  /** the CTR keystream applied with this tag as the synthetic IV */
+  protected abstract ctr(tag: Uint8Array, data: Uint8Array): Uint8Array;
+}
+
+class SivMode extends SivBase {
+  protected seal(pt: Uint8Array): [Uint8Array, Uint8Array] {
+    const out = aessiv(this.key, ...this.aads).encrypt(pt);
+    return [out.slice(16), out.slice(0, 16)];
+  }
+  protected ctr(tag: Uint8Array, data: Uint8Array) {
+    // Q = V with bits 63 and 31 cleared; K2 is the key's second half; a 128-bit big-endian counter
+    const q = tag.slice();
+    q[8] &= 0x7f;
+    q[12] &= 0x7f;
+    const c = aes(this.key.subarray(this.key.length / 2));
+    const out = new Uint8Array(data.length);
+    const ks = new Uint8Array(16);
+    for (let i = 0; i < data.length; i += 16) {
+      c.encrypt(q, 0, ks, 0);
+      for (let j = 0; j < 16 && i + j < data.length; j++) out[i + j] = data[i + j] ^ ks[j];
+      for (let j = 15; j >= 0 && ++q[j] === 256; j--) q[j] = 0;
+    }
+    return out;
+  }
+}
+
+class GcmSivMode extends SivBase {
+  protected override revealUnverified = true;
+  protected seal(pt: Uint8Array): [Uint8Array, Uint8Array] {
+    const out = gcmsiv(this.key, this.iv, concat(this.aads)).encrypt(pt);
+    return [out.slice(0, out.length - 16), out.slice(out.length - 16)];
+  }
+  protected ctr(tag: Uint8Array, data: Uint8Array) {
+    // RFC 8452 4: the message-encryption key from the key-generating key and the nonce
+    const kgk = aes(this.key);
+    const parts: Uint8Array[] = [];
+    const block = new Uint8Array(16);
+    const outBlock = new Uint8Array(16);
+    for (let i = 0; i < 2 + this.key.length / 8; i++) {
+      block.fill(0);
+      block[0] = i;
+      block.set(this.iv, 4);
+      kgk.encrypt(block, 0, outBlock, 0);
+      parts.push(outBlock.slice(0, 8));
+    }
+    const c = aes(concat(parts.slice(2)));
+    // the counter block is the tag with its top bit set; the low 32 bits count little-endian
+    const ctr = tag.slice();
+    ctr[15] |= 0x80;
+    const dv = new DataView(ctr.buffer);
+    const out = new Uint8Array(data.length);
+    const ks = new Uint8Array(16);
+    for (let i = 0; i < data.length; i += 16) {
+      c.encrypt(ctr, 0, ks, 0);
+      for (let j = 0; j < 16 && i + j < data.length; j++) out[i + j] = data[i + j] ^ ks[j];
+      dv.setUint32(0, (dv.getUint32(0, true) + 1) >>> 0, true);
+    }
+    return out;
+  }
+}
+
+// -----------------------------------------------------------------------------
 // CBC with ciphertext stealing (OpenSSL 3's aes-*-cbc-cts; NIST SP 800-38A addendum): the whole
 // message goes through a single update(), at least one block long. CS1 keeps the blocks in order,
 // CS3 (Kerberos) always swaps the last two, CS2 swaps them only when the last one is partial.
@@ -996,7 +1196,8 @@ function findByNid(nid: number): CipherInfo | undefined {
 
 const isChaChaPoly = (info: CipherInfo) => info.nid === 1018;
 const isChaCha = (info: CipherInfo) => info.nid === 1019;
-const isAuthMode = (info: CipherInfo) => info.mode === 'gcm' || info.mode === 'ccm' || info.mode === 'ocb' || isChaChaPoly(info);
+const isSiv = (info: CipherInfo) => info.mode === 'siv' || info.mode === 'gcm-siv';
+const isAuthMode = (info: CipherInfo) => info.mode === 'gcm' || info.mode === 'ccm' || info.mode === 'ocb' || isSiv(info) || isChaChaPoly(info);
 const isDes3Wrap = (info: CipherInfo) => info.nid === 246;
 const isDes = (info: CipherInfo) => /^des/i.test(info.name);
 const isValidGcmTagLength = (n: number) => n === 4 || n === 8 || (n >= 12 && n <= 16);
@@ -1006,15 +1207,19 @@ function blockSizeOf(info: CipherInfo) {
   return info.blockSize ?? 1;
 }
 
-function makeEngine(info: CipherInfo, key: Uint8Array, iv: Uint8Array, enc: boolean, tagLen: number, cts: CtsVariant = 'CS1'): Engine {
+function makeEngine(info: CipherInfo, key: Uint8Array, iv: Uint8Array, enc: boolean, tagLen: number, cts: CtsVariant = 'CS1', xtsGb = false): Engine {
   if (isChaChaPoly(info)) return new ChaChaPolyMode(key, iv, enc);
   if (isChaCha(info)) {
     const s = new ChaChaStream(key, iv);
     return { update: (d) => s.xor(d), final: () => new Uint8Array(0) };
   }
   if (isDes3Wrap(info)) return new Des3WrapMode(desEde(key), enc);
-  const c = isDes(info) ? desEde(key) : aes(key);
   const name = info.name.toLowerCase();
+  const block = isDes(info) ? desEde : name.startsWith('sm4') ? sm4 : aes;
+  if (info.mode === 'xts') return new XtsMode(block(key.subarray(0, key.length / 2)), block(key.subarray(key.length / 2)), enc, iv, xtsGb);
+  if (info.mode === 'siv') return new SivMode(key, enc, iv);
+  if (info.mode === 'gcm-siv') return new GcmSivMode(key, enc, iv);
+  const c = block(key);
   switch (info.mode) {
     case 'ecb':
       return new BlockMode(c, enc, null);
@@ -1059,6 +1264,7 @@ export class CipherBase {
   #ccmBroken = false;
   /** ChaCha20-Poly1305 without an explicit authTagLength */
   #lenientTag = false;
+  #xtsGb = false;
   #maxMessageSize = INT_MAX;
 
   // new CipherBase(isEncrypt, cipher, key, iv | null, authTagLength[, ctsMode, xtsStandard]): Node 24+
@@ -1072,13 +1278,19 @@ export class CipherBase {
     if (isAuthMode(info) && !this.#initAuthenticated(cipherType, info, iv.length, authTagLen)) return;
     if (key.length !== info.keyLength) throw err('ERR_CRYPTO_INVALID_KEYLEN');
     this.#info = info;
-    this.#ctx = makeEngine(info, key, iv, this.#encrypt, this.#authTagLen, cts);
+    this.#ctx = makeEngine(info, key, iv, this.#encrypt, this.#authTagLen, cts, this.#xtsGb);
     if (this.#lenientTag) (this.#ctx as ChaChaPolyMode).lenient = true;
   }
 
   #initAuthenticated(cipherType: string, info: CipherInfo, ivLen: number, authTagLen: number): boolean {
-    const ivOk = info.mode === 'gcm' ? ivLen > 0 : info.mode === 'ccm' ? ivLen >= 7 && ivLen <= 13 : info.mode === 'ocb' ? ivLen >= 1 && ivLen <= 15 : ivLen === 12;
+    const ivOk = info.mode === 'gcm' ? ivLen > 0 : info.mode === 'ccm' ? ivLen >= 7 && ivLen <= 13 : info.mode === 'ocb' ? ivLen >= 1 && ivLen <= 15 : info.mode === 'siv' ? ivLen === 0 : ivLen === 12;
     if (!ivOk) throw err('ERR_CRYPTO_INVALID_IV');
+    if (isSiv(info)) {
+      // SIV and GCM-SIV tags are always 16 bytes
+      if (authTagLen !== -1 && authTagLen !== 16) throw err('ERR_CRYPTO_INVALID_AUTH_TAG', `Invalid authentication tag length: ${authTagLen}`);
+      this.#authTagLen = 16;
+      return true;
+    }
     if (info.mode === 'gcm') {
       if (authTagLen !== -1) {
         if (!isValidGcmTagLength(authTagLen)) throw err('ERR_CRYPTO_INVALID_AUTH_TAG', `Invalid authentication tag length: ${authTagLen}`);
@@ -1105,9 +1317,11 @@ export class CipherBase {
   #initiv(cipherType: string, key: unknown, iv: unknown, authTagLength: number, ctsMode?: unknown, xtsStandard?: unknown) {
     const info = findCipher(cipherType);
     if (!info) throw err('ERR_CRYPTO_UNKNOWN_CIPHER');
-    // ctsMode belongs to the *-cbc-cts ciphers, xtsStandard to XTS (not provided here)
+    // ctsMode belongs to the *-cbc-cts ciphers, xtsStandard to sm4-xts (GB/T 17964 by default, or IEEE 1619)
     if (ctsMode !== undefined && !info.name.toLowerCase().endsWith('-cts')) throw err('ERR_CRYPTO_UNSUPPORTED_OPERATION', `${cipherType} does not support the ctsMode option`);
-    if (xtsStandard !== undefined) throw err('ERR_CRYPTO_UNSUPPORTED_OPERATION', `${cipherType} does not support the xtsStandard option`);
+    const isSm4Xts = info.name.toLowerCase() === 'sm4-xts';
+    if (xtsStandard !== undefined && !isSm4Xts) throw err('ERR_CRYPTO_UNSUPPORTED_OPERATION', `${cipherType} does not support the xtsStandard option`);
+    this.#xtsGb = isSm4Xts && xtsStandard !== 'IEEE';
     const k = secretKeyBytes(key);
     const ivb = iv === null || iv === undefined ? new Uint8Array(0) : view(iv);
     const expected = info.ivLength ?? 0;
@@ -1135,6 +1349,8 @@ export class CipherBase {
     if (!ctx) throw cryptoError('Trying to add data in unsupported state');
     const info = this.#info!;
     if (info.mode === 'ccm' && input.length > this.#maxMessageSize) throw err('ERR_CRYPTO_INVALID_MESSAGELEN');
+    // EVP_CipherUpdate counts in int: the output (input plus a block) must fit
+    if (input.length > INT_MAX - blockSizeOf(info)) throw cryptoError('Trying to add data in unsupported state');
     if (!this.#encrypt && this.#isAuth()) this.#passTag();
     if (info.mode === 'ccm') {
       // CCM processes the whole text in one update()
@@ -1179,7 +1395,7 @@ export class CipherBase {
         }
       }
     } catch (e) {
-      if (this.#encrypt && isAuth && this.#authTagLen !== -1) this.#authTag = new Uint8Array(this.#authTagLen);
+      if (this.#encrypt && isAuth && this.#authTagLen !== -1 && !isSiv(info)) this.#authTag = new Uint8Array(this.#authTagLen);
       if (e !== FAIL) throw e;
       throw cryptoError(isAuth ? 'Unsupported state or unable to authenticate data' : 'Unsupported state');
     }
@@ -1199,6 +1415,7 @@ export class CipherBase {
 
   setAuthTag(tag: unknown) {
     if (!this.#ctx || !this.#isAuth() || this.#encrypt || this.#authTagState !== kAuthTagUnknown) return false;
+    if ((this.#ctx as AeadEngine).acceptsTag?.() === false) return false;
     const t = view(tag);
     const len = t.length;
     // Node 26 (DEP0182 end-of-life): without authTagLength, a GCM tag must be the full 16 bytes

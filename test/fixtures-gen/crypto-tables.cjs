@@ -3,8 +3,8 @@ const b = require('internal/test/binding').internalBinding('crypto');
 const fs = require('fs');
 const supported = (n) => {
   const l = n.toLowerCase();
-  if (/xts|aria|camellia|sm4|siv/.test(l)) return false; // AES-SIV and AES-GCM-SIV (OpenSSL 3.2+) are not implemented
-  return /^(aes|id-aes|chacha20|des-ede|des3|id-smime-alg-cms3deswrap)/.test(l);
+  if (/aria|camellia/.test(l)) return false;
+  return /^(aes|id-aes|chacha20|des-ede|des3|id-smime-alg-cms3deswrap|sm4)/.test(l);
 };
 const ciphers = b.getCiphers().filter(supported);
 const table = {};

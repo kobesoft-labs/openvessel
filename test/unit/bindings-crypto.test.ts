@@ -315,10 +315,9 @@ function runScript(s: any) {
 
 test('cipher scripts', () => {
   let failures = 0;
-  // XTS and the SIV modes (OpenSSL 3.2+) are not implemented; getCiphers() does not list them
-  const unsupported = new Set(['aes-128-xts', 'aes-128-ocb']);
+  const unsupported = new Set(['aes-128-ocb']);
   for (const s of fx.cipher) {
-    if (unsupported.has(s.cipher) || /siv$/.test(s.cipher)) continue;
+    if (unsupported.has(s.cipher)) continue;
     const got = runScript(s);
     try {
       assert.deepEqual(got, s.results);
@@ -331,7 +330,6 @@ test('cipher scripts', () => {
 
 test('getCipherInfo', () => {
   for (const c of fx.cipherInfo) {
-    if (c.name === 'aes-128-xts' || /siv$/.test(c.name)) continue;
     // Node 24+: getCipherInfo(nameOrNid, keyLength, ivLength) → a null-prototype object (lib passes
     // empty names and out-of-range NIDs over); the fixture is its JSON form
     const n = c.name;
