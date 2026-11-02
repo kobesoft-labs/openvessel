@@ -8,7 +8,7 @@ import { S } from '../state.ts';
 import { fromShape, shapeOf } from './shape.ts';
 import { perfNow, timeOrigin } from '../../node/native.ts';
 import { hardwareConcurrency, nativeQueueMicrotask } from '../web.ts';
-import { Histogram, createELDHistogram } from './performance.ts';
+import { Histogram, SlidingWindowHistogram, createELDHistogram } from './performance.ts';
 import { uvError } from './fs.ts';
 
 const enc = new TextEncoder();
@@ -588,12 +588,15 @@ export function createPerformance() {
       ms[b.constants.NODE_PERFORMANCE_MILESTONE_BOOTSTRAP_COMPLETE] = perfNow() * 1e6;
     },
     loopIdleTime: () => 0,
-    uvMetricsInfo: () => [0, 0, 0],
+    // fills uvMetricsBuffer / uvMetricsBigIntBuffer (loop count, events, events waiting): no libuv
+    // loop to count here, so they stay 0
+    uvMetricsInfo: () => {},
     setupObservers: () => {},
-    installGarbageCollectionTracking: () => {},
-    removeGarbageCollectionTracking: () => {},
+    // GC entries are never observed (no GC callbacks in a browser)
+    updateGarbageCollectionTracking: () => {},
     notify: () => {},
     Histogram,
+    SlidingWindowHistogram,
     createELDHistogram,
   });
 }

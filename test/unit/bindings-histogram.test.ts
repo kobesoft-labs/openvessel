@@ -1,12 +1,14 @@
+// qrde() resolves through loop.ts's macrotasks
+import './zlib-loop-shim.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Histogram, createELDHistogram } from '../../src/nodejs/bindings/performance.ts';
+import { Histogram, SlidingWindowHistogram, createELDHistogram } from '../../src/nodejs/bindings/performance.ts';
 import { run } from '../fixtures-gen/histogram.cases.mjs';
 import fixture from './fixtures/performance.json';
 import { compareFixtures } from './binding-fixtures.ts';
 
-test("internalBinding('performance').Histogram matches Node", () => {
-  const total = compareFixtures(run({ Histogram }) as any, fixture.results as any);
+test("internalBinding('performance').Histogram matches Node", async () => {
+  const total = compareFixtures((await run({ Histogram, SlidingWindowHistogram })) as any, fixture.results as any);
   console.log(`${total} cases`);
 });
 

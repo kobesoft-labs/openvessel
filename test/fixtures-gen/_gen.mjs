@@ -10,10 +10,11 @@ export const NODE_VERSION = /NODE_VERSION = '([^']+)'/.exec(readFileSync(new URL
 
 const require = createRequire(import.meta.url);
 
-export function generate(name, run) {
+export async function generate(name, run) {
   if (process.version !== `v${NODE_VERSION}`) throw new Error(`run with node@${NODE_VERSION} (got ${process.version})`);
   const { internalBinding } = require('internal/test/binding');
-  const results = run(internalBinding(name));
+  // a case module may be async (results that arrive through promises)
+  const results = await run(internalBinding(name));
   const file = new URL(`../unit/fixtures/${name}.json`, import.meta.url);
   writeFileSync(file, JSON.stringify({ node: process.version, results }) + '\n');
   console.log(`wrote ${file.pathname}`);
