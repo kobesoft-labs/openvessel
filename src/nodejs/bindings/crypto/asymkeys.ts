@@ -17,6 +17,7 @@ import { md5 } from '@noble/hashes/legacy.js';
 import { CipherBase, findCipher } from './cipher.ts';
 import { concat, cryptoError, err, fillRandom, osslError } from './util.ts';
 import type { KeyData } from './keys.ts';
+import { PQ, pqByOid, pqExportJwk, pqPkcs8Inner, pqReadPkcs8, type PqKey } from './pqc.ts';
 
 // -----------------------------------------------------------------------------
 // key model
@@ -91,13 +92,21 @@ export type Asym =
   | { kind: 'ec'; curve: Curve; pub: Uint8Array; d?: bigint; explicit?: boolean }
   | { kind: 'dsa'; dsa: DsaKey }
   | { kind: 'dh'; dh: DhKey }
-  | { kind: OkpKind; pub: Uint8Array; priv?: Uint8Array };
+  | { kind: OkpKind; pub: Uint8Array; priv?: Uint8Array }
+  | { kind: PqKind; pq: PqKey };
+
+/** ML-DSA, ML-KEM and SLH-DSA (pqc.ts) */
+export type PqKind =
+  | `ml-dsa-${'44' | '65' | '87'}`
+  | `ml-kem-${'512' | '768' | '1024'}`
+  | `slh-dsa-${'sha2' | 'shake'}-${'128' | '192' | '256'}${'s' | 'f'}`;
 
 export function hasPrivate(a: Asym): boolean {
   if ('rsa' in a) return a.rsa.d !== undefined;
   if (a.kind === 'ec') return a.d !== undefined;
   if (a.kind === 'dsa') return a.dsa.x !== undefined;
   if (a.kind === 'dh') return a.dh.x !== undefined;
+  if ('pq' in a) return a.pq.priv !== undefined;
   return (a as any).priv !== undefined;
 }
 
@@ -214,6 +223,7 @@ function algId(a: Asym): Uint8Array {
         ? der.seq(der.oid(OID.dhx), der.seq(der.int(a.dh.p), der.int(a.dh.g), der.int(a.dh.q)))
         : der.seq(der.oid(OID.dh), der.seq(der.int(a.dh.p), der.int(a.dh.g)));
     default:
+      if ('pq' in a) return der.seq(der.oid(PQ[a.kind].oid));
       return der.seq(der.oid(OKP[a.kind].oid));
   }
 }
@@ -274,6 +284,7 @@ export function spki(a: Asym): Uint8Array {
   if ('rsa' in a) key = rsaPublicDer(a.rsa);
   else if (a.kind === 'dsa') key = der.int(a.dsa.y);
   else if (a.kind === 'dh') key = der.int(a.dh.y);
+  else if ('pq' in a) key = a.pq.pub;
   else key = a.pub;
   return der.seq(algId(a), der.bitString(key));
 }
@@ -284,6 +295,7 @@ export function pkcs8(a: Asym): Uint8Array {
   else if (a.kind === 'ec') inner = ecPrivateDer(a, false);
   else if (a.kind === 'dsa') inner = der.int(a.dsa.x!);
   else if (a.kind === 'dh') inner = der.int(a.dh.x!);
+  else if ('pq' in a) inner = pqPkcs8Inner(a.pq);
   else inner = der.octets((a as any).priv);
   return der.seq(der.int(0), algId(a), der.octets(inner));
 }
@@ -403,6 +415,11 @@ export function readSpki(b: Uint8Array): Asym {
       return { kind: info.kind, pub: key.slice() };
     }
   }
+  const pq = pqByOid(oid);
+  if (pq) {
+    if (key.length !== pq.pubLen) throw keyErr.unsupported();
+    return { kind: pq.kind as PqKind, pq: { kind: pq.kind, pub: key.slice() } };
+  }
   throw keyErr.unsupported();
 }
 
@@ -432,6 +449,8 @@ export function readPkcs8(b: Uint8Array): Asym {
       return okpFromPrivate(info.kind, priv);
     }
   }
+  const pq = pqByOid(oid);
+  if (pq) return { kind: pq.kind as PqKind, pq: pqReadPkcs8(pq, inner) };
   throw keyErr.unsupported();
 }
 
@@ -719,6 +738,10 @@ export function exportJwk(a: Asym, isPrivate: boolean, target: any, handleRsaPss
     return;
   }
   if (a.kind === 'rsa-pss' || a.kind === 'dsa' || a.kind === 'dh') throw err('ERR_CRYPTO_JWK_UNSUPPORTED_KEY_TYPE');
+  if ('pq' in a) {
+    pqExportJwk(a.pq, isPrivate, target, b64url);
+    return;
+  }
   target.crv = OKP[a.kind].jwk;
   if (isPrivate) target.d = b64url((a as any).priv);
   target.x = b64url(a.pub);

@@ -32,6 +32,7 @@ import {
   type Asym,
   type Curve,
   type OkpKind,
+  type PqKind,
 } from './asymkeys.ts';
 import {
   base64Decode,
@@ -47,6 +48,8 @@ import {
   type KeyData,
 } from './keys.ts';
 import * as rsa from './rsa.ts';
+import { PQ, isPqKind, pqDecapsulate, pqEncapsulate, pqFromPrivate, pqFromPublic, pqFromSeed, pqGenerate, pqImportJwk, pqSign, pqVerify, type PqKey } from './pqc.ts';
+import { dhkemDecapsulate, dhkemEncapsulate } from './dhkem.ts';
 import { S } from '../../state.ts';
 import { bigIntToBytes, bitLength, bytesToBigInt } from './random.ts';
 import { decodeInput, err, fillRandom, isAnyBufferSource, isWebCryptoJob, jobClass, osslError, stringOrBuffer, toArrayBuffer, toBuffer, view } from './util.ts';
@@ -99,8 +102,8 @@ function jwkKey(jwk: any, wantPrivate: boolean): KeyData {
   } else if (kty === 'RSA') {
     data = importJwk(jwk, kty, undefined);
   } else if (kty === 'AKP') {
-    // ML-DSA / ML-KEM: no implementation here
-    throw err('ERR_CRYPTO_INVALID_JWK', 'Invalid JWK AKP key');
+    const { type, key } = pqImportJwk(jwk, wantPrivate, base64Decode);
+    data = { type, asym: { kind: key.kind as PqKind, pq: key } };
   } else {
     throw err('ERR_CRYPTO_INVALID_JWK', `${kty} is not a supported JWK key type`);
   }
@@ -134,6 +137,15 @@ function rawKey(bytes: Uint8Array, format: number, typeName: unknown, namedCurve
     if (bytes.length !== OKP[kind].len) throw invalidKeyData();
     if (format === kKeyFormatRawPrivate) return { type: 2, asym: okpFromPrivate(kind, bytes) };
     return { type: 1, asym: { kind, pub: bytes.slice() } };
+  }
+  if (isPqKind(name)) {
+    // ML keys are made from their seed, SLH-DSA keys from the whole raw private key
+    const slhDsa = PQ[name].family === 'slh-dsa';
+    const asym = (pq: PqKey): Asym => ({ kind: name as PqKind, pq });
+    if (format === kKeyFormatRawPublic) return { type: 1, asym: asym(pqFromPublic(name, bytes)) };
+    if (format === kKeyFormatRawSeed && !slhDsa) return { type: 2, asym: asym(pqFromSeed(name, bytes)) };
+    if (format === kKeyFormatRawPrivate && slhDsa) return { type: 2, asym: asym(pqFromPrivate(name, bytes)) };
+    throw incompatible();
   }
   if (name === 'rsa' || name === 'rsa-pss' || name === 'dsa' || name === 'dh') throw incompatible();
   // the comparison saw the whole string, the message is a C string
@@ -225,11 +237,17 @@ function exportRaw(data: KeyData, format: number, pointForm: unknown): Uint8Arra
   if (format === kKeyFormatRawPublic) {
     if (a.kind === 'ec') return encodePoint(a.curve, a.pub, typeof pointForm === 'number' ? pointForm : POINT_CONVERSION_UNCOMPRESSED);
     if (isOkp(a)) return (a as any).pub;
+    if ('pq' in a) return a.pq.pub;
     throw incompatible();
   }
   if (format === kKeyFormatRawPrivate && data.type === 2) {
     if (a.kind === 'ec') return bigIntToBytes(a.d!, Math.ceil(bitLength(curveOrder(a.curve)) / 8));
     if (isOkp(a)) return (a as any).priv;
+    if ('pq' in a && PQ[a.kind].family === 'slh-dsa') return a.pq.priv!;
+  }
+  if (format === kKeyFormatRawSeed && data.type === 2 && 'pq' in a && PQ[a.kind].family !== 'slh-dsa') {
+    if (!a.pq.seed) throw err('ERR_CRYPTO_OPERATION_FAILED', 'Failed to get raw seed');
+    return a.pq.seed;
   }
   throw incompatible();
 }
@@ -264,17 +282,14 @@ registerAsymOps({
   },
   equals: (a, b) => sameKey(asymOf(a), asymOf(b)),
   rawPublicKey(data) {
-    if (!isOkp(asymOf(data))) throw incompatible();
+    if (asymOf(data).kind === 'ec') throw incompatible();
     return exportRaw(data, kKeyFormatRawPublic, undefined);
   },
   rawPrivateKey(data) {
-    if (!isOkp(asymOf(data))) throw incompatible();
     return exportRaw(data, kKeyFormatRawPrivate, undefined);
   },
-  // seeds belong to ML-DSA / ML-KEM keys, which are not implemented
-  rawSeed: () => {
-    throw incompatible();
-  },
+  // seeds belong to ML-DSA / ML-KEM keys
+  rawSeed: (data) => exportRaw(data, kKeyFormatRawSeed, undefined),
   exportECPublicRaw(data, form) {
     if (asymOf(data).kind !== 'ec') throw incompatible();
     return exportRaw(data, kKeyFormatRawPublic, form);
@@ -450,7 +465,8 @@ export class Sign extends SignBase {
   // sign(key, format, type, passphrase, namedCurve, rsaPadding, pssSaltLength, dsaSigEnc)
   sign(...args: any[]) {
     const a = asymOf(privateKeyArg(args, 0));
-    if (isEdKind(a.kind)) throw err('ERR_CRYPTO_UNSUPPORTED_OPERATION');
+    // one-shot only: EdDSA, ML-DSA and SLH-DSA sign the message itself
+    if (isEdKind(a.kind) || 'pq' in a) throw err('ERR_CRYPTO_UNSUPPORTED_OPERATION');
     const [algo, hash] = this.finish();
     let sig = signDigest(a, algo, hash, args[5], args[6]);
     if (args[7] === kSigEncP1363 && isDsaLike(a)) sig = derToP1363(a, sig);
@@ -462,7 +478,8 @@ export class Verify extends SignBase {
   // verify(key, format, type, passphrase, namedCurve, signature, rsaPadding, pssSaltLength, dsaSigEnc)
   verify(...args: any[]) {
     const a = asymOf(anyKeyArg(args, 0));
-    if (isEdKind(a.kind)) throw err('ERR_CRYPTO_UNSUPPORTED_OPERATION');
+    // one-shot only: EdDSA, ML-DSA and SLH-DSA sign the message itself
+    if (isEdKind(a.kind) || 'pq' in a) throw err('ERR_CRYPTO_UNSUPPORTED_OPERATION');
     let sig: Uint8Array | null = view(args[5]);
     if (args[8] === kSigEncP1363 && isDsaLike(a)) {
       sig = p1363ToDer(a, sig);
@@ -499,7 +516,14 @@ export const SignJob = jobClass('SignJob', (async, signMode: number, ...rest: an
   return () => {
     if (context) {
       if (context.length > 255) throw err('ERR_OUT_OF_RANGE', 'context string must be at most 255 bytes');
-      if (context.length > 0 && !isEdKind(a.kind)) throw err('ERR_CRYPTO_OPERATION_FAILED', 'Context parameter is unsupported');
+      if (context.length > 0 && !isEdKind(a.kind) && !('pq' in a && PQ[a.kind].family !== 'ml-kem')) throw err('ERR_CRYPTO_OPERATION_FAILED', 'Context parameter is unsupported');
+    }
+    if ('pq' in a) {
+      // ML-DSA / SLH-DSA sign the message (FIPS 204/205 pure mode); ML-KEM keys do not sign
+      if (PQ[a.kind].family === 'ml-kem') throw notSupportedForKeyType();
+      if (algo) throw osslError('1C80007A', 'Provider routines', 'invalid digest', 'ERR_OSSL_INVALID_DIGEST');
+      if (signMode === 0) return toArrayBuffer(pqSign(a.pq, data, context));
+      return !!signature && pqVerify(a.pq, data, signature, context);
     }
     if (isXKind(a.kind)) throw notSupportedForKeyType();
     if (isEdKind(a.kind)) {
@@ -547,7 +571,6 @@ function keyPairEncoder(enc: any[]) {
         return o;
       }
       if (format === kKeyFormatRawPublic || format === kKeyFormatRawPrivate || format === kKeyFormatRawSeed) {
-        if (format === kKeyFormatRawSeed) throw incompatible();
         return toBuffer(exportRaw(data, format, kt).slice());
       }
       const out = type === 1 ? writePublic(asym, format as number, kt as number) : writePrivate(asym, format as number, kt as number, cipher, pass);
@@ -563,6 +586,18 @@ function keyPairEncoder(enc: any[]) {
 export const NamedKeyPairGenJob = jobClass('NamedKeyPairGenJob', (_async, name: unknown, ...enc: any[]) => {
   // generateKeyPair() takes the lower-case key type; crypto.subtle the algorithm name (Ed25519)
   const kind = (isWebCryptoJob() ? String(name).toLowerCase() : String(name)) as OkpKind;
+  if (typeof name === 'string' && isPqKind(kind)) {
+    const encodePq = keyPairEncoder(enc);
+    return () =>
+      encodePq({
+        kind: kind as unknown as PqKind,
+        pq: pqGenerate(kind, (n) => {
+          const r = new Uint8Array(n);
+          fillRandom(r);
+          return r;
+        }),
+      });
+  }
   if (typeof name !== 'string' || !Object.prototype.hasOwnProperty.call(OKP, kind)) {
     throw err('ERR_INVALID_ARG_VALUE', `The argument 'type' must be a supported key type. Received '${String(name)}'`);
   }
@@ -875,25 +910,37 @@ function publicDecrypt(...args: any[]) {
   throw osslError('1C8000A5', 'Provider routines', 'illegal or unsupported padding mode', 'ERR_OSSL_ILLEGAL_OR_UNSUPPORTED_PADDING_MODE');
 }
 
-// new KEMEncapsulateJob(mode, key ×5) / new KEMDecapsulateJob(mode, key ×5, ciphertext): the key
-// types with a KEM (ML-KEM, and RSA/EC/X25519 through OpenSSL's RSASVE/DHKEM) are not implemented,
-// so a valid key is an unsupported one
+// new KEMEncapsulateJob(mode, key ×5) → [sharedKey, ciphertext] (WebCrypto: {sharedKey, ciphertext})
+// new KEMDecapsulateJob(mode, key ×5, ciphertext) → sharedKey: ML-KEM, and the DHKEM (RFC 9180) /
+// RSASVE (SP 800-56B) KEMs OpenSSL 3 provides for EC, X25519/X448 and RSA keys
 export const KEMEncapsulateJob = jobClass('KEMEncapsulateJob', (_async, ...args: any[]) => {
-  anyKeyArg(args, 0);
+  const a = asymOf(anyKeyArg(args, 0));
+  const webcrypto = isWebCryptoJob();
   return () => {
-    throw notSupportedForKeyType();
+    let r: [Uint8Array, Uint8Array] | null;
+    if ('pq' in a) r = PQ[a.kind].family === 'ml-kem' ? pqEncapsulate(a.pq) : null;
+    else r = dhkemEncapsulate(a);
+    if (!r) throw err('ERR_CRYPTO_OPERATION_FAILED', 'Encapsulation failed');
+    if (webcrypto) return { sharedKey: toArrayBuffer(r[0]), ciphertext: toArrayBuffer(r[1]) };
+    return [toBuffer(r[0].slice()), toBuffer(r[1].slice())];
   };
 });
-export const KEMDecapsulateJob = jobClass('KEMDecapsulateJob', (_async, ...args: any[]) => {
-  privateKeyArg(args, 0);
+export const KEMDecapsulateJob = jobClass('KEMDecapsulateJob', (async, ...args: any[]) => {
+  const a = asymOf(privateKeyArg(args, 0));
+  const ct = async ? view(args[5]).slice() : view(args[5]);
+  const webcrypto = isWebCryptoJob();
   return () => {
-    throw notSupportedForKeyType();
+    let secret: Uint8Array | null;
+    if ('pq' in a) secret = PQ[a.kind].family === 'ml-kem' ? pqDecapsulate(a.pq, ct) : null;
+    else secret = dhkemDecapsulate(a, ct);
+    if (!secret) throw err('ERR_CRYPTO_OPERATION_FAILED', 'Decapsulation failed');
+    return webcrypto ? toArrayBuffer(secret) : toBuffer(secret.slice());
   };
 });
 
-/** isKeyAlgorithmAvailable(name): the key types this binding can create (no ML-DSA / ML-KEM). */
+/** isKeyAlgorithmAvailable(name): the key types this binding can create. */
 function isKeyAlgorithmAvailable(name: unknown): boolean {
-  return typeof name === 'string' && Object.prototype.hasOwnProperty.call(OKP, name.toLowerCase());
+  return typeof name === 'string' && (Object.prototype.hasOwnProperty.call(OKP, name.toLowerCase()) || isPqKind(name.toLowerCase()));
 }
 
 export const asymmetric: Record<string, unknown> = {

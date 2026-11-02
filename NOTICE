@@ -12,7 +12,7 @@ Bundled into the runtime (dist/)
 - Brotli 1.1.0 (compiled to WebAssembly, with the decoder change Node.js carries in
   deps/brotli) — MIT. https://github.com/google/brotli
 - Zstandard (compiled to WebAssembly) — BSD-3-Clause. https://github.com/facebook/zstd
-- @noble/ciphers, @noble/curves, @noble/hashes — MIT. https://paulmillr.com/noble/
+- @noble/ciphers, @noble/curves, @noble/hashes, @noble/post-quantum — MIT. https://paulmillr.com/noble/
 - amaro 1.1.8 (Node.js's TypeScript type stripper; swc compiled to WebAssembly) — MIT, and
   Apache-2.0 for swc. Shipped as dist/runtime/amaro.js with
   dist/runtime/AMARO-LICENSE.txt. https://github.com/nodejs/amaro
