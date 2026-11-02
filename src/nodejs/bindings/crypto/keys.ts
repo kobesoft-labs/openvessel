@@ -8,7 +8,7 @@
 import { Enc, decode } from '../buffer.ts';
 import { S } from '../../state.ts';
 import type { Asym } from './asymkeys.ts';
-import { err, fillRandom, isAnyBufferSource, isWebCryptoJob, jobClass, stringOrBuffer, toBuffer, view } from './util.ts';
+import { copy, err, fillRandom, isAnyBufferSource, isWebCryptoJob, jobClass, stringOrBuffer, toBuffer, view } from './util.ts';
 
 export const kKeyTypeSecret = 0;
 export const kKeyTypePublic = 1;
@@ -77,7 +77,7 @@ export function base64Decode(s: string): Uint8Array {
 /** ImportJWKSecretKey */
 function jwkSecret(jwk: any): Uint8Array {
   if (!jwk || typeof jwk !== 'object' || typeof jwk.k !== 'string') throw err('ERR_CRYPTO_INVALID_JWK', 'Invalid JWK secret key format');
-  return base64Decode(jwk.k).slice();
+  return copy(base64Decode(jwk.k));
 }
 
 export class KeyObjectHandle {
@@ -91,7 +91,7 @@ export class KeyObjectHandle {
         return kKeyTypeSecret;
       }
       const d = keyDataOf(args[0]);
-      this.data = { type: 0, secret: d?.type === 0 ? d.secret : view(args[0]).slice() };
+      this.data = { type: 0, secret: d?.type === 0 ? d.secret : copy(view(args[0])) };
       return undefined;
     }
     this.data = asym().init(type, args);
@@ -116,7 +116,7 @@ export class KeyObjectHandle {
   }
 
   export(...args: any[]) {
-    if (this.data.type === 0) return toBuffer(this.data.secret.slice());
+    if (this.data.type === 0) return toBuffer(copy(this.data.secret));
     return asym().export(this.data, args);
   }
 
@@ -131,27 +131,27 @@ export class KeyObjectHandle {
   }
 
   rawPublicKey() {
-    return toBuffer(asym().rawPublicKey(this.data).slice());
+    return toBuffer(copy(asym().rawPublicKey(this.data)));
   }
 
   rawPrivateKey() {
-    return toBuffer(asym().rawPrivateKey(this.data).slice());
+    return toBuffer(copy(asym().rawPrivateKey(this.data)));
   }
 
   rawSeed() {
-    return toBuffer(asym().rawSeed(this.data).slice());
+    return toBuffer(copy(asym().rawSeed(this.data)));
   }
 
   exportECPublicRaw(form: number) {
-    return toBuffer(asym().exportECPublicRaw(this.data, form).slice());
+    return toBuffer(copy(asym().exportECPublicRaw(this.data, form)));
   }
 
   exportECPrivateRaw() {
-    return toBuffer(asym().exportECPrivateRaw(this.data).slice());
+    return toBuffer(copy(asym().exportECPrivateRaw(this.data)));
   }
 
   exportECPrivatePkcs8() {
-    return toBuffer(asym().exportECPrivatePkcs8(this.data).slice());
+    return toBuffer(copy(asym().exportECPrivatePkcs8(this.data)));
   }
 
   keyDetail(target: any) {
@@ -267,7 +267,7 @@ export function createCryptoKeyClass(callback: (base: Function) => unknown) {
         usagesMask: (usagesMask as number) >>> 0,
         extractable: extractable === true,
         secondaryHandle: secondaryHandle instanceof KeyObjectHandle ? secondaryHandle : undefined,
-        seedData: isAnyBufferSource(seedData) ? view(seedData).slice() : undefined,
+        seedData: isAnyBufferSource(seedData) ? copy(view(seedData)) : undefined,
       });
     }
   }
@@ -280,7 +280,7 @@ export function createCryptoKeyClass(callback: (base: Function) => unknown) {
 export function getCryptoKeySlots(key: unknown) {
   const s = key && typeof key === 'object' ? nativeCryptoKeys.get(key) : undefined;
   if (!s) throw invalidThis('CryptoKey');
-  return [s.handle.data.type, s.extractable, s.algorithm, s.usagesMask, s.handle, s.secondaryHandle, s.seedData?.slice().buffer];
+  return [s.handle.data.type, s.extractable, s.algorithm, s.usagesMask, s.handle, s.secondaryHandle, (s.seedData && copy(s.seedData).buffer)];
 }
 
 export function isCryptoKey(v: unknown): boolean {
@@ -329,7 +329,7 @@ export function registerCloneHook(kind: string, hook: CloneHook) {
 }
 
 function keyBytes(d: KeyData): Uint8Array {
-  return d.type === 0 ? d.secret.slice() : asym().toDer(d);
+  return d.type === 0 ? copy(d.secret) : asym().toDer(d);
 }
 
 function keyFromBytes(type: 0 | 1 | 2, data: Uint8Array): KeyObjectHandle {
@@ -344,8 +344,10 @@ export function cloneKeyObject(v: unknown): KeyObjectClone | undefined {
   const ck = nativeCryptoKeys.get(v);
   if (ck) {
     // the algorithm dictionary is a null-prototype object; structured clone makes it a plain one
-    const algorithm = { ...ck.algorithm };
-    if (algorithm.hash) algorithm.hash = { ...algorithm.hash };
+    // (own properties only: a polluted Object.prototype must not leak in or block the copy)
+    const algorithm: Record<string, unknown> = {};
+    for (const k of Object.keys(ck.algorithm)) Object.defineProperty(algorithm, k, { value: ck.algorithm[k], enumerable: true, writable: true, configurable: true });
+    if (Object.hasOwn(algorithm, 'hash') && algorithm.hash) Object.defineProperty(algorithm, 'hash', { value: { ...(algorithm.hash as object) }, enumerable: true, writable: true, configurable: true });
     return {
       [KEY_OBJECT_CLONE]: {
         kind: 'cryptokey',
@@ -355,7 +357,7 @@ export function cloneKeyObject(v: unknown): KeyObjectClone | undefined {
         usagesMask: ck.usagesMask,
         extractable: ck.extractable,
         secondary: ck.secondaryHandle ? { type: ck.secondaryHandle.data.type, data: keyBytes(ck.secondaryHandle.data) } : undefined,
-        seedData: ck.seedData?.slice(),
+        seedData: ck.seedData && copy(ck.seedData),
       },
     };
   }
@@ -393,11 +395,14 @@ export function deserializeKeyObject(v: KeyObjectClone): object {
 // new SecretKeyGenJob(mode, lengthInBits) → KeyObjectHandle
 // new SecretKeyGenJob(kCryptoJobWebCrypto, lengthInBits, algorithm, usagesMask, extractable) → CryptoKey
 export const SecretKeyGenJob = jobClass('SecretKeyGenJob', (_async, length: number, algorithm?: unknown, usagesMask?: number, extractable?: boolean) => {
-  const bytes = Math.floor(length / 8);
+  // generateKey() drops a partial byte; WebCrypto keeps it (with the unused bits zero)
   const webcrypto = isWebCryptoJob();
+  const bytes = webcrypto ? Math.ceil(length / 8) : Math.floor(length / 8);
   return () => {
     const out = new Uint8Array(bytes);
     fillRandom(out);
+    // the bits past `length` are zero
+    if (webcrypto && length % 8) out[bytes - 1] &= 0xff << (8 - (length % 8));
     const h = secretHandle(out);
     return webcrypto ? newCryptoKey(h, algorithm, usagesMask ?? 0, extractable === true) : h;
   };

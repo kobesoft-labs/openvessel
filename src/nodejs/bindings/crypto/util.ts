@@ -102,9 +102,18 @@ export function view(v: any): Uint8Array {
   // through the intrinsic getters, as C++ reads a view: own properties may shadow them
   if (ArrayBuffer.isView(v)) {
     const g = v instanceof DataView ? dvGetters : taGetters;
-    return new Uint8Array(g.buffer.call(v), g.byteOffset.call(v), g.byteLength.call(v));
+    let len = 0;
+    try {
+      len = g.byteLength.call(v);
+    } catch {
+      // a DataView of a detached buffer throws where a typed array reads 0
+    }
+    // a view of a detached buffer reads as empty
+    if (len === 0) return new Uint8Array(0);
+    return new Uint8Array(g.buffer.call(v), g.byteOffset.call(v), len);
   }
   if (v == null) return new Uint8Array(0);
+  if ((v as ArrayBuffer).detached) return new Uint8Array(0);
   return new Uint8Array(v as ArrayBuffer);
 }
 
@@ -116,8 +125,11 @@ export function stringOrBuffer(v: unknown): Uint8Array {
   return view(v);
 }
 
+/** A copy that ignores Uint8Array[Symbol.species] (which slice() would honor). */
 export function copy(u: Uint8Array): Uint8Array {
-  return u.slice();
+  const out = new Uint8Array(u.length);
+  out.set(u);
+  return out;
 }
 
 export function concat(parts: Uint8Array[]): Uint8Array {
@@ -233,13 +245,29 @@ export function toBuffer(u: Uint8Array): Uint8Array {
 /** An ArrayBuffer holding exactly these bytes. */
 export function toArrayBuffer(u: Uint8Array): ArrayBuffer {
   if (u.byteOffset === 0 && u.byteLength === u.buffer.byteLength && u.buffer instanceof ArrayBuffer) return u.buffer;
-  return u.slice().buffer;
+  return copy(u).buffer as ArrayBuffer;
 }
 
 // -----------------------------------------------------------------------------
 // CryptoJob
 
 type Work = () => unknown;
+
+/**
+ * Runs binding code the way C++ runs: unaffected by a script's Uint8Array[Symbol.species]
+ * (TypedArray#slice/subarray here would otherwise build the script's class). It is set aside for the
+ * synchronous call and put back after.
+ */
+export function nativeRealm<T>(fn: () => T): T {
+  const own = Object.getOwnPropertyDescriptor(Uint8Array, Symbol.species);
+  if (!own) return fn();
+  delete (Uint8Array as any)[Symbol.species];
+  try {
+    return fn();
+  } finally {
+    Object.defineProperty(Uint8Array, Symbol.species, own);
+  }
+}
 
 /** The mode of the job whose arguments are being configured (jobs that build CryptoKeys in WebCrypto mode read it). */
 let configuringMode = kCryptoJobSync;
@@ -293,7 +321,7 @@ export function jobClass(name: string, configure: (async: boolean, ...args: any[
       const work = this.#work;
       if (this.#mode === kCryptoJobSync) {
         try {
-          return [undefined, work()];
+          return [undefined, nativeRealm(work)];
         } catch (e) {
           return [e, undefined];
         }
@@ -310,7 +338,7 @@ export function jobClass(name: string, configure: (async: boolean, ...args: any[
         let error: unknown;
         let result: unknown;
         try {
-          result = work();
+          result = nativeRealm(work);
         } catch (e) {
           error = e;
           result = undefined;

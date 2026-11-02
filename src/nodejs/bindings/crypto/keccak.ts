@@ -35,6 +35,6 @@ export const KmacJob = jobClass('KmacJob', (async, signMode: number, keyHandle: 
     const bytes = Math.floor(length / 8);
     const mac = bytes === 0 ? new Uint8Array(0) : fn(key, input, { dkLen: bytes, ...(personalization ? { personalization } : {}) });
     if (signMode === 0) return toArrayBuffer(mac);
-    return !!sig && mac.length > 0 && equalBytes(mac, sig);
+    return !!sig && equalBytes(mac, sig);
   };
 });

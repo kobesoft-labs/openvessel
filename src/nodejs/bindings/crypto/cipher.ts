@@ -1139,7 +1139,8 @@ export class CipherBase {
     if (info.mode === 'ccm') {
       // CCM processes the whole text in one update()
       if (this.#ccmUpdated) {
-        this.#ccmBroken = true;
+        // (encrypting, the tag is lost; decrypting, the first update already verified)
+        if (this.#encrypt) this.#ccmBroken = true;
         throw cryptoError('Trying to add data in unsupported state');
       }
       this.#ccmUpdated = true;

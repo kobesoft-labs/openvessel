@@ -122,7 +122,6 @@ export const AESCipherJob = jobClass('AESCipherJob', (async, cipherMode: number,
   if (typeof rest[1] !== 'number' || rest[1] > 16) throw err('ERR_CRYPTO_INVALID_TAG_LENGTH');
   const tagLen = rest[1];
   const aad = isAnyBufferSource(rest[2]) ? copy(view(rest[2])) : null;
-  if (mode === 'gcm' && iv.length < 12) throw err('ERR_CRYPTO_INVALID_IV');
   return () => {
     if (secret.length * 8 !== bits) throw cipherJobFailed();
     return aead(`aes-${bits}-${mode}`, encrypt, secret, iv, input, tagLen, aad);
