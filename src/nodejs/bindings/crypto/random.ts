@@ -13,6 +13,13 @@ export const RandomBytesJob = jobClass('RandomBytesJob', (_async, buffer: unknow
   };
 });
 
+// randomFillSync(buffer, offset, size): Node 24+ fills synchronously without a job (lib checked the bounds)
+export function randomFillSync(buffer: unknown, offset: number, size: number) {
+  const target = view(buffer);
+  if (offset + size > target.length) throw new RangeError('randomFillSync: out of bounds');
+  fillRandom(target.subarray(offset, offset + size));
+}
+
 // -----------------------------------------------------------------------------
 // BigInt arithmetic
 
@@ -140,7 +147,7 @@ function sieveSearch(start: bigint, step: bigint, bits: number, safe: boolean, c
 
 /** BN_generate_prime_ex2 */
 export function generatePrime(bits: number, safe: boolean, add?: bigint, rem?: bigint, checks = 0): bigint {
-  if (bits < 2 || (bits === 2 && safe)) throw cryptoError('error:01800076:bignum routines::bits too small');
+  if (bits < 2 || (bits === 2 && safe)) throw osslError('01800076', 'bignum routines', 'bits too small', 'ERR_OSSL_BN_BITS_TOO_SMALL');
   if (bits <= 16) {
     // small enough to try every candidate directly
     const check = (p: bigint) => isProbablePrime(p, checks) && (!safe || isProbablePrime((p - 1n) >> 1n, checks));

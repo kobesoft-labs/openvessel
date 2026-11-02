@@ -7,6 +7,7 @@ import { S } from '../../state.ts';
 
 export const kCryptoJobAsync = 0;
 export const kCryptoJobSync = 1;
+export const kCryptoJobWebCrypto = 2;
 
 // -----------------------------------------------------------------------------
 // errors
@@ -41,6 +42,9 @@ const DEFAULTS: Record<string, [ErrCtor, string]> = {
   ERR_CRYPTO_UNKNOWN_DH_GROUP: [Error, 'Unknown DH group'],
   ERR_CRYPTO_UNSUPPORTED_OPERATION: [Error, 'Unsupported crypto operation'],
   ERR_CRYPTO_JOB_INIT_FAILED: [Error, 'Failed to initialize crypto job config'],
+  ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS: [Error, 'The selected key encoding is incompatible with the key type'],
+  ERR_INVALID_THIS: [TypeError, 'Invalid this'],
+  ERR_CRYPTO_INVALID_MAC: [TypeError, 'Invalid MAC'],
   ERR_INVALID_ARG_TYPE: [TypeError, 'Invalid argument type'],
   ERR_INVALID_ARG_VALUE: [TypeError, 'Invalid argument value'],
   ERR_MISSING_ARGS: [TypeError, 'Missing arguments'],
@@ -83,12 +87,23 @@ export function isAnyBufferSource(v: unknown): boolean {
   return ArrayBuffer.isView(v) || v instanceof ArrayBuffer || (typeof SharedArrayBuffer !== 'undefined' && v instanceof SharedArrayBuffer) || Object.prototype.toString.call(v) === '[object ArrayBuffer]';
 }
 
+const getters = (proto: object) => {
+  const g = (k: string) => Object.getOwnPropertyDescriptor(proto, k)!.get!;
+  return { buffer: g('buffer'), byteOffset: g('byteOffset'), byteLength: g('byteLength') };
+};
+const taGetters = getters(Object.getPrototypeOf(Uint8Array.prototype));
+const dvGetters = getters(DataView.prototype);
+
 /**
  * A plain Uint8Array view over an ArrayBuffer, SharedArrayBuffer or any ArrayBufferView (no copy).
  * Always a fresh plain Uint8Array, never a Buffer: Buffer#slice() does not copy.
  */
 export function view(v: any): Uint8Array {
-  if (ArrayBuffer.isView(v)) return new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+  // through the intrinsic getters, as C++ reads a view: own properties may shadow them
+  if (ArrayBuffer.isView(v)) {
+    const g = v instanceof DataView ? dvGetters : taGetters;
+    return new Uint8Array(g.buffer.call(v), g.byteOffset.call(v), g.byteLength.call(v));
+  }
   if (v == null) return new Uint8Array(0);
   return new Uint8Array(v as ArrayBuffer);
 }
@@ -226,10 +241,25 @@ export function toArrayBuffer(u: Uint8Array): ArrayBuffer {
 
 type Work = () => unknown;
 
+/** The mode of the job whose arguments are being configured (jobs that build CryptoKeys in WebCrypto mode read it). */
+let configuringMode = kCryptoJobSync;
+export function isWebCryptoJob(): boolean {
+  return configuringMode === kCryptoJobWebCrypto;
+}
+
+/** The OperationError DOMException a rejected WebCrypto job settles with (the job error as its cause). */
+function operationError(cause: unknown): unknown {
+  const D = S.perContextExports.DOMException;
+  if (!D) return cause;
+  return new D('The operation failed for an operation-specific reason', { name: 'OperationError', cause });
+}
+
 /**
  * Builds a CryptoJob class. `configure(async, ...args)` validates the arguments (throwing like
  * AdditionalConfig does) and returns the work to run; the work returns the result or throws the
- * job error. Async jobs copy their inputs in `configure` (Node's ToCopy) when `async` is true.
+ * job error. Async jobs copy their inputs in `configure` (Node's ToCopy) when `async` is true, which
+ * includes WebCrypto jobs (Node 24+): those also run on a later turn, but run() hands back a promise
+ * instead of calling ondone, rejecting with an OperationError whose cause is the job error.
  */
 export function jobClass(name: string, configure: (async: boolean, ...args: any[]) => Work): any {
   // the AsyncWrap provider, e.g. PBKDF2Job → PBKDF2REQUEST
@@ -242,8 +272,14 @@ export function jobClass(name: string, configure: (async: boolean, ...args: any[
     ondone?: (err: unknown, result: unknown) => void;
     constructor(mode: number, ...args: any[]) {
       this.#mode = mode;
-      this.#work = configure(mode === kCryptoJobAsync, ...args);
-      if (mode === kCryptoJobAsync) {
+      const prev = configuringMode;
+      configuringMode = mode;
+      try {
+        this.#work = configure(mode !== kCryptoJobSync, ...args);
+      } finally {
+        configuringMode = prev;
+      }
+      if (mode !== kCryptoJobSync) {
         // AsyncWrap: an async id and the init hook (domains and async_hooks see the request)
         const hooks = asyncHooks();
         if (hooks) {
@@ -255,13 +291,20 @@ export function jobClass(name: string, configure: (async: boolean, ...args: any[
     }
     run() {
       const work = this.#work;
-      if (this.#mode !== kCryptoJobAsync) {
+      if (this.#mode === kCryptoJobSync) {
         try {
           return [undefined, work()];
         } catch (e) {
           return [e, undefined];
         }
       }
+      let settle: ((ok: boolean, v: unknown) => void) | undefined;
+      const promise =
+        this.#mode === kCryptoJobWebCrypto
+          ? new Promise((resolve, reject) => {
+              settle = (ok, v) => (ok ? resolve(v) : reject(v));
+            })
+          : undefined;
       const done = startReq('CRYPTO');
       macrotask(() => {
         let error: unknown;
@@ -275,14 +318,15 @@ export function jobClass(name: string, configure: (async: boolean, ...args: any[
         done();
         const hooks = this.#asyncId ? asyncHooks() : null;
         if (hooks) hooks.emitBefore(this.#asyncId, this.#triggerId, this);
-        if (typeof this.ondone === 'function') scope(this.ondone, this, error, result);
+        if (settle) scope(() => (error === undefined ? settle!(true, result) : settle!(false, operationError(error))));
+        else if (typeof this.ondone === 'function') scope(this.ondone, this, error, result);
         if (hooks) {
           // a handled uncaught exception has already emitted the after hooks
           if (hooks.executionAsyncId() === this.#asyncId) hooks.emitAfter(this.#asyncId);
           hooks.emitDestroy(this.#asyncId);
         }
       });
-      return undefined;
+      return promise;
     }
   };
   Object.defineProperty(C, 'name', { value: name });

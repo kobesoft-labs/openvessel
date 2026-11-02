@@ -1,12 +1,13 @@
-// crypto_x509.cc: parseX509() and the X509Certificate handle, over a DER reading of the
+// crypto_x509.cc: NativeX509Certificate (the base of X509Certificate), over a DER reading of the
 // certificate (RFC 5280). Names and extensions are formatted the way Node prints them with OpenSSL.
 
 import { type Node, DerError, children, expect, fromPem, parse, read, readBitString, readOid, toPem } from './asn1.ts';
 import { readSpki } from './asymkeys.ts';
 import { verifyDigest } from './asym.ts';
 import { digestOnce, getDigest } from './digests.ts';
-import { KeyObjectHandle, keyDataOf } from './keys.ts';
+import { KeyObjectHandle, keyDataOf, registerCloneHook } from './keys.ts';
 import { err, osslError, toBuffer } from './util.ts';
+import { S } from '../../state.ts';
 
 // OBJ_nid2sn for the attribute types of names
 const NAME_SN: Record<string, string> = {
@@ -50,6 +51,27 @@ const SIG_DIGESTS: Record<string, { digest: string; pss?: boolean }> = {
   '1.2.840.10045.4.3.2': { digest: 'sha256' },
   '1.2.840.10045.4.3.3': { digest: 'sha384' },
   '1.2.840.10045.4.3.4': { digest: 'sha512' },
+};
+
+// OBJ_nid2ln of the usual certificate signature algorithms
+const SIG_NAMES: Record<string, string> = {
+  '1.2.840.113549.1.1.4': 'md5WithRSAEncryption',
+  '1.2.840.113549.1.1.5': 'sha1WithRSAEncryption',
+  '1.2.840.113549.1.1.10': 'rsassaPss',
+  '1.2.840.113549.1.1.14': 'sha224WithRSAEncryption',
+  '1.2.840.113549.1.1.11': 'sha256WithRSAEncryption',
+  '1.2.840.113549.1.1.12': 'sha384WithRSAEncryption',
+  '1.2.840.113549.1.1.13': 'sha512WithRSAEncryption',
+  '1.2.840.10045.4.1': 'ecdsa-with-SHA1',
+  '1.2.840.10045.4.3.1': 'ecdsa-with-SHA224',
+  '1.2.840.10045.4.3.2': 'ecdsa-with-SHA256',
+  '1.2.840.10045.4.3.3': 'ecdsa-with-SHA384',
+  '1.2.840.10045.4.3.4': 'ecdsa-with-SHA512',
+  '1.2.840.10040.4.3': 'dsaWithSHA1',
+  '2.16.840.1.101.3.4.3.1': 'dsa_with_SHA224',
+  '2.16.840.1.101.3.4.3.2': 'dsa_with_SHA256',
+  '1.3.101.112': 'ED25519',
+  '1.3.101.113': 'ED448',
 };
 
 interface NameEntry {
@@ -317,10 +339,28 @@ function wildcardMatch(pattern: string, host: string, flags: number): boolean {
 const kAlwaysCheckSubject = 1;
 const kNeverCheckSubject = 32;
 
-class X509Handle {
+/** A parsed certificate handed out by tls_wrap / getIssuerCert, for `new InternalX509Certificate(ref)`. */
+class CertRef {
+  constructor(readonly cert: Cert) {}
+}
+
+/**
+ * NativeX509Certificate (Node 24+): the base class lib's InternalX509Certificate extends. It is
+ * constructed from certificate bytes or from a certificate the binding handed out; lib calls the
+ * prototype methods with the certificate as `this`.
+ */
+class NativeX509Certificate {
   #c: Cert;
-  constructor(c: Cert) {
-    this.#c = c;
+  constructor(src: unknown) {
+    if (src instanceof CertRef) this.#c = src.cert;
+    else if (ArrayBuffer.isView(src)) this.#c = certFromBytes(new Uint8Array(src.buffer, src.byteOffset, src.byteLength));
+    else throw err('ERR_INVALID_ARG_TYPE', 'The "buffer" argument must be an instance of ArrayBufferView.');
+  }
+  static isCert(v: unknown): boolean {
+    return !!v && typeof v === 'object' && #c in v;
+  }
+  static certOf(v: NativeX509Certificate): Cert {
+    return v.#c;
   }
   subject() {
     return nameString(this.#c.subject);
@@ -400,7 +440,7 @@ class X509Handle {
     for (const g of sanEntries(this.#c)) if (g.tag === 0x87 && ipString(g.value).toLowerCase() === canonicalIP(ip)) return ip;
     return undefined;
   }
-  checkIssued(other: X509Handle) {
+  checkIssued(other: NativeX509Certificate) {
     return equalBytes(this.#c.issuerDer, other.#c.subjectDer);
   }
   checkPrivateKey(key: unknown) {
@@ -420,6 +460,13 @@ class X509Handle {
     if (!alg) return false;
     const md = getDigest(alg.digest)!;
     return verifyDigest(d.asym, md, digestOnce(md, this.#c.tbs), this.#c.signature, undefined, undefined);
+  }
+  /** OBJ_nid2ln of the signature algorithm; undefined for an OID OpenSSL has no name for */
+  signatureAlgorithm() {
+    return SIG_NAMES[this.#c.sigOid];
+  }
+  signatureAlgorithmOid() {
+    return this.#c.sigOid;
   }
   getIssuerCert() {
     return undefined;
@@ -506,14 +553,33 @@ export function certFromBytes(bytes: Uint8Array): Cert {
   }
 }
 
-export function x509Handle(c: Cert): X509Handle {
-  return new X509Handle(c);
+/** What getX509Certificate() / getPeerX509Certificate() hand to `new InternalX509Certificate()`. */
+export function x509Handle(c: Cert): CertRef {
+  return new CertRef(c);
 }
 
-/** internalBinding('crypto').parseX509 */
-export function parseX509(buffer: unknown) {
-  if (!ArrayBuffer.isView(buffer)) throw err('ERR_INVALID_ARG_TYPE', 'The "buffer" argument must be an instance of ArrayBufferView.');
-  return new X509Handle(certFromBytes(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)));
+/** [X509Certificate, InternalX509Certificate] as lib/internal/crypto/x509 returned them. */
+let x509Classes: [Function, new (src: unknown) => object] | null = null;
+
+/** internalBinding('crypto').createX509CertificateClass(callback) */
+export function createX509CertificateClass(callback: (base: Function) => unknown) {
+  const classes = callback(NativeX509Certificate);
+  if (Array.isArray(classes)) x509Classes = classes as typeof x509Classes;
+  return classes;
 }
+
+export function isX509Certificate(v: unknown): boolean {
+  return NativeX509Certificate.isCert(v);
+}
+
+// X509Certificate is a cloneable BaseObject: it crosses threads as its DER bytes
+registerCloneHook('x509', {
+  clone: (v) => (NativeX509Certificate.isCert(v) ? { der: NativeX509Certificate.certOf(v as NativeX509Certificate).der.slice() } : undefined),
+  revive(rec) {
+    if (!x509Classes) S.requireBuiltin?.('internal/crypto/x509');
+    if (!x509Classes) throw err('ERR_CRYPTO_UNSUPPORTED_OPERATION', 'X509Certificate is not set up in this thread');
+    return new x509Classes[1](new CertRef(certFromBytes(new Uint8Array(rec.der))));
+  },
+});
 
 export type { Cert };

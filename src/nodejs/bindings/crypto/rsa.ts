@@ -137,7 +137,7 @@ function randomNonZero(n: number): Uint8Array {
   return out;
 }
 
-export function oaepEncrypt(k: RsaKey, algo: DigestAlgo, label: Uint8Array, msg: Uint8Array): Uint8Array {
+export function oaepEncrypt(k: RsaKey, algo: DigestAlgo, label: Uint8Array, msg: Uint8Array, mgfAlgo: DigestAlgo = algo): Uint8Array {
   const kLen = byteLen(k);
   const hLen = algo.size;
   if (msg.length > kLen - 2 * hLen - 2) throw rsaErr.dataTooLarge();
@@ -148,23 +148,23 @@ export function oaepEncrypt(k: RsaKey, algo: DigestAlgo, label: Uint8Array, msg:
   db.set(msg, db.length - msg.length);
   const seed = new Uint8Array(hLen);
   fillRandom(seed);
-  const dbMask = mgf1(algo, seed, db.length);
+  const dbMask = mgf1(mgfAlgo, seed, db.length);
   for (let i = 0; i < db.length; i++) db[i] ^= dbMask[i];
-  const seedMask = mgf1(algo, db, hLen);
+  const seedMask = mgf1(mgfAlgo, db, hLen);
   for (let i = 0; i < hLen; i++) seed[i] ^= seedMask[i];
   return rawPublic(k, concat([Uint8Array.of(0), seed, db]));
 }
 
-export function oaepDecrypt(k: RsaKey, algo: DigestAlgo, label: Uint8Array, ct: Uint8Array): Uint8Array {
+export function oaepDecrypt(k: RsaKey, algo: DigestAlgo, label: Uint8Array, ct: Uint8Array, mgfAlgo: DigestAlgo = algo): Uint8Array {
   const kLen = byteLen(k);
   const hLen = algo.size;
   if (ct.length !== kLen || kLen < 2 * hLen + 2) throw rsaErr.oaepDecoding();
   const em = rawPrivate(k, ct);
   const seed = em.slice(1, 1 + hLen);
   const db = em.slice(1 + hLen);
-  const seedMask = mgf1(algo, db, hLen);
+  const seedMask = mgf1(mgfAlgo, db, hLen);
   for (let i = 0; i < hLen; i++) seed[i] ^= seedMask[i];
-  const dbMask = mgf1(algo, seed, db.length);
+  const dbMask = mgf1(mgfAlgo, seed, db.length);
   for (let i = 0; i < db.length; i++) db[i] ^= dbMask[i];
   const lHash = digestOnce(algo, label);
   let ok = em[0] === 0 && equalBytes(db.subarray(0, hLen), lHash);

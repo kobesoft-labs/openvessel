@@ -96,6 +96,7 @@ for (const m of [
   'setOptions',
   'setSessionIdContext',
   'setSessionTimeout',
+  'setCertificateCompression', // Node 26: RFC 8879 algorithms, packed by lib
   'close',
   'setTicketKeys',
   'enableTicketKeyCallback',
@@ -284,6 +285,10 @@ class TLSWrap extends LibuvStreamWrap {
     // the browser verified the certificate (or the connection stays inside the runtime)
     return null;
   }
+  /** Node 26: whether the other end presented a certificate (an outside peer: the browser checked one) */
+  hasPeerCertificate() {
+    return this.#peer ? this.#peer.length > 0 : true;
+  }
   getPeerCertificate(detailed?: boolean) {
     // the other end inside the runtime: its own certificate (none presented: undefined)
     if (this.#peer) return this.#peer.length ? (detailed ? detailedLegacy(this.#peer) : legacyObject(this.#peer[0])) : undefined;
@@ -362,6 +367,7 @@ for (const m of [
   'loadSession',
   'newSessionDone',
   'certCbDone',
+  'clientHelloDone', // Node 26: the handshake waits for it after a server's clienthello
   'requestOCSP',
   'setOCSPResponse',
   'setKeyCert',

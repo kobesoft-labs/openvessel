@@ -3,7 +3,7 @@
 
 import { md5, sha1, ripemd160 } from '@noble/hashes/legacy.js';
 import { sha224, sha256, sha384, sha512, sha512_224, sha512_256 } from '@noble/hashes/sha2.js';
-import { sha3_224, sha3_256, sha3_384, sha3_512, shake128, shake256 } from '@noble/hashes/sha3.js';
+import { Keccak, keccak_224, keccak_256, keccak_384, keccak_512, sha3_224, sha3_256, sha3_384, sha3_512, shake128, shake256 } from '@noble/hashes/sha3.js';
 import { blake2b, blake2s } from '@noble/hashes/blake2.js';
 import { pbkdf2 as noblePbkdf2 } from '@noble/hashes/pbkdf2.js';
 import { SM3 } from './sm3.ts';
@@ -95,7 +95,20 @@ export const ALGOS: DigestAlgo[] = [
   { id: 16, name: 'MD5-SHA1', size: 36, block: 64, create: md5sha1 },
   nobleAlgo(17, 'SHAKE128', shake128, 16),
   nobleAlgo(18, 'SHAKE256', shake256, 32),
+  // OpenSSL 3.5 providers (Node 24+ lists provider digests too)
+  { id: 19, name: 'SHA2-256/192', size: 24, block: 64, create: () => truncated(sha256.create(), 24) },
+  nobleAlgo(20, 'KECCAK-224', keccak_224),
+  nobleAlgo(21, 'KECCAK-256', keccak_256),
+  nobleAlgo(22, 'KECCAK-384', keccak_384),
+  nobleAlgo(23, 'KECCAK-512', keccak_512),
+  // the Keccak sponge KMAC runs on (cSHAKE's 0x04 padding, no function name/customization)
+  { id: 24, name: 'KECCAK-KMAC-128', size: 32, block: 168, xof: true, create: () => wrapNoble(new Keccak(168, 0x04, 32, true), true) },
+  { id: 25, name: 'KECCAK-KMAC-256', size: 64, block: 136, xof: true, create: () => wrapNoble(new Keccak(136, 0x04, 64, true), true) },
 ];
+
+function truncated(h: any, len: number): Ctx {
+  return { update: (d) => h.update(d), final: () => h.digest().slice(0, len), clone: () => truncated(h.clone(), len) };
+}
 
 // Names accepted by EVP_get_digestbyname (case-insensitive) beyond the alias cache.
 const EXTRA: Record<string, number> = {
@@ -142,6 +155,14 @@ export const HASH_NAMES = [
   'sha3-512', 'sha384', 'sha384WithRSAEncryption', 'sha512', 'sha512-224', 'sha512-224WithRSAEncryption',
   'sha512-256', 'sha512-256WithRSAEncryption', 'sha512WithRSAEncryption', 'shake128', 'shake256', 'sm3',
   'sm3WithRSAEncryption', 'ssl3-md5', 'ssl3-sha1',
+  // Node 24+ adds the names of the digests OpenSSL's providers fetch
+  'sha3-512', 'sha512-256', 'sha2-512/256', 'sha-512/256', 'sha224', 'sha2-224', 'sha-224', 'sha1', 'sha-1',
+  'ssl3-sha1', 'sha3-224', 'sha3-384', 'ripemd160', 'ripemd-160', 'ripemd', 'rmd160', 'sha512', 'sha2-512',
+  'sha-512', 'sha512-224', 'sha2-512/224', 'sha-512/224', 'shake256', 'shake-256', 'sha384', 'sha2-384',
+  'sha-384', 'sm3', 'sha3-256', 'md5', 'ssl3-md5', 'blake2s256', 'blake2s-256', 'sha256', 'sha2-256', 'sha-256',
+  'blake2b512', 'blake2b-512', 'md5-sha1', 'shake128', 'shake-128', 'sha2-256/192', 'sha-256/192', 'sha256-192',
+  'keccak-224', 'keccak-256', 'keccak-384', 'keccak-512', 'keccak-kmac-128', 'keccak-kmac128', 'keccak-kmac-256',
+  'keccak-kmac256',
 ];
 
 /** EVP_Digest */

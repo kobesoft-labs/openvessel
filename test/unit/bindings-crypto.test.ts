@@ -215,15 +215,16 @@ function getUIntOption(options: any, key: string) {
   return -1;
 }
 
+// Node 24+: new CipherBase(isEncrypt, cipher, key, iv, authTagLength) initializes the context
 function createCipherBase(encrypt: boolean, cipher: string, key: Buffer, iv: Buffer | null, options: any) {
-  const handle = new b.CipherBase(encrypt);
-  handle.initiv(cipher, key, iv, getUIntOption(options, 'authTagLength'));
+  const handle = new b.CipherBase(encrypt, cipher, key, iv, getUIntOption(options, 'authTagLength'));
   let decoder: StringDecoder | null = null;
   const getDecoder = (encoding: string) => {
     decoder ??= new StringDecoder(encoding as BufferEncoding);
-    if ((decoder as any).encoding !== (new StringDecoder(encoding as BufferEncoding) as any).encoding) {
-      const message = 'Cannot change encoding\nThis is caused by either a bug in Node.js or incorrect usage of Node.js internals.\nPlease open an issue with this stack trace at https://github.com/nodejs/node/issues\n';
-      throw libError('ERR_INTERNAL_ASSERTION', message);
+    const normalized = (new StringDecoder(encoding as BufferEncoding) as any).encoding;
+    if ((decoder as any).encoding !== normalized) {
+      const message = `The argument 'outputEncoding' cannot be changed from '${(decoder as any).encoding}'. Received '${encoding}'`;
+      throw libError('ERR_INVALID_ARG_VALUE', message, TypeError);
     }
     return decoder;
   };
@@ -314,9 +315,10 @@ function runScript(s: any) {
 
 test('cipher scripts', () => {
   let failures = 0;
+  // XTS and the SIV modes (OpenSSL 3.2+) are not implemented; getCiphers() does not list them
   const unsupported = new Set(['aes-128-xts', 'aes-128-ocb']);
   for (const s of fx.cipher) {
-    if (unsupported.has(s.cipher)) continue;
+    if (unsupported.has(s.cipher) || /siv$/.test(s.cipher)) continue;
     const got = runScript(s);
     try {
       assert.deepEqual(got, s.results);
@@ -329,12 +331,13 @@ test('cipher scripts', () => {
 
 test('getCipherInfo', () => {
   for (const c of fx.cipherInfo) {
-    if (c.name === 'aes-128-xts') continue;
-    const ret = b.getCipherInfo({}, c.name, c.opts?.keyLength, c.opts?.ivLength);
-    if (ret) {
-      ret.name &&= ret.name.toLowerCase();
-    }
-    assert.deepEqual(ret ?? null, c.result, `${c.name} ${JSON.stringify(c.opts)}`);
+    if (c.name === 'aes-128-xts' || /siv$/.test(c.name)) continue;
+    // Node 24+: getCipherInfo(nameOrNid, keyLength, ivLength) → a null-prototype object (lib passes
+    // empty names and out-of-range NIDs over); the fixture is its JSON form
+    const n = c.name;
+    const skip = (typeof n === 'string' && n.length === 0) || (typeof n === 'number' && (!Number.isInteger(n) || n < 1));
+    const ret = skip ? undefined : b.getCipherInfo(n, c.opts?.keyLength, c.opts?.ivLength);
+    assert.deepEqual(ret === undefined ? null : JSON.parse(JSON.stringify(ret)), c.result, `${c.name} ${JSON.stringify(c.opts)}`);
   }
 });
 
@@ -394,10 +397,12 @@ test('secret keys', async () => {
   assert.ok(Buffer.isBuffer(h.export()));
   assert.deepEqual(h.exportJwk({}, false), { kty: 'oct', k: 'c2VjcmV0IQ' });
   assert.deepEqual(h.keyDetail({}), { length: 56 });
+  // Node 24+: JWK imports go through init(type, jwk, kKeyFormatJWK)
   const j = new b.KeyObjectHandle();
-  assert.equal(j.initJwk({ kty: 'oct', k: 'c2VjcmV0IQ' }), 0);
+  assert.equal(j.init(0, { kty: 'oct', k: 'c2VjcmV0IQ' }, b.kKeyFormatJWK, null, null), 0);
   assert.ok(h.equals(j));
-  assert.throws(() => new b.KeyObjectHandle().initJwk({ kty: 'oct' }), { code: 'ERR_CRYPTO_INVALID_JWK', message: 'Invalid JWK secret key format' });
+  assert.equal(j.getKeyType(), 0);
+  assert.throws(() => new b.KeyObjectHandle().init(0, { kty: 'oct' }, b.kKeyFormatJWK, null, null), { code: 'ERR_CRYPTO_INVALID_JWK', message: 'Invalid JWK secret key format' });
   const [err, key] = await runAsync(new b.SecretKeyGenJob(kAsync, 256));
   assert.equal(err, undefined);
   assert.equal(key.getSymmetricKeySize(), 32);
@@ -415,6 +420,8 @@ test('webcrypto jobs: HashJob / HmacJob', async () => {
   assert.equal(hex(d), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
   assert.equal(hex(runSync(new b.HashJob(kSync, 'shake256', Buffer.from(''), 64))), '46b9dd2b0ba88d13');
   assert.throws(() => new b.HashJob(kSync, 'sha256', Buffer.from(''), 64), { code: 'ERR_CRYPTO_INVALID_DIGEST', message: 'Digest method not supported' });
+  // Node 24+: kCryptoJobWebCrypto jobs hand back a promise, rejected with an OperationError
+  assert.equal(hex(await new b.HashJob(b.kCryptoJobWebCrypto, 'sha256', Buffer.from('abc')).run()), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
   const key = new b.KeyObjectHandle();
   key.init(0, Buffer.from('key'));
   const mac = runSync(new b.HmacJob(kSync, 0, 'sha256', key, Buffer.from('The quick brown fox jumps over the lazy dog')));

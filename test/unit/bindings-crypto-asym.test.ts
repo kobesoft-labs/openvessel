@@ -47,23 +47,15 @@ function runAsync(job: any): Promise<[any, any]> {
 const FORMAT: Record<string, number> = { der: 0, pem: 1, jwk: 2 };
 const TYPE: Record<string, number> = { pkcs1: 0, pkcs8: 1, spki: 2, sec1: 3 };
 
+// init(type, data, format, type, passphrase, namedCurve): Node 24+ imports JWKs in the binding too
 function importKey(kind: 'public' | 'private', enc: any, value: any) {
   const h = new b.KeyObjectHandle();
   if (enc.format === 'jwk') {
-    const jwk = value;
-    const isPublic = kind === 'public';
-    if (jwk.kty === 'OKP') {
-      const data = Buffer.from(isPublic ? jwk.x : jwk.d, 'base64');
-      assert.ok(h.initEDRaw(jwk.crv, data, isPublic ? 1 : 2));
-      return h;
-    }
-    const pick: any = jwk.kty === 'EC' ? { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y } : { kty: jwk.kty, n: jwk.n, e: jwk.e };
-    if (!isPublic) for (const f of jwk.kty === 'EC' ? ['d'] : ['d', 'p', 'q', 'dp', 'dq', 'qi']) pick[f] = jwk[f];
-    assert.notEqual(h.initJwk(pick, jwk.crv), undefined);
+    assert.equal(h.init(kind === 'public' ? 1 : 2, value, FORMAT.jwk, null, null, null), kind === 'public' ? 1 : 2);
     return h;
   }
   const data = typeof value === 'string' ? Buffer.from(value) : fromHex(value.hex);
-  h.init(kind === 'public' ? 1 : 2, data, FORMAT[enc.format], enc.type === undefined ? undefined : TYPE[enc.type], undefined);
+  h.init(kind === 'public' ? 1 : 2, data, FORMAT[enc.format], enc.type === undefined ? null : TYPE[enc.type], null, null);
   return h;
 }
 
@@ -170,11 +162,11 @@ const sigArgs = (o: any) => [o.saltLength, o.padding, o.dsaEncoding === 'ieee-p1
 
 function signOneShot(alg: string | null, data: Buffer, key: any, o: any) {
   const [salt, padding, dsa] = sigArgs(o);
-  return hex(runSync(new b.SignJob(kSync, b.kSignJobModeSign, key, undefined, undefined, undefined, data, alg ?? undefined, salt, padding, dsa)));
+  return hex(runSync(new b.SignJob(kSync, b.kSignJobModeSign, key, undefined, undefined, undefined, undefined, data, alg ?? undefined, salt, padding, dsa, undefined)));
 }
 function verifyOneShot(alg: string | null, data: Buffer, key: any, o: any, sig: Buffer) {
   const [salt, padding, dsa] = sigArgs(o);
-  return runSync(new b.SignJob(kSync, b.kSignJobModeVerify, key, undefined, undefined, undefined, data, alg ?? undefined, salt, padding, dsa, sig));
+  return runSync(new b.SignJob(kSync, b.kSignJobModeVerify, key, undefined, undefined, undefined, undefined, data, alg ?? undefined, salt, padding, dsa, undefined, sig));
 }
 
 const message = Buffer.from('The quick brown fox jumps over the lazy dog');
@@ -199,27 +191,27 @@ test('signatures', async () => {
       signer.init(s.alg);
       signer.update(message.subarray(0, 5));
       signer.update(message.subarray(5));
-      const got = attempt(() => hex(signer.sign(key, undefined, undefined, undefined, padding, salt, dsa)));
+      const got = attempt(() => hex(signer.sign(key, undefined, undefined, undefined, undefined, padding, salt, dsa)));
       if (s.streamSig.error) assert.deepEqual(got, s.streamSig, label + ' stream');
       else {
         if (deterministic) assert.equal(got, s.streamSig, label + ' stream');
         const v = new b.Verify();
         v.init(s.alg);
         v.update(message);
-        assert.equal(v.verify(key, undefined, undefined, undefined, fromHex(s.streamSig), padding, salt, dsa), true, label + ' stream verify');
+        assert.equal(v.verify(key, undefined, undefined, undefined, undefined, fromHex(s.streamSig), padding, salt, dsa), true, label + ' stream verify');
       }
     }
   }
   const ed = privHandleFor('ed25519', {});
-  const [err, sig] = await runAsync(new b.SignJob(kAsync, 0, ed, undefined, undefined, undefined, message, undefined, undefined, undefined, 0));
+  const [err, sig] = await runAsync(new b.SignJob(kAsync, 0, ed, undefined, undefined, undefined, undefined, message, undefined, undefined, undefined, 0, undefined));
   assert.equal(err, undefined);
   assert.equal(sig.byteLength, 64);
   const signer = new b.Sign();
   signer.init('sha256');
   signer.update('x');
-  assert.deepEqual(attempt(() => signer.sign(ed, undefined, undefined, undefined, undefined, undefined, 0)), fx.signErrors.edStream);
+  assert.deepEqual(attempt(() => signer.sign(ed, undefined, undefined, undefined, undefined, undefined, undefined, 0)), fx.signErrors.edStream);
   assert.deepEqual(attempt(() => new b.Sign().init('nope')), fx.signErrors.unknownDigest);
-  assert.deepEqual(attempt(() => new b.SignJob(kSync, 0, ed, undefined, undefined, undefined, message, 'nope', undefined, undefined, 0)), fx.signErrors.oneShotUnknownDigest);
+  assert.deepEqual(attempt(() => new b.SignJob(kSync, 0, ed, undefined, undefined, undefined, undefined, message, 'nope', undefined, undefined, 0, undefined)), fx.signErrors.oneShotUnknownDigest);
   const ec = privHandleFor('ec', { namedCurve: 'P-256' });
   assert.equal(verifyOneShot('sha256', message, ec, { dsaEncoding: 'ieee-p1363' }, Buffer.alloc(10)), fx.signErrors.p1363Malformed);
 });
@@ -252,12 +244,15 @@ test('ECDH', () => {
 });
 
 test('stateless DH', () => {
+  // Node 24+: DHBitsJob(mode, public key ×5, private key ×5) replaces statelessDH(priv, pub)
   for (const c of fx.dh) {
     const priv = new b.KeyObjectHandle();
     priv.init(2, fromHex(c.aPriv), 0, 1, undefined);
     const pub = new b.KeyObjectHandle();
     pub.init(1, fromHex(c.bPub), 0, 2, undefined);
-    assert.equal(hex(b.statelessDH(priv, pub)), c.secret, c.type);
+    const u = undefined;
+    assert.equal(hex(runSync(new b.DHBitsJob(kSync, pub, u, u, u, u, priv, u, u, u, u))), c.secret, c.type);
+    assert.equal(hex(runSync(new b.DHBitsJob(kSync, fromHex(c.bPub), 0, 2, null, null, fromHex(c.aPriv), 0, 1, null, null))), c.secret, c.type);
   }
 });
 
@@ -270,18 +265,18 @@ test('RSA public-key ciphers', () => {
   key.init(2, fromHex(r.key), 0, 1, undefined);
   const pub = new b.KeyObjectHandle();
   pub.init(1, fromHex(r.key), 0, 1, undefined);
-  const call = (fn: any, k: any, buf: Buffer, o: any) => fn(k, undefined, undefined, undefined, buf, o.padding, o.oaepHash, o.oaepLabel === undefined ? undefined : fromHex(o.oaepLabel));
+  const call = (fn: any, k: any, buf: Buffer, o: any) => fn(k, undefined, undefined, undefined, undefined, buf, o.padding, o.oaepHash, o.oaepLabel === undefined ? undefined : fromHex(o.oaepLabel), undefined);
   for (const c of r.cases) {
     assert.deepEqual(attempt(() => hex(call(b.privateDecrypt, key, fromHex(c.ct), c.opts))), c.decrypted, JSON.stringify(c.opts));
     const ours = call(b.publicEncrypt, pub, message, c.opts);
     assert.equal(hex(call(b.privateDecrypt, key, ours, c.opts)), hex(message));
   }
-  assert.equal(hex(b.privateEncrypt(key, undefined, undefined, undefined, message, 1)), r.privateEncrypt);
-  assert.equal(hex(b.publicDecrypt(pub, undefined, undefined, undefined, fromHex(r.privateEncrypt), 1)), hex(message));
-  assert.equal(hex(b.privateEncrypt(key, undefined, undefined, undefined, Buffer.alloc(128, 7), 3)), r.privateEncryptNoPad);
-  assert.deepEqual(attempt(() => b.publicDecrypt(pub, undefined, undefined, undefined, Buffer.alloc(128, 1), 1)), r.publicDecryptBad);
-  assert.deepEqual(attempt(() => b.publicEncrypt(pub, undefined, undefined, undefined, Buffer.alloc(100), 4)), r.oaepTooLong);
-  assert.deepEqual(attempt(() => b.privateDecrypt(key, undefined, undefined, undefined, Buffer.alloc(128, 1), 4)), r.privateDecryptBad);
+  assert.equal(hex(b.privateEncrypt(key, undefined, undefined, undefined, undefined, message, 1)), r.privateEncrypt);
+  assert.equal(hex(b.publicDecrypt(pub, undefined, undefined, undefined, undefined, fromHex(r.privateEncrypt), 1)), hex(message));
+  assert.equal(hex(b.privateEncrypt(key, undefined, undefined, undefined, undefined, Buffer.alloc(128, 7), 3)), r.privateEncryptNoPad);
+  assert.deepEqual(attempt(() => b.publicDecrypt(pub, undefined, undefined, undefined, undefined, Buffer.alloc(128, 1), 1)), r.publicDecryptBad);
+  assert.deepEqual(attempt(() => b.publicEncrypt(pub, undefined, undefined, undefined, undefined, Buffer.alloc(100), 4)), r.oaepTooLong);
+  assert.deepEqual(attempt(() => b.privateDecrypt(key, undefined, undefined, undefined, undefined, Buffer.alloc(128, 1), 4)), r.privateDecryptBad);
 });
 
 // -----------------------------------------------------------------------------
@@ -290,10 +285,10 @@ test('RSA public-key ciphers', () => {
 test('key pair generation', async () => {
   const pemEnc = [1, 2, 1, 1, undefined, undefined];
   for (const [Job, args] of [
-    [b.NidKeyPairGenJob, [b.EVP_PKEY_ED25519]],
-    [b.NidKeyPairGenJob, [b.EVP_PKEY_X25519]],
-    [b.NidKeyPairGenJob, [b.EVP_PKEY_ED448]],
-    [b.NidKeyPairGenJob, [b.EVP_PKEY_X448]],
+    [b.NamedKeyPairGenJob, ['ed25519']],
+    [b.NamedKeyPairGenJob, ['x25519']],
+    [b.NamedKeyPairGenJob, ['ed448']],
+    [b.NamedKeyPairGenJob, ['x448']],
     [b.EcKeyPairGenJob, ['P-256', 1]],
     [b.EcKeyPairGenJob, ['secp384r1', 1]],
     [b.EcKeyPairGenJob, ['secp256k1', 1]],
@@ -325,7 +320,7 @@ test('key pair generation', async () => {
   assert.throws(() => new b.EcKeyPairGenJob(kSync, 'nope', 1), { code: 'ERR_CRYPTO_INVALID_CURVE' });
   assert.throws(() => new b.RsaKeyPairGenJob(kSync, 1, 1024, 3, 'nope', undefined, undefined), { code: 'ERR_CRYPTO_INVALID_DIGEST', message: 'Invalid digest: nope' });
   // JWK output
-  const [jwkPub, jwkPriv] = runSync(new b.NidKeyPairGenJob(kSync, b.EVP_PKEY_ED25519, 2, undefined, 2, undefined, undefined, undefined));
+  const [jwkPub, jwkPriv] = runSync(new b.NamedKeyPairGenJob(kSync, 'ed25519', 2, undefined, 2, undefined, undefined, undefined));
   assert.equal(jwkPub.kty, 'OKP');
   assert.equal(typeof jwkPriv.d, 'string');
 });
@@ -394,13 +389,15 @@ test('WebCrypto jobs', async () => {
     const aad = g.aad === null ? undefined : Buffer.from(g.aad);
     const ct = await job(b.AESCipherJob, 0, key, data, variant('GCM', bits), fromHex(g.iv), g.tagLength / 8, aad);
     assert.equal(hex(ct), g.ct);
+    // Node 24+: decryption gets the whole ciphertext and the tag length, and splits the tag off itself
     const full = fromHex(g.ct);
     const tl = g.tagLength / 8;
-    const pt = await job(b.AESCipherJob, 1, key, full.subarray(0, -tl), variant('GCM', bits), fromHex(g.iv), full.subarray(-tl), aad);
+    const pt = await job(b.AESCipherJob, 1, key, full, variant('GCM', bits), fromHex(g.iv), tl, aad);
     assert.equal(Buffer.from(pt).toString(), data.toString());
-    const bad = Buffer.from(full.subarray(-tl));
-    bad[0] ^= 1;
-    await assert.rejects(job(b.AESCipherJob, 1, key, full.subarray(0, -tl), variant('GCM', bits), fromHex(g.iv), bad, aad), { message: 'Cipher job failed' });
+    const bad = Buffer.from(full);
+    bad[bad.length - 1] ^= 1;
+    await assert.rejects(job(b.AESCipherJob, 1, key, bad, variant('GCM', bits), fromHex(g.iv), tl, aad), { message: 'Cipher job failed' });
+    await assert.rejects(job(b.AESCipherJob, 1, key, full.subarray(0, tl - 1), variant('GCM', bits), fromHex(g.iv), tl, aad), { message: 'Cipher job failed' });
   }
   const k16 = '000102030405060708090a0b0c0d0e0f';
   const iv16 = fromHex('f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
@@ -420,19 +417,21 @@ test('WebCrypto jobs', async () => {
     h.init(type === 2 ? 1 : 2, fromHex(der), 0, type, undefined);
     return h;
   };
-  assert.equal(hex(await job(b.ECDHBitsJob, imp(ecA.bPub, 2), imp(ecA.aPriv, 1))), w.ecdh);
-  assert.equal(hex(await job(b.ECDHBitsJob, imp(xA.bPub, 2), imp(xA.aPriv, 1))), w.x25519);
-  assert.equal(hex(await job(b.ECKeyExportJob, 0, imp(ecA.bPub, 2))), w.ecRaw);
-  assert.equal(hex(await job(b.ECKeyExportJob, 2, imp(ecA.bPub, 2))), ecA.bPub);
-  assert.equal(hex(await job(b.ECKeyExportJob, 1, imp(ecA.aPriv, 1))), ecA.aPriv);
+  // Node 24+: DHBitsJob for ECDH, and the key exports are KeyObjectHandle methods
+  const u = undefined;
+  assert.equal(hex(await job(b.DHBitsJob, imp(ecA.bPub, 2), u, u, u, u, imp(ecA.aPriv, 1), u, u, u, u)), w.ecdh);
+  assert.equal(hex(await job(b.DHBitsJob, imp(xA.bPub, 2), u, u, u, u, imp(xA.aPriv, 1), u, u, u, u)), w.x25519);
+  assert.equal(hex(imp(ecA.bPub, 2).exportECPublicRaw(4)), w.ecRaw);
+  assert.equal(hex(imp(ecA.bPub, 2).export(0, 2)), ecA.bPub);
+  assert.equal(hex(imp(ecA.aPriv, 1).exportECPrivatePkcs8()), ecA.aPriv);
   // RSA-OAEP and RSA exports
   const rsaK = fx.keys.find((x: any) => x.type === 'rsa' && x.opts.modulusLength === 1024);
   const rsaPriv = imp(rsaK.private[1].result.hex, 1);
   assert.equal(Buffer.from(await job(b.RSACipherJob, 1, rsaPriv, fromHex(w.oaep), b.kKeyVariantRSA_OAEP, 'sha256', Buffer.from('L'))).toString(), data.toString());
   const ours = await job(b.RSACipherJob, 0, imp(rsaK.public[1].result.hex, 2), data, b.kKeyVariantRSA_OAEP, 'sha256', Buffer.from('L'));
   assert.equal(Buffer.from(await job(b.RSACipherJob, 1, rsaPriv, ours, b.kKeyVariantRSA_OAEP, 'sha256', Buffer.from('L'))).toString(), data.toString());
-  assert.equal(hex(await job(b.RSAKeyExportJob, 2, imp(rsaK.public[1].result.hex, 2), 2)), w.rsaSpki);
-  assert.equal(hex(await job(b.RSAKeyExportJob, 1, rsaPriv, 2)), w.rsaPkcs8);
+  assert.equal(hex(imp(rsaK.public[1].result.hex, 2).export(0, 2)), w.rsaSpki);
+  assert.equal(hex(rsaPriv.export(0, 1, null, null)), w.rsaPkcs8);
 });
 
 test('createNativeKeyObjectClass', () => {

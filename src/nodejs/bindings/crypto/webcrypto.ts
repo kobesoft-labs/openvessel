@@ -1,20 +1,15 @@
-// The CryptoJobs behind lib/internal/crypto/webcrypto.js (crypto.subtle): AESCipherJob, ECDHBitsJob,
-// ECKeyExportJob, RSAKeyExportJob and RSACipherJob. Failures surface as job errors, which lib turns
-// into an OperationError DOMException.
+// The CryptoJobs behind crypto.subtle's ciphers (lib/internal/crypto/aes.js, rsa.js,
+// chacha20_poly1305.js): AESCipherJob, RSACipherJob and ChaCha20Poly1305CipherJob. Failures surface
+// as job errors, which a WebCrypto-mode job turns into an OperationError DOMException.
 
 import { aes } from './blockcipher.ts';
 import { CipherBase } from './cipher.ts';
 import { getDigest } from './digests.ts';
-import { pkcs8, spki } from './asymkeys.ts';
 import { keyDataOf } from './keys.ts';
 import * as rsa from './rsa.ts';
-import { statelessDH } from './asym.ts';
 import { concat, copy, cryptoError, err, isAnyBufferSource, jobClass, toArrayBuffer, view } from './util.ts';
 
 const kWebCryptoCipherEncrypt = 0;
-const kWebCryptoKeyFormatRaw = 0;
-const kWebCryptoKeyFormatPKCS8 = 1;
-const kWebCryptoKeyFormatSPKI = 2;
 
 const cipherJobFailed = () => cryptoError('Cipher job failed');
 
@@ -24,14 +19,38 @@ const AES_VARIANTS: [string, number][] = [
   ['cbc', 128], ['cbc', 192], ['cbc', 256],
   ['gcm', 128], ['gcm', 192], ['gcm', 256],
   ['kw', 128], ['kw', 192], ['kw', 256],
+  ['ocb', 128], ['ocb', 192], ['ocb', 256],
 ];
 
-function runCipherBase(name: string, encrypt: boolean, key: Uint8Array, iv: Uint8Array | null, data: Uint8Array, setup?: (c: CipherBase) => void) {
-  const c = new CipherBase(encrypt);
-  c.initiv(name, key, iv, -1);
+function runCipherBase(name: string, encrypt: boolean, key: Uint8Array, iv: Uint8Array | null, data: Uint8Array, authTagLength = -1, setup?: (c: CipherBase) => void) {
+  const c = new CipherBase(encrypt, name, key, iv, authTagLength);
   setup?.(c);
-  const out = concat([c.update(data), c.final()]);
+  const out = concat([c.update(data) as Uint8Array, c.final() as Uint8Array]);
   return { c, out };
+}
+
+/**
+ * An AEAD cipher the WebCrypto way: encryption appends the tag; decryption takes it off the end of
+ * the data (Node 24+ hands the whole ciphertext to the job).
+ */
+function aead(name: string, encrypt: boolean, key: Uint8Array, iv: Uint8Array, input: Uint8Array, tagLen: number, aad: Uint8Array | null): ArrayBuffer {
+  let data = input;
+  let tag: Uint8Array | null = null;
+  if (!encrypt) {
+    if (input.length < tagLen) throw cipherJobFailed();
+    data = input.subarray(0, input.length - tagLen);
+    tag = input.subarray(input.length - tagLen);
+  }
+  try {
+    const { c, out } = runCipherBase(name, encrypt, key, iv, data, tagLen, (c) => {
+      if (tag) c.setAuthTag(tag);
+      if (aad && aad.length) c.setAAD(aad, -1);
+    });
+    if (!encrypt) return toArrayBuffer(out);
+    return toArrayBuffer(concat([out, (c.getAuthTag() as Uint8Array).subarray(0, tagLen)]));
+  } catch {
+    throw cipherJobFailed();
+  }
 }
 
 /** AES-CTR with a counter of `length` bits that wraps without carrying into the nonce (as Chromium). */
@@ -99,62 +118,30 @@ export const AESCipherJob = jobClass('AESCipherJob', (async, cipherMode: number,
       }
     };
   }
-  // gcm: encrypt gets the tag length in bytes, decrypt the tag itself
-  let tagLen = 16;
-  let tag: Uint8Array | null = null;
-  if (encrypt) {
-    if (typeof rest[1] !== 'number' || rest[1] > 128) throw err('ERR_CRYPTO_INVALID_TAG_LENGTH');
-    tagLen = rest[1];
-  } else {
-    if (!isAnyBufferSource(rest[1])) throw err('ERR_CRYPTO_INVALID_TAG_LENGTH');
-    tag = copy(view(rest[1]));
-  }
+  // gcm / ocb: (iv, tag length in bytes, additional data)
+  if (typeof rest[1] !== 'number' || rest[1] > 16) throw err('ERR_CRYPTO_INVALID_TAG_LENGTH');
+  const tagLen = rest[1];
   const aad = isAnyBufferSource(rest[2]) ? copy(view(rest[2])) : null;
-  if (iv.length < 12) throw err('ERR_CRYPTO_INVALID_IV');
+  if (mode === 'gcm' && iv.length < 12) throw err('ERR_CRYPTO_INVALID_IV');
   return () => {
     if (secret.length * 8 !== bits) throw cipherJobFailed();
-    try {
-      const { c, out } = runCipherBase(`aes-${bits}-gcm`, encrypt, secret, iv, input, (c) => {
-        if (tag) c.setAuthTag(tag);
-        if (aad && aad.length) c.setAAD(aad, -1);
-      });
-      if (!encrypt) return toArrayBuffer(out);
-      return toArrayBuffer(concat([out, (c.getAuthTag() as Uint8Array).subarray(0, tagLen)]));
-    } catch {
-      throw cipherJobFailed();
-    }
+    return aead(`aes-${bits}-${mode}`, encrypt, secret, iv, input, tagLen, aad);
   };
 });
 
-// new ECDHBitsJob(mode, publicKeyHandle, privateKeyHandle)
-export const ECDHBitsJob = jobClass('ECDHBitsJob', (_async, pub: unknown, priv: unknown) => {
+// new ChaCha20Poly1305CipherJob(mode, cipherMode, keyHandle, data, iv, additionalData)
+export const ChaCha20Poly1305CipherJob = jobClass('ChaCha20Poly1305CipherJob', (async, cipherMode: number, keyHandle: unknown, data: unknown, ivArg: unknown, aadArg: unknown) => {
+  const key = keyDataOf(keyHandle);
+  if (!key || key.type !== 0) throw err('ERR_INVALID_ARG_TYPE', 'Invalid key object');
+  const input = async ? copy(view(data)) : view(data);
+  const iv = copy(view(ivArg));
+  if (iv.length !== 12) throw err('ERR_CRYPTO_INVALID_IV');
+  const aad = isAnyBufferSource(aadArg) ? copy(view(aadArg)) : null;
+  const encrypt = cipherMode === kWebCryptoCipherEncrypt;
+  const secret = key.secret;
   return () => {
-    const secret = statelessDH(priv, pub) as Uint8Array;
-    return toArrayBuffer(new Uint8Array(secret));
-  };
-});
-
-// new ECKeyExportJob(mode, format, keyHandle) — EC and OKP keys
-export const ECKeyExportJob = jobClass('ECKeyExportJob', (_async, format: number, handle: unknown) => {
-  const data = keyDataOf(handle);
-  if (!data || data.type === 0) throw err('ERR_CRYPTO_INVALID_KEYTYPE');
-  return () => {
-    const a = data.asym;
-    if (format === kWebCryptoKeyFormatRaw) return toArrayBuffer((a as any).pub.slice());
-    if (format === kWebCryptoKeyFormatSPKI) return toArrayBuffer(spki(a));
-    if (format === kWebCryptoKeyFormatPKCS8 && data.type === 2) return toArrayBuffer(pkcs8(a));
-    throw cryptoError('Key export failed');
-  };
-});
-
-// new RSAKeyExportJob(mode, format, keyHandle, variant)
-export const RSAKeyExportJob = jobClass('RSAKeyExportJob', (_async, format: number, handle: unknown) => {
-  const data = keyDataOf(handle);
-  if (!data || data.type === 0) throw err('ERR_CRYPTO_INVALID_KEYTYPE');
-  return () => {
-    if (format === kWebCryptoKeyFormatSPKI) return toArrayBuffer(spki(data.asym));
-    if (format === kWebCryptoKeyFormatPKCS8 && data.type === 2) return toArrayBuffer(pkcs8(data.asym));
-    throw cryptoError('Key export failed');
+    if (secret.length !== 32) throw cipherJobFailed();
+    return aead('chacha20-poly1305', encrypt, secret, iv, input, 16, aad);
   };
 });
 

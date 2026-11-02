@@ -1,9 +1,10 @@
 // crypto_sig.cc / crypto_keygen.cc / crypto_ec.cc / crypto_rsa.cc / crypto_cipher.cc (public-key
-// ciphers): Sign, Verify, SignJob, NidKeyPairGenJob, EcKeyPairGenJob, RsaKeyPairGenJob, ECDH,
-// ECDHConvertKey, statelessDH, publicEncrypt/privateDecrypt/privateEncrypt/publicDecrypt.
+// ciphers) / crypto_dh.cc: Sign, Verify, SignJob, NamedKeyPairGenJob, EcKeyPairGenJob,
+// RsaKeyPairGenJob, DsaKeyPairGenJob, DhKeyPairGenJob, DHBitsJob, ECDH, ECDHConvertKey,
+// publicEncrypt/privateDecrypt/privateEncrypt/publicDecrypt.
 // Key material and encodings live in asymkeys.ts; RSA math in rsa.ts.
 
-import { ed25519, x25519 } from '@noble/curves/ed25519.js';
+import { ed25519, ed25519ctx, x25519 } from '@noble/curves/ed25519.js';
 import { ed448, x448 } from '@noble/curves/ed448.js';
 import { getDigest, type Ctx, type DigestAlgo } from './digests.ts';
 import {
@@ -32,10 +33,22 @@ import {
   type Curve,
   type OkpKind,
 } from './asymkeys.ts';
-import { KeyObjectHandle, keyDataOf, registerAsymOps, type KeyData } from './keys.ts';
+import {
+  base64Decode,
+  handleFor,
+  kKeyFormatJWK,
+  kKeyFormatRawPrivate,
+  kKeyFormatRawPublic,
+  kKeyFormatRawSeed,
+  kKeyFormatStore,
+  keyDataOf,
+  newCryptoKeyPair,
+  registerAsymOps,
+  type KeyData,
+} from './keys.ts';
 import * as rsa from './rsa.ts';
 import { bigIntToBytes, bitLength, bytesToBigInt } from './random.ts';
-import { decodeInput, err, fillRandom, isAnyBufferSource, jobClass, osslError, stringOrBuffer, toArrayBuffer, toBuffer, view } from './util.ts';
+import { decodeInput, err, fillRandom, isAnyBufferSource, isWebCryptoJob, jobClass, osslError, stringOrBuffer, toArrayBuffer, toBuffer, view } from './util.ts';
 import * as der from './asn1.ts';
 import { findCipher } from './cipher.ts';
 import { DH_GROUPS } from './tables.ts';
@@ -48,32 +61,106 @@ const notSupportedForKeyType = () =>
   osslError('03000096', 'digital envelope routines', 'operation not supported for this keytype', 'ERR_OSSL_EVP_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE');
 
 // -----------------------------------------------------------------------------
-// key arguments: (data | handle, format, type, passphrase)
+// key arguments: (data | handle, format, type, passphrase, namedCurve)
 
 function passphraseOf(v: unknown): Uint8Array | undefined {
   return isAnyBufferSource(v) ? view(v) : undefined;
 }
 
-/** KeyObjectData::GetPrivateKeyFromJs */
-function privateKeyArg(args: any[], i: number): KeyData {
-  const d = keyDataOf(args[i]);
-  if (d) return d;
-  return { type: 2, asym: parsePrivate(stringOrBuffer(args[i]), args[i + 1], args[i + 2], passphraseOf(args[i + 3])) };
+const incompatible = () => err('ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS');
+const invalidKeyData = () => err('ERR_INVALID_ARG_VALUE', 'Invalid key data');
+
+/** ImportJWKAsymmetricKey: the JWK validation lib did in JS before Node 24 now happens here. */
+function jwkKey(jwk: any, wantPrivate: boolean): KeyData {
+  if (!jwk || typeof jwk !== 'object' || typeof jwk.kty !== 'string') throw err('ERR_CRYPTO_INVALID_JWK');
+  const kty = jwk.kty;
+  let data: KeyData;
+  if (kty === 'OKP') {
+    const bad = () => err('ERR_CRYPTO_INVALID_JWK', 'Invalid JWK OKP key');
+    const kind = typeof jwk.crv === 'string' ? (jwk.crv.toLowerCase() as OkpKind) : undefined;
+    const info = kind && OKP[kind];
+    if (!info || info.jwk !== jwk.crv || typeof jwk.x !== 'string') throw bad();
+    const x = base64Decode(jwk.x);
+    if (x.length !== info.len) throw bad();
+    if (jwk.d === undefined) {
+      data = { type: 1, asym: { kind: info.kind, pub: x.slice() } };
+    } else {
+      if (typeof jwk.d !== 'string') throw bad();
+      const d = base64Decode(jwk.d);
+      if (d.length !== info.len) throw bad();
+      const a = okpFromPrivate(info.kind, d);
+      if (!equalArrays((a as any).pub, x)) throw bad();
+      data = { type: 2, asym: a };
+    }
+  } else if (kty === 'EC') {
+    if (typeof jwk.crv !== 'string') throw err('ERR_CRYPTO_INVALID_JWK', 'Invalid JWK EC key');
+    data = importJwk(jwk, kty, jwk.crv);
+  } else if (kty === 'RSA') {
+    data = importJwk(jwk, kty, undefined);
+  } else if (kty === 'AKP') {
+    // ML-DSA / ML-KEM: no implementation here
+    throw err('ERR_CRYPTO_INVALID_JWK', 'Invalid JWK AKP key');
+  } else {
+    throw err('ERR_CRYPTO_INVALID_JWK', `${kty} is not a supported JWK key type`);
+  }
+  if (wantPrivate && data.type !== 2) throw err('ERR_CRYPTO_INVALID_JWK', 'JWK does not contain private key material');
+  return data;
 }
 
-/** KeyObjectData::GetPublicOrPrivateKeyFromJs */
-function anyKeyArg(args: any[], i: number): KeyData {
+/** KeyObjectData::CreateFromRaw: raw-public / raw-private / raw-seed bytes of a named key type. */
+function rawKey(bytes: Uint8Array, format: number, typeName: unknown, namedCurve: unknown): KeyData {
+  const name = String(typeName);
+  if (name === 'ec') {
+    const curve = typeof namedCurve === 'string' ? curveByName(namedCurve) : undefined;
+    if (!curve) throw err('ERR_CRYPTO_INVALID_CURVE');
+    if (format === kKeyFormatRawPublic) {
+      try {
+        return { type: 1, asym: { kind: 'ec', curve, pub: ecPoint(curve, bytes).toBytes(false) } };
+      } catch {
+        throw invalidKeyData();
+      }
+    }
+    if (format === kKeyFormatRawPrivate) {
+      const d = bytesToBigInt(bytes);
+      if (bytes.length !== Math.ceil(bitLength(curveOrder(curve)) / 8) || d < 1n || d >= curveOrder(curve)) throw invalidKeyData();
+      return { type: 2, asym: ecFromPrivate(curve, d) };
+    }
+    throw incompatible();
+  }
+  const kind = name as OkpKind;
+  if (Object.prototype.hasOwnProperty.call(OKP, kind)) {
+    if (format === kKeyFormatRawSeed) throw incompatible();
+    if (bytes.length !== OKP[kind].len) throw invalidKeyData();
+    if (format === kKeyFormatRawPrivate) return { type: 2, asym: okpFromPrivate(kind, bytes) };
+    return { type: 1, asym: { kind, pub: bytes.slice() } };
+  }
+  if (name === 'rsa' || name === 'rsa-pss' || name === 'dsa' || name === 'dh') throw incompatible();
+  // the comparison saw the whole string, the message is a C string
+  throw err('ERR_INVALID_ARG_VALUE', `Invalid asymmetricKeyType: ${name.split('\0')[0]}`);
+}
+
+/** KeyObjectData::GetPrivateKeyFromJs / GetPublicOrPrivateKeyFromJs */
+function keyArg(args: any[], i: number, wantPrivate: boolean): KeyData {
   const d = keyDataOf(args[i]);
   if (d) return d;
-  const [asym, isPrivate] = parsePublicOrPrivate(stringOrBuffer(args[i]), args[i + 1], args[i + 2], passphraseOf(args[i + 3]));
+  const format = args[i + 1];
+  if (format === kKeyFormatJWK) return jwkKey(args[i], wantPrivate);
+  if (format === kKeyFormatRawPublic || format === kKeyFormatRawPrivate || format === kKeyFormatRawSeed) {
+    const k = rawKey(view(args[i]), format, args[i + 2], args[i + 4]);
+    if (wantPrivate && k.type !== 2) throw incompatible();
+    return k;
+  }
+  if (format === kKeyFormatStore) {
+    // keys referenced by URI through an OpenSSL STORE loader: there is no OpenSSL here
+    throw osslError('1600008A', 'STORE routines', 'unregistered scheme', 'ERR_OSSL_OSSL_STORE_UNREGISTERED_SCHEME');
+  }
+  if (wantPrivate) return { type: 2, asym: parsePrivate(stringOrBuffer(args[i]), format, args[i + 2], passphraseOf(args[i + 3])) };
+  const [asym, isPrivate] = parsePublicOrPrivate(stringOrBuffer(args[i]), format, args[i + 2], passphraseOf(args[i + 3]));
   return { type: isPrivate ? 2 : 1, asym };
 }
 
-function handleFor(data: KeyData): KeyObjectHandle {
-  const h = new KeyObjectHandle();
-  h.data = data;
-  return h;
-}
+const privateKeyArg = (args: any[], i: number) => keyArg(args, i, true);
+const anyKeyArg = (args: any[], i: number) => keyArg(args, i, false);
 
 // -----------------------------------------------------------------------------
 // KeyObjectHandle operations for asymmetric keys
@@ -95,32 +182,34 @@ function equalArrays(a: Uint8Array, b: Uint8Array) {
   return true;
 }
 
+const isOkp = (a: Asym) => Object.prototype.hasOwnProperty.call(OKP, a.kind);
+
+/** KeyObjectHandle::Export / keypair encodings for the raw formats (Node 24+). */
+function exportRaw(data: KeyData, format: number, pointForm: unknown): Uint8Array {
+  const a = asymOf(data);
+  if (format === kKeyFormatRawPublic) {
+    if (a.kind === 'ec') return encodePoint(a.curve, a.pub, typeof pointForm === 'number' ? pointForm : POINT_CONVERSION_UNCOMPRESSED);
+    if (isOkp(a)) return (a as any).pub;
+    throw incompatible();
+  }
+  if (format === kKeyFormatRawPrivate && data.type === 2) {
+    if (a.kind === 'ec') return bigIntToBytes(a.d!, Math.ceil(bitLength(curveOrder(a.curve)) / 8));
+    if (isOkp(a)) return (a as any).priv;
+  }
+  throw incompatible();
+}
+
 registerAsymOps({
   init(type, args) {
     if (type === 1) return { type: 1, asym: asymOf(anyKeyArg(args, 0)) };
     return privateKeyArg(args, 0);
   },
-  initJwk: (jwk, kty, namedCurve) => importJwk(jwk, kty, namedCurve),
-  initECRaw(curveName, data) {
-    const curve = CURVES.find((c) => c.name === curveName);
-    if (!curve) throw err('ERR_CRYPTO_INVALID_CURVE');
-    try {
-      return { type: 1, asym: { kind: 'ec', curve, pub: ecPoint(curve, data).toBytes(false) } };
-    } catch {
-      return null;
-    }
-  },
-  initEDRaw(name, data, type) {
-    const kind = name.toLowerCase() as OkpKind;
-    const info = OKP[kind];
-    if (!info || data.length !== info.len) return null;
-    if (type === 2) return { type: 2, asym: okpFromPrivate(kind, data) };
-    return { type: 1, asym: { kind, pub: data.slice() } };
-  },
   export(data, args) {
     const a = asymOf(data);
-    if (data.type === 1) return asBuffer(writePublic(a, args[0], args[1]));
-    return asBuffer(writePrivate(a, args[0], args[1], args[2], passphraseOf(args[3])));
+    const format = args[0];
+    if (format === kKeyFormatRawPublic || format === kKeyFormatRawPrivate || format === kKeyFormatRawSeed) return toBuffer(exportRaw(data, format, args[1]).slice());
+    if (data.type === 1) return asBuffer(writePublic(a, format, args[1]));
+    return asBuffer(writePrivate(a, format, args[1], args[2], passphraseOf(args[3])));
   },
   exportJwk(data, target, handleRsaPss) {
     exportJwk(asymOf(data), data.type === 2, target, handleRsaPss);
@@ -139,6 +228,31 @@ registerAsymOps({
     }
   },
   equals: (a, b) => sameKey(asymOf(a), asymOf(b)),
+  rawPublicKey(data) {
+    if (!isOkp(asymOf(data))) throw incompatible();
+    return exportRaw(data, kKeyFormatRawPublic, undefined);
+  },
+  rawPrivateKey(data) {
+    if (!isOkp(asymOf(data))) throw incompatible();
+    return exportRaw(data, kKeyFormatRawPrivate, undefined);
+  },
+  // seeds belong to ML-DSA / ML-KEM keys, which are not implemented
+  rawSeed: () => {
+    throw incompatible();
+  },
+  exportECPublicRaw(data, form) {
+    if (asymOf(data).kind !== 'ec') throw incompatible();
+    return exportRaw(data, kKeyFormatRawPublic, form);
+  },
+  exportECPrivateRaw(data) {
+    if (asymOf(data).kind !== 'ec') throw incompatible();
+    return exportRaw(data, kKeyFormatRawPrivate, undefined);
+  },
+  exportECPrivatePkcs8(data) {
+    const a = asymOf(data);
+    if (a.kind !== 'ec' || data.type !== 2) throw incompatible();
+    return pkcs8(a);
+  },
   toDer: (data) => (data.type === 2 ? pkcs8(asymOf(data)) : spki(asymOf(data))),
   fromDer: (type, bytes) => ({ type, asym: type === 2 ? readPkcs8(bytes) : readSpki(bytes) }),
 });
@@ -253,16 +367,22 @@ function p1363ToDer(a: Asym, sig: Uint8Array): Uint8Array | null {
   return der.seq(der.int(bytesToBigInt(sig.subarray(0, n))), der.int(bytesToBigInt(sig.subarray(n))));
 }
 
-function edSign(a: Asym, data: Uint8Array): Uint8Array {
+/** Ed25519 (Ed25519ctx with a non-empty context, RFC 8032 5.1) and Ed448 (context: 5.2). */
+function edSign(a: Asym, data: Uint8Array, context?: Uint8Array): Uint8Array {
   const priv = (a as any).priv as Uint8Array | undefined;
   if (!priv) throw notSupportedForKeyType();
-  return a.kind === 'ed25519' ? ed25519.sign(data, priv) : ed448.sign(data, priv);
+  if (a.kind === 'ed25519') return context?.length ? ed25519ctx.sign(data, priv, { context }) : ed25519.sign(data, priv);
+  return ed448.sign(data, priv, context?.length ? { context } : undefined);
 }
 
-function edVerify(a: Asym, data: Uint8Array, sig: Uint8Array): boolean {
+function edVerify(a: Asym, data: Uint8Array, sig: Uint8Array, context?: Uint8Array): boolean {
   try {
     const pub = (a as any).pub as Uint8Array;
-    return a.kind === 'ed25519' ? ed25519.verify(sig, data, pub, { zip215: false }) : ed448.verify(sig, data, pub, { zip215: false });
+    if (a.kind === 'ed25519') {
+      if (context?.length) return ed25519ctx.verify(sig, data, pub, { context, zip215: false });
+      return ed25519.verify(sig, data, pub, { zip215: false });
+    }
+    return ed448.verify(sig, data, pub, { zip215: false, ...(context?.length ? { context } : {}) });
   } catch {
     return false;
   }
@@ -292,57 +412,65 @@ class SignBase {
 }
 
 export class Sign extends SignBase {
-  // sign(key, format, type, passphrase, rsaPadding, pssSaltLength, dsaSigEnc)
+  // sign(key, format, type, passphrase, namedCurve, rsaPadding, pssSaltLength, dsaSigEnc)
   sign(...args: any[]) {
     const a = asymOf(privateKeyArg(args, 0));
     if (isEdKind(a.kind)) throw err('ERR_CRYPTO_UNSUPPORTED_OPERATION');
     const [algo, hash] = this.finish();
-    let sig = signDigest(a, algo, hash, args[4], args[5]);
-    if (args[6] === kSigEncP1363 && isDsaLike(a)) sig = derToP1363(a, sig);
+    let sig = signDigest(a, algo, hash, args[5], args[6]);
+    if (args[7] === kSigEncP1363 && isDsaLike(a)) sig = derToP1363(a, sig);
     return toBuffer(sig.slice());
   }
 }
 
 export class Verify extends SignBase {
-  // verify(key, format, type, passphrase, signature, rsaPadding, pssSaltLength, dsaSigEnc)
+  // verify(key, format, type, passphrase, namedCurve, signature, rsaPadding, pssSaltLength, dsaSigEnc)
   verify(...args: any[]) {
     const a = asymOf(anyKeyArg(args, 0));
     if (isEdKind(a.kind)) throw err('ERR_CRYPTO_UNSUPPORTED_OPERATION');
-    let sig: Uint8Array | null = view(args[4]);
-    if (args[7] === kSigEncP1363 && isDsaLike(a)) {
+    let sig: Uint8Array | null = view(args[5]);
+    if (args[8] === kSigEncP1363 && isDsaLike(a)) {
       sig = p1363ToDer(a, sig);
       if (!sig) throw err('ERR_CRYPTO_OPERATION_FAILED', 'Malformed signature');
     }
     const [algo, hash] = this.finish();
-    return verifyDigest(a, algo, hash, sig, args[5], args[6]);
+    return verifyDigest(a, algo, hash, sig, args[6], args[7]);
   }
 }
 
-// new SignJob(mode, signMode, key, format, type, passphrase, data, algorithm, saltLength, padding, dsaEncoding[, signature])
+// new SignJob(mode, signMode, key, format, type, passphrase, namedCurve, data, algorithm, saltLength,
+//             padding, dsaEncoding, context[, signature])
 export const SignJob = jobClass('SignJob', (async, signMode: number, ...rest: any[]) => {
   const keyData = signMode === 1 ? anyKeyArg(rest, 0) : privateKeyArg(rest, 0);
   const a = asymOf(keyData);
-  const data = async ? view(rest[4]).slice() : view(rest[4]);
+  const data = async ? view(rest[5]).slice() : view(rest[5]);
   let algo: DigestAlgo | undefined;
-  if (typeof rest[5] === 'string') {
-    algo = getDigest(rest[5]);
-    if (!algo) throw err('ERR_CRYPTO_INVALID_DIGEST', `Invalid digest: ${rest[5]}`);
+  if (typeof rest[6] === 'string') {
+    algo = getDigest(rest[6]);
+    if (!algo) throw err('ERR_CRYPTO_INVALID_DIGEST', `Invalid digest: ${rest[6]}`);
   }
-  const saltLength = typeof rest[6] === 'number' ? rest[6] : undefined;
-  const padding = typeof rest[7] === 'number' ? rest[7] : undefined;
-  const dsaEnc = rest[8];
+  const saltLength = typeof rest[7] === 'number' ? rest[7] : undefined;
+  const padding = typeof rest[8] === 'number' ? rest[8] : undefined;
+  const dsaEnc = rest[9];
   if (dsaEnc !== undefined && dsaEnc !== 0 && dsaEnc !== 1) throw err('ERR_OUT_OF_RANGE', 'invalid signature encoding');
+  // Ed25519 (Ed25519ctx when not empty) and Ed448 take a context string; other keys only an empty one
+  // (checked when the job runs: an async job reports these through its callback)
+  const context = isAnyBufferSource(rest[10]) ? view(rest[10]).slice() : undefined;
   let signature: Uint8Array | null = null;
   if (signMode === 1) {
-    signature = view(rest[9]).slice();
+    signature = view(rest[11]).slice();
     if (dsaEnc === kSigEncP1363 && isDsaLike(a)) signature = p1363ToDer(a, signature);
   }
   return () => {
+    if (context) {
+      if (context.length > 255) throw err('ERR_OUT_OF_RANGE', 'context string must be at most 255 bytes');
+      if (context.length > 0 && !isEdKind(a.kind)) throw err('ERR_CRYPTO_OPERATION_FAILED', 'Context parameter is unsupported');
+    }
     if (isXKind(a.kind)) throw notSupportedForKeyType();
     if (isEdKind(a.kind)) {
       if (algo) throw osslError('1C8000AE', 'Provider routines', 'digest not allowed', 'ERR_OSSL_DIGEST_NOT_ALLOWED');
-      if (signMode === 0) return toArrayBuffer(edSign(a, data));
-      return !!signature && edVerify(a, data, signature);
+      if (signMode === 0) return toArrayBuffer(edSign(a, data, context));
+      return !!signature && edVerify(a, data, signature, context);
     }
     const md = algo ?? defaultDigest(a);
     const hash = md.create();
@@ -360,10 +488,17 @@ export const SignJob = jobClass('SignJob', (async, signMode: number, ...rest: an
 // -----------------------------------------------------------------------------
 // key pair generation
 
-const EVP_PKEY: Record<number, OkpKind> = { 1087: 'ed25519', 1088: 'ed448', 1034: 'x25519', 1035: 'x448' };
-
-/** The six trailing encoding arguments: pubFormat, pubType, privFormat, privType, cipher, passphrase. */
+/**
+ * The trailing arguments of the key pair jobs. Usually the six encodings: pubFormat, pubType,
+ * privFormat, privType, cipher, passphrase (undefined format: a KeyObjectHandle). In WebCrypto mode
+ * (Node 24+): algorithm, publicUsagesMask, privateUsagesMask, extractable, and the job resolves to
+ * a {publicKey, privateKey} pair of CryptoKeys.
+ */
 function keyPairEncoder(enc: any[]) {
+  if (isWebCryptoJob()) {
+    const [algorithm, pubUsages, privUsages, extractable] = enc;
+    return (asym: Asym) => newCryptoKeyPair(handleFor({ type: 1, asym }), handleFor({ type: 2, asym }), algorithm, pubUsages >>> 0, privUsages >>> 0, extractable === true);
+  }
   const [pubFormat, pubType, privFormat, privType, cipher, passphrase] = enc;
   if (typeof cipher === 'string' && !findCipher(cipher)) throw err('ERR_CRYPTO_UNKNOWN_CIPHER');
   const pass = passphraseOf(passphrase);
@@ -371,10 +506,14 @@ function keyPairEncoder(enc: any[]) {
     const one = (type: 1 | 2, format: unknown, kt: unknown) => {
       const data: KeyData = { type, asym };
       if (format === undefined) return handleFor(data);
-      if (format === 2) {
+      if (format === kKeyFormatJWK) {
         const o = {};
         exportJwk(asym, type === 2, o, false);
         return o;
+      }
+      if (format === kKeyFormatRawPublic || format === kKeyFormatRawPrivate || format === kKeyFormatRawSeed) {
+        if (format === kKeyFormatRawSeed) throw incompatible();
+        return toBuffer(exportRaw(data, format, kt).slice());
       }
       const out = type === 1 ? writePublic(asym, format as number, kt as number) : writePrivate(asym, format as number, kt as number, cipher, pass);
       return asBuffer(out);
@@ -383,12 +522,17 @@ function keyPairEncoder(enc: any[]) {
   };
 }
 
-// new NidKeyPairGenJob(mode, id, ...encoding)
-export const NidKeyPairGenJob = jobClass('NidKeyPairGenJob', (_async, id: number, ...enc: any[]) => {
-  const kind = EVP_PKEY[id];
+// new NamedKeyPairGenJob(mode, name, ...encoding): the key types named by an algorithm name alone.
+// ML-DSA / ML-KEM have no implementation here, so they are not a supported key type (as with an
+// OpenSSL that lacks them).
+export const NamedKeyPairGenJob = jobClass('NamedKeyPairGenJob', (_async, name: unknown, ...enc: any[]) => {
+  // generateKeyPair() takes the lower-case key type; crypto.subtle the algorithm name (Ed25519)
+  const kind = (isWebCryptoJob() ? String(name).toLowerCase() : String(name)) as OkpKind;
+  if (typeof name !== 'string' || !Object.prototype.hasOwnProperty.call(OKP, kind)) {
+    throw err('ERR_INVALID_ARG_VALUE', `The argument 'type' must be a supported key type. Received '${String(name)}'`);
+  }
   const encode = keyPairEncoder(enc);
   return () => {
-    if (!kind) throw err('ERR_CRYPTO_OPERATION_FAILED', 'Unsupported key type');
     const priv = new Uint8Array(OKP[kind].len);
     fillRandom(priv);
     return encode(okpFromPrivate(kind, priv));
@@ -482,6 +626,7 @@ export const RsaKeyPairGenJob = jobClass('RsaKeyPairGenJob', (_async, variant: n
 // ECDH
 
 const POINT_CONVERSION_COMPRESSED = 2;
+const POINT_CONVERSION_UNCOMPRESSED = 4;
 const POINT_CONVERSION_HYBRID = 6;
 
 function encodePoint(curve: Curve, pub: Uint8Array, form: number): Uint8Array {
@@ -569,25 +714,23 @@ export function ECDHConvertKey(key: unknown, curveName: unknown, form: number) {
   return toBuffer(encodePoint(curve, pub, form));
 }
 
-// statelessDH(privateKeyHandle, publicKeyHandle)
-export function statelessDH(privHandle: unknown, pubHandle: unknown) {
-  const a = asymOf(keyDataOf(privHandle)!);
-  const b = asymOf(keyDataOf(pubHandle)!);
+/** The shared secret of two keys (crypto.diffieHellman, ECDH and X25519/X448 deriveBits). */
+function deriveSecret(a: Asym, b: Asym): Uint8Array {
   const fail = () => osslError('1C800066', 'Provider routines', 'failed during derivation', 'ERR_OSSL_FAILED_DURING_DERIVATION');
   const mismatch = () => osslError('1C8000CB', 'Provider routines', 'mismatching domain parameters', 'ERR_OSSL_MISMATCHING_DOMAIN_PARAMETERS');
   if (a.kind === 'dh' && b.kind === 'dh') {
     if (a.dh.p !== b.dh.p || a.dh.g !== b.dh.g) throw mismatch();
-    return toBuffer(dhSecret(a.dh, b.dh.y));
+    return dhSecret(a.dh, b.dh.y);
   }
   if (a.kind === 'ec' && b.kind === 'ec') {
     if (a.curve !== b.curve) throw mismatch();
     const shared = ecPoint(a.curve, b.pub).multiply(a.d!).toBytes(false);
-    return toBuffer(shared.slice(1, 1 + a.curve.size));
+    return shared.slice(1, 1 + a.curve.size);
   }
   if ((a.kind === 'x25519' || a.kind === 'x448') && a.kind === b.kind) {
     try {
       const fn = a.kind === 'x25519' ? x25519 : x448;
-      return toBuffer(fn.getSharedSecret((a as any).priv, (b as any).pub).slice());
+      return fn.getSharedSecret((a as any).priv, (b as any).pub).slice();
     } catch {
       throw fail();
     }
@@ -595,8 +738,19 @@ export function statelessDH(privHandle: unknown, pubHandle: unknown) {
   throw notSupportedForKeyType();
 }
 
+// new DHBitsJob(mode, publicKey, format, type, passphrase, namedCurve,
+//               privateKey, format, type, passphrase, namedCurve) → ArrayBuffer (Node 24+; replaces
+// statelessDH and ECDHBitsJob)
+export const DHBitsJob = jobClass('DHBitsJob', (_async, ...args: any[]) => {
+  const pub = asymOf(anyKeyArg(args, 0));
+  const privData = privateKeyArg(args, 5);
+  const priv = asymOf(privData);
+  return () => toArrayBuffer(deriveSecret(priv, pub));
+});
+
 // -----------------------------------------------------------------------------
-// RSA public-key ciphers: (key, format, type, passphrase, buffer, padding, oaepHash, oaepLabel)
+// RSA public-key ciphers: (key, format, type, passphrase, namedCurve, buffer, padding, oaepHash,
+// oaepLabel, mgf1Hash)
 
 function rsaKeyOf(data: KeyData) {
   const a = asymOf(data);
@@ -606,23 +760,30 @@ function rsaKeyOf(data: KeyData) {
 
 function oaepParams(args: any[]) {
   let algo = getDigest('sha1')!;
-  if (typeof args[6] === 'string') {
-    const d = getDigest(args[6]);
+  if (typeof args[7] === 'string') {
+    const d = getDigest(args[7]);
     if (!d) throw err('ERR_OSSL_EVP_INVALID_DIGEST');
     algo = d;
   }
-  const label = args[7] === undefined ? new Uint8Array(0) : view(args[7]);
-  return { algo, label };
+  // the MGF1 digest defaults to the OAEP one
+  let mgf = algo;
+  if (typeof args[9] === 'string') {
+    const d = getDigest(args[9]);
+    if (!d) throw err('ERR_OSSL_EVP_INVALID_DIGEST');
+    mgf = d;
+  }
+  const label = args[8] === undefined ? new Uint8Array(0) : view(args[8]);
+  return { algo, mgf, label };
 }
 
 function publicEncrypt(...args: any[]) {
   const key = anyKeyArg(args, 0);
-  const { algo, label } = oaepParams(args);
+  const { algo, mgf, label } = oaepParams(args);
   const k = rsaKeyOf(key);
-  const data = view(args[4]);
-  const padding = args[5] >>> 0;
+  const data = view(args[5]);
+  const padding = args[6] >>> 0;
   if (padding === RSA_PKCS1_OAEP_PADDING) {
-    return toBuffer(rsa.oaepEncrypt(k, algo, label, data));
+    return toBuffer(rsa.oaepEncrypt(k, algo, label, data, mgf));
   }
   if (padding === RSA_PKCS1_PADDING) return toBuffer(rsa.rawPublic(k, rsa.pkcs1Pad(k, data, 2)));
   if (padding === RSA_NO_PADDING) {
@@ -634,13 +795,13 @@ function publicEncrypt(...args: any[]) {
 
 function privateDecrypt(...args: any[]) {
   const data = anyKeyArg(args, 0);
-  const { algo, label } = oaepParams(args);
+  const { algo, mgf, label } = oaepParams(args);
   if (data.type !== 2) throw notSupportedForKeyType();
   const k = rsaKeyOf(data);
-  const ct = view(args[4]);
-  const padding = args[5] >>> 0;
+  const ct = view(args[5]);
+  const padding = args[6] >>> 0;
   if (padding === RSA_PKCS1_OAEP_PADDING) {
-    return toBuffer(rsa.oaepDecrypt(k, algo, label, ct));
+    return toBuffer(rsa.oaepDecrypt(k, algo, label, ct, mgf));
   }
   if (padding === RSA_PKCS1_PADDING) {
     // OpenSSL 3.2+ answers a bad padding with a synthetic plaintext (implicit rejection); we throw.
@@ -656,8 +817,8 @@ function privateEncrypt(...args: any[]) {
   const data = anyKeyArg(args, 0);
   if (data.type !== 2) throw notSupportedForKeyType();
   const k = rsaKeyOf(data);
-  const m = view(args[4]);
-  const padding = args[5] >>> 0;
+  const m = view(args[5]);
+  const padding = args[6] >>> 0;
   if (padding === RSA_PKCS1_PADDING) return toBuffer(rsa.rawPrivate(k, rsa.pkcs1Pad(k, m, 1)));
   if (padding === RSA_NO_PADDING) {
     if (m.length !== rsa.byteLen(k)) throw osslError('0200006E', 'rsa routines', 'data too large for key size', 'ERR_OSSL_RSA_DATA_TOO_LARGE_FOR_KEY_SIZE');
@@ -668,8 +829,8 @@ function privateEncrypt(...args: any[]) {
 
 function publicDecrypt(...args: any[]) {
   const k = rsaKeyOf(anyKeyArg(args, 0));
-  const c = view(args[4]);
-  const padding = args[5] >>> 0;
+  const c = view(args[5]);
+  const padding = args[6] >>> 0;
   if (padding === RSA_PKCS1_PADDING) {
     const m = rsa.pkcs1Unpad(rsa.rawPublic(k, c), 1);
     if (!m) throw rsa.rsaErr.invalidPadding();
@@ -679,22 +840,28 @@ function publicDecrypt(...args: any[]) {
   throw osslError('1C8000A5', 'Provider routines', 'illegal or unsupported padding mode', 'ERR_OSSL_ILLEGAL_OR_UNSUPPORTED_PADDING_MODE');
 }
 
+/** isKeyAlgorithmAvailable(name): the key types this binding can create (no ML-DSA / ML-KEM). */
+function isKeyAlgorithmAvailable(name: unknown): boolean {
+  return typeof name === 'string' && Object.prototype.hasOwnProperty.call(OKP, name.toLowerCase());
+}
+
 export const asymmetric: Record<string, unknown> = {
   // the subset of OpenSSL's curve list implemented here, in OpenSSL's order
   getCurves: () => ['secp224r1', 'secp256k1', 'secp384r1', 'secp521r1', 'prime256v1'],
   Sign,
   Verify,
   SignJob,
-  NidKeyPairGenJob,
+  NamedKeyPairGenJob,
   EcKeyPairGenJob,
   RsaKeyPairGenJob,
   DsaKeyPairGenJob,
   DhKeyPairGenJob,
+  DHBitsJob,
   ECDH,
   ECDHConvertKey,
-  statelessDH,
   publicEncrypt,
   privateDecrypt,
   privateEncrypt,
   publicDecrypt,
+  isKeyAlgorithmAvailable,
 };

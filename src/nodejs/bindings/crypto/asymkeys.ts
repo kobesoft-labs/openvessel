@@ -310,15 +310,21 @@ function readPssParams(n: der.Node | undefined): PssParams | null {
       const alg = der.children(params)[0];
       mgf1 = digestByOid(der.readOid(alg)) ?? mgf1;
     } else if (c.tag === 0xa2) {
-      saltLength = Number(der.readInt(der.read(c.body)));
+      const v = der.read(c.body);
+      // a negative salt length is no restriction at all (OpenSSL drops the parameters)
+      if (v.body.length && v.body[0] & 0x80) return null;
+      saltLength = Number(der.readInt(v));
     }
   }
   return { hash, mgf1, saltLength };
 }
 
 function readRsaPublic(b: Uint8Array): RsaKey {
-  const [n, e] = der.children(der.expect(der.parse(b), 0x30));
-  return { n: der.readInt(n), e: der.readInt(e) };
+  // d2i_RSAPublicKey reads one RSAPublicKey and ignores what follows it
+  const parts = der.children(der.expect(der.read(b), 0x30));
+  if (parts.length !== 2) throw new der.DerError('not an RSAPublicKey');
+  const [n, e] = parts.map((x) => der.readInt(der.expect(x, 0x02)));
+  return { n, e };
 }
 
 function readRsaPrivate(b: Uint8Array): RsaKey {
@@ -447,8 +453,7 @@ function bytesToKey(cipher: string, pass: Uint8Array, salt: Uint8Array): { key: 
 }
 
 function runCipher(name: string, encrypt: boolean, key: Uint8Array, iv: Uint8Array, data: Uint8Array): Uint8Array {
-  const c = new CipherBase(encrypt);
-  c.initiv(name, key, iv, -1);
+  const c = new CipherBase(encrypt, name, key, iv, -1);
   return concat([c.update(data), c.final()]);
 }
 
@@ -482,8 +487,11 @@ function decryptPkcs8(b: Uint8Array, pass: Uint8Array): Uint8Array {
 
 function encryptPkcs8(plain: Uint8Array, cipher: string, pass: Uint8Array): Uint8Array {
   const info = findCipher(cipher);
-  const oid = Object.entries(PBE_CIPHERS).find(([, n]) => info && findCipher(n)!.nid === info.nid)?.[0];
-  if (!info || !oid) throw err('ERR_CRYPTO_UNKNOWN_CIPHER');
+  if (!info) throw err('ERR_CRYPTO_UNKNOWN_CIPHER');
+  const oid = Object.entries(PBE_CIPHERS).find(([, n]) => findCipher(n)?.nid === info.nid)?.[0];
+  // provider-only ciphers (no NID, e.g. aes-128-cbc-cts) have nothing to name them by in PBES2
+  if (!info.nid) throw osslError('0680007C', 'asn1 encoding routines', 'cipher has no object identifier', 'ERR_OSSL_ASN1_CIPHER_HAS_NO_OBJECT_IDENTIFIER');
+  if (!oid) throw err('ERR_CRYPTO_UNKNOWN_CIPHER');
   const salt = new Uint8Array(16);
   fillRandom(salt);
   const iv = new Uint8Array(info.ivLength ?? 0);
@@ -623,7 +631,13 @@ export function parsePublicOrPrivate(data: Uint8Array, format: number, type: num
       return [readSpki(data), false];
     } catch (e) {
       if ((e as any)?.library) throw e;
-      throw keyErr.readAsym();
+      // Node 24+ decorates the error with the decoder error OpenSSL queued
+      let seq = false;
+      try {
+        seq = der.read(data).tag === 0x30;
+      } catch {}
+      const cause = seq ? keyErr.fieldMissing() : keyErr.wrongTag();
+      throw Object.assign(keyErr.readAsym(), { code: (cause as any).code, library: (cause as any).library, reason: (cause as any).reason });
     }
   }
   return [privateFromDer(data, type, pass), true];
@@ -721,6 +735,9 @@ export function importJwk(jwk: any, kty: string, namedCurve: unknown): KeyData {
     if (jwk.d === undefined) return { type: 1, asym: { kind: 'rsa', rsa } };
     for (const f of ['d', 'p', 'q', 'dp', 'dq', 'qi']) if (typeof jwk[f] !== 'string') throw bad();
     Object.assign(rsa, { d: big(jwk.d), p: big(jwk.p), q: big(jwk.q), dp: big(jwk.dp), dq: big(jwk.dq), qi: big(jwk.qi) });
+    // Node 24+ has OpenSSL check the key: the modulus must be the product of the primes
+    // (multi-prime keys, with "oth", are not implemented here)
+    if (jwk.oth !== undefined || rsa.p! * rsa.q! !== rsa.n) throw bad();
     return { type: 2, asym: { kind: 'rsa', rsa } };
   }
   if (kty === 'EC') {
@@ -739,6 +756,7 @@ export function importJwk(jwk: any, kty: string, namedCurve: unknown): KeyData {
     if (jwk.d === undefined) return { type: 1, asym: { kind: 'ec', curve, pub } };
     if (typeof jwk.d !== 'string') throw bad();
     const d = bytesToBigInt(unb64(jwk.d));
+    if (d < 1n || d >= curveOrder(curve)) throw bad();
     const a = ecFromPrivate(curve, d) as Extract<Asym, { kind: 'ec' }>;
     if (decode(a.pub, Enc.HEX) !== decode(pub, Enc.HEX)) throw bad();
     return { type: 2, asym: a };

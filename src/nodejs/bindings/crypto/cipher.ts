@@ -5,7 +5,7 @@ import { GHASH } from '@noble/ciphers/_polyval.js';
 import { Poly1305 } from '@noble/ciphers/_poly1305.js';
 import { aes, desEde, type BlockCipher } from './blockcipher.ts';
 import { ChaChaStream } from './chacha.ts';
-import { md5, sha1 } from '@noble/hashes/legacy.js';
+import { sha1 } from '@noble/hashes/legacy.js';
 import { CIPHERS, SSL_CIPHERS, type CipherInfo } from './tables.ts';
 import { secretKeyBytes } from './keys.ts';
 import { S } from '../../state.ts';
@@ -529,6 +529,7 @@ class ChaChaPolyMode implements AeadEngine {
 // AES key wrap (RFC 3394) and key wrap with padding (RFC 5649)
 
 class WrapMode implements Engine {
+  private used = false;
   constructor(
     private c: BlockCipher,
     private enc: boolean,
@@ -570,7 +571,14 @@ class WrapMode implements Engine {
     return [a, r];
   }
   update(data: Uint8Array): Uint8Array | null {
+    if (this.used) return null;
     if (data.length === 0) return new Uint8Array(0);
+    this.used = true;
+    this.ok = this.wrap(data) ?? null;
+    return this.ok;
+  }
+  private ok: Uint8Array | null = null;
+  private wrap(data: Uint8Array): Uint8Array | null {
     if (this.enc) {
       if (!this.pad) {
         if (data.length < 16 || data.length % 8) return null;
@@ -609,7 +617,94 @@ class WrapMode implements Engine {
     return r.slice(0, mli);
   }
   final() {
+    // OpenSSL 3's wrap ciphers take exactly one update(), which must have succeeded
+    if (!this.ok) throw FAIL;
     return new Uint8Array(0);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// CBC with ciphertext stealing (OpenSSL 3's aes-*-cbc-cts; NIST SP 800-38A addendum): the whole
+// message goes through a single update(), at least one block long. CS1 keeps the blocks in order,
+// CS3 (Kerberos) always swaps the last two, CS2 swaps them only when the last one is partial.
+
+export type CtsVariant = 'CS1' | 'CS2' | 'CS3';
+
+class CtsMode implements Engine {
+  private used = false;
+  constructor(
+    private c: BlockCipher,
+    private enc: boolean,
+    private iv: Uint8Array,
+    private variant: CtsVariant,
+  ) {}
+  update(data: Uint8Array): Uint8Array | null {
+    if (this.used || data.length < 16) return null;
+    this.used = true;
+    return this.enc ? this.encrypt(data) : this.decrypt(data);
+  }
+  final() {
+    if (!this.used) throw FAIL;
+    return new Uint8Array(0);
+  }
+  private swaps(d: number) {
+    return this.variant === 'CS3' || (this.variant === 'CS2' && d < 16);
+  }
+  private encrypt(p: Uint8Array): Uint8Array {
+    const n = Math.ceil(p.length / 16);
+    const d = p.length - 16 * (n - 1);
+    const padded = new Uint8Array(16 * n);
+    padded.set(p);
+    const cbc = new Uint8Array(16 * n);
+    let prev = this.iv;
+    for (let i = 0; i < n; i++) {
+      const blk = cbc.subarray(16 * i, 16 * i + 16);
+      for (let j = 0; j < 16; j++) blk[j] = padded[16 * i + j] ^ prev[j];
+      this.c.encrypt(blk, 0, blk, 0);
+      prev = blk;
+    }
+    if (n === 1) return cbc;
+    const head = cbc.subarray(0, 16 * (n - 2));
+    const penult = cbc.subarray(16 * (n - 2), 16 * (n - 2) + d);
+    const last = cbc.subarray(16 * (n - 1));
+    return this.swaps(d) ? concat([head, last, penult]) : concat([head, penult, last]);
+  }
+  private decrypt(input: Uint8Array): Uint8Array {
+    const n = Math.ceil(input.length / 16);
+    const d = input.length - 16 * (n - 1);
+    let c = input;
+    // back to CS1 order: ... C(n-1)* Cn
+    if (n > 1 && this.swaps(d)) {
+      const head = input.subarray(0, 16 * (n - 2));
+      const last = input.subarray(16 * (n - 2), 16 * (n - 1));
+      const penult = input.subarray(16 * (n - 1));
+      c = concat([head, penult, last]);
+    }
+    const out = new Uint8Array(input.length);
+    const blk = new Uint8Array(16);
+    let prev = this.iv;
+    for (let i = 0; i < n - 2; i++) {
+      const ci = c.subarray(16 * i, 16 * i + 16);
+      this.c.decrypt(ci, 0, blk, 0);
+      for (let j = 0; j < 16; j++) out[16 * i + j] = blk[j] ^ prev[j];
+      prev = ci;
+    }
+    if (n === 1) {
+      this.c.decrypt(c, 0, blk, 0);
+      for (let j = 0; j < 16; j++) out[j] = blk[j] ^ prev[j];
+      return out;
+    }
+    const cn = c.subarray(16 * (n - 2) + d);
+    const z = new Uint8Array(16);
+    this.c.decrypt(cn, 0, z, 0);
+    // the stolen tail of C(n-1) is what the zero padding of Pn left in D(Cn)
+    const cPenult = new Uint8Array(16);
+    cPenult.set(c.subarray(16 * (n - 2), 16 * (n - 2) + d));
+    cPenult.set(z.subarray(d), d);
+    for (let j = 0; j < d; j++) out[16 * (n - 1) + j] = z[j] ^ cPenult[j];
+    this.c.decrypt(cPenult, 0, blk, 0);
+    for (let j = 0; j < 16; j++) out[16 * (n - 2) + j] = blk[j] ^ prev[j];
+    return out;
   }
 }
 
@@ -847,9 +942,39 @@ class Des3WrapMode implements Engine {
 // -----------------------------------------------------------------------------
 // cipher lookup
 
+// EVP_CIPHER_fetch also resolves the algorithms' OIDs (NIST CSOR, RSA DSI)
+const CIPHER_OIDS: Record<string, string> = {
+  '2.16.840.1.101.3.4.1.1': 'aes-128-ecb',
+  '2.16.840.1.101.3.4.1.2': 'aes-128-cbc',
+  '2.16.840.1.101.3.4.1.3': 'aes-128-ofb',
+  '2.16.840.1.101.3.4.1.4': 'aes-128-cfb',
+  '2.16.840.1.101.3.4.1.5': 'id-aes128-wrap',
+  '2.16.840.1.101.3.4.1.6': 'id-aes128-gcm',
+  '2.16.840.1.101.3.4.1.7': 'id-aes128-ccm',
+  '2.16.840.1.101.3.4.1.8': 'id-aes128-wrap-pad',
+  '2.16.840.1.101.3.4.1.21': 'aes-192-ecb',
+  '2.16.840.1.101.3.4.1.22': 'aes-192-cbc',
+  '2.16.840.1.101.3.4.1.23': 'aes-192-ofb',
+  '2.16.840.1.101.3.4.1.24': 'aes-192-cfb',
+  '2.16.840.1.101.3.4.1.25': 'id-aes192-wrap',
+  '2.16.840.1.101.3.4.1.26': 'id-aes192-gcm',
+  '2.16.840.1.101.3.4.1.27': 'id-aes192-ccm',
+  '2.16.840.1.101.3.4.1.28': 'id-aes192-wrap-pad',
+  '2.16.840.1.101.3.4.1.41': 'aes-256-ecb',
+  '2.16.840.1.101.3.4.1.42': 'aes-256-cbc',
+  '2.16.840.1.101.3.4.1.43': 'aes-256-ofb',
+  '2.16.840.1.101.3.4.1.44': 'aes-256-cfb',
+  '2.16.840.1.101.3.4.1.45': 'id-aes256-wrap',
+  '2.16.840.1.101.3.4.1.46': 'id-aes256-gcm',
+  '2.16.840.1.101.3.4.1.47': 'id-aes256-ccm',
+  '2.16.840.1.101.3.4.1.48': 'id-aes256-wrap-pad',
+  '1.2.840.113549.3.7': 'des-ede3-cbc',
+};
+
 export function findCipher(name: unknown): CipherInfo | undefined {
   if (typeof name !== 'string') return undefined;
-  return CIPHERS[name.replace(/ +$/, '').toLowerCase()];
+  const n = name.replace(/ +$/, '');
+  return CIPHERS[n.toLowerCase()] ?? CIPHERS[CIPHER_OIDS[n]];
 }
 
 function findByNid(nid: number): CipherInfo | undefined {
@@ -869,7 +994,7 @@ function blockSizeOf(info: CipherInfo) {
   return info.blockSize ?? 1;
 }
 
-function makeEngine(info: CipherInfo, key: Uint8Array, iv: Uint8Array, enc: boolean, tagLen: number): Engine {
+function makeEngine(info: CipherInfo, key: Uint8Array, iv: Uint8Array, enc: boolean, tagLen: number, cts: CtsVariant = 'CS1'): Engine {
   if (isChaChaPoly(info)) return new ChaChaPolyMode(key, iv, enc);
   if (isChaCha(info)) {
     const s = new ChaChaStream(key, iv);
@@ -882,7 +1007,7 @@ function makeEngine(info: CipherInfo, key: Uint8Array, iv: Uint8Array, enc: bool
     case 'ecb':
       return new BlockMode(c, enc, null);
     case 'cbc':
-      return new BlockMode(c, enc, iv);
+      return name.endsWith('-cts') ? new CtsMode(c, enc, iv, cts) : new BlockMode(c, enc, iv);
     case 'ctr':
       return ctrMode(c, iv);
     case 'ofb':
@@ -898,7 +1023,8 @@ function makeEngine(info: CipherInfo, key: Uint8Array, iv: Uint8Array, enc: bool
     case 'ocb':
       return new OcbMode(c, enc, iv, tagLen);
     case 'wrap':
-      return new WrapMode(c, enc, iv, name.includes('pad'));
+      // the -inv variants (OpenSSL 3) run the inverse cipher as the forward one (SP 800-38F 5.1)
+      return new WrapMode(name.endsWith('-inv') ? { ...c, encrypt: c.decrypt, decrypt: c.encrypt } : c, enc, iv, name.includes('pad'));
   }
   throw err('ERR_CRYPTO_UNKNOWN_CIPHER');
 }
@@ -916,17 +1042,23 @@ export class CipherBase {
   #authTag: Uint8Array | null = null;
   #authTagState = kAuthTagUnknown;
   #pendingAuthFailed = false;
+  #ccmUpdated = false;
+  /** a second CCM update() failed: the context is unusable, final() fails without a tag */
+  #ccmBroken = false;
   #maxMessageSize = INT_MAX;
 
-  constructor(isEncrypt: unknown) {
+  // new CipherBase(isEncrypt, cipher, key, iv | null, authTagLength[, ctsMode, xtsStandard]): Node 24+
+  // initializes in the constructor (the old init/initiv methods are gone)
+  constructor(isEncrypt: unknown, cipherType: string, key: unknown, iv: unknown, authTagLength: number, ctsMode?: unknown, xtsStandard?: unknown) {
     this.#encrypt = isEncrypt === true;
+    this.#initiv(cipherType, key, iv, typeof authTagLength === 'number' ? authTagLength : -1, ctsMode, xtsStandard);
   }
 
-  #commonInit(cipherType: string, info: CipherInfo, key: Uint8Array, iv: Uint8Array, authTagLen: number) {
+  #commonInit(cipherType: string, info: CipherInfo, key: Uint8Array, iv: Uint8Array, authTagLen: number, cts?: CtsVariant) {
     if (isAuthMode(info) && !this.#initAuthenticated(cipherType, info, iv.length, authTagLen)) return;
     if (key.length !== info.keyLength) throw err('ERR_CRYPTO_INVALID_KEYLEN');
     this.#info = info;
-    this.#ctx = makeEngine(info, key, iv, this.#encrypt, this.#authTagLen);
+    this.#ctx = makeEngine(info, key, iv, this.#encrypt, this.#authTagLen, cts);
   }
 
   #initAuthenticated(cipherType: string, info: CipherInfo, ivLen: number, authTagLen: number): boolean {
@@ -952,29 +1084,12 @@ export class CipherBase {
     return true;
   }
 
-  // init(cipher, password, authTagLength): the deprecated createCipher (EVP_BytesToKey with MD5)
-  init(cipherType: string, password: unknown, authTagLength: number) {
+  #initiv(cipherType: string, key: unknown, iv: unknown, authTagLength: number, ctsMode?: unknown, xtsStandard?: unknown) {
     const info = findCipher(cipherType);
     if (!info) throw err('ERR_CRYPTO_UNKNOWN_CIPHER');
-    const pass = view(password);
-    const keyLen = info.keyLength;
-    const ivLen = info.ivLength ?? 0;
-    const material: Uint8Array[] = [];
-    let have = 0;
-    let prev = new Uint8Array(0);
-    while (have < keyLen + ivLen) {
-      prev = md5(concat([prev, pass])) as Uint8Array<ArrayBuffer>;
-      material.push(prev);
-      have += prev.length;
-    }
-    const all = concat(material);
-    this.#commonInit(cipherType, info, all.subarray(0, keyLen), all.subarray(keyLen, keyLen + ivLen), authTagLength);
-  }
-
-  // initiv(cipher, key, iv | null, authTagLength)
-  initiv(cipherType: string, key: unknown, iv: unknown, authTagLength: number) {
-    const info = findCipher(cipherType);
-    if (!info) throw err('ERR_CRYPTO_UNKNOWN_CIPHER');
+    // ctsMode belongs to the *-cbc-cts ciphers, xtsStandard to XTS (not provided here)
+    if (ctsMode !== undefined && !info.name.toLowerCase().endsWith('-cts')) throw err('ERR_CRYPTO_UNSUPPORTED_OPERATION', `${cipherType} does not support the ctsMode option`);
+    if (xtsStandard !== undefined) throw err('ERR_CRYPTO_UNSUPPORTED_OPERATION', `${cipherType} does not support the xtsStandard option`);
     const k = secretKeyBytes(key);
     const ivb = iv === null || iv === undefined ? new Uint8Array(0) : view(iv);
     const expected = info.ivLength ?? 0;
@@ -982,7 +1097,7 @@ export class CipherBase {
     if (!hasIv && expected !== 0) throw err('ERR_CRYPTO_INVALID_IV');
     if (!isAuthMode(info) && hasIv && ivb.length !== expected) throw err('ERR_CRYPTO_INVALID_IV');
     if (isChaChaPoly(info) && ivb.length > 12) throw err('ERR_CRYPTO_INVALID_IV');
-    this.#commonInit(cipherType, info, k, ivb.slice(), authTagLength);
+    this.#commonInit(cipherType, info, k, ivb.slice(), authTagLength, typeof ctsMode === 'string' ? (ctsMode as CtsVariant) : undefined);
   }
 
   #isAuth() {
@@ -1003,12 +1118,21 @@ export class CipherBase {
     const info = this.#info!;
     if (info.mode === 'ccm' && input.length > this.#maxMessageSize) throw err('ERR_CRYPTO_INVALID_MESSAGELEN');
     if (!this.#encrypt && this.#isAuth()) this.#passTag();
+    if (info.mode === 'ccm') {
+      // CCM processes the whole text in one update()
+      if (this.#ccmUpdated) {
+        this.#ccmBroken = true;
+        throw cryptoError('Trying to add data in unsupported state');
+      }
+      this.#ccmUpdated = true;
+    }
     const out = ctx.update(input);
     if (out === null) {
       if (!this.#encrypt && info.mode === 'ccm') {
         this.#pendingAuthFailed = true;
         return toBuffer(new Uint8Array(0));
       }
+      if (info.mode === 'ccm') this.#ccmBroken = true;
       throw cryptoError('Trying to add data in unsupported state');
     }
     return toBuffer(out.byteOffset === 0 && out.byteLength === out.buffer.byteLength ? out : out.slice());
@@ -1022,9 +1146,11 @@ export class CipherBase {
     if (!this.#encrypt && isAuth) this.#passTag();
     this.#ctx = null;
     let out: Uint8Array;
+    if (this.#ccmBroken) throw cryptoError('Unsupported state or unable to authenticate data');
     try {
       if (!this.#encrypt && info.mode === 'ccm') {
-        if (this.#pendingAuthFailed) throw FAIL;
+        // CCM authenticates the text in update(): with none (Node 26 tests this), there is nothing verified
+        if (this.#pendingAuthFailed || !this.#ccmUpdated) throw FAIL;
         out = new Uint8Array(0);
       } else {
         out = ctx.final();
@@ -1056,15 +1182,9 @@ export class CipherBase {
     if (!this.#ctx || !this.#isAuth() || this.#encrypt || this.#authTagState !== kAuthTagUnknown) return false;
     const t = view(tag);
     const len = t.length;
-    const valid = this.#info!.mode === 'gcm' ? (this.#authTagLen === -1 || this.#authTagLen === len) && isValidGcmTagLength(len) : this.#authTagLen === len;
+    // Node 26 (DEP0182 end-of-life): without authTagLength, a GCM tag must be the full 16 bytes
+    const valid = this.#info!.mode === 'gcm' ? (this.#authTagLen === -1 ? len === 16 : this.#authTagLen === len) && isValidGcmTagLength(len) : this.#authTagLen === len;
     if (!valid) throw err('ERR_CRYPTO_INVALID_AUTH_TAG', `Invalid authentication tag length: ${len}`);
-    if (this.#info!.mode === 'gcm' && this.#authTagLen === -1 && len !== 16 && S.optionValues['--pending-deprecation']) {
-      S.requireBuiltin?.('internal/process/warning').emitWarning(
-        'Using AES-GCM authentication tags of less than 128 bits without specifying the authTagLength option when initializing decryption is deprecated.',
-        'DeprecationWarning',
-        'DEP0182',
-      );
-    }
     this.#authTagLen = len;
     this.#authTagState = kAuthTagKnown;
     this.#authTag = t.slice();
@@ -1089,15 +1209,18 @@ export class CipherBase {
 
 /** EVP_CIPHER_do_all_sorted names, restricted to the ciphers implemented here. */
 export function getCiphers() {
-  return Object.keys(CIPHERS).map((k) => (k.startsWith('id-aes') ? k.replace(/-(gcm|ccm)$/, (m) => m.toUpperCase()) : k === 'id-smime-alg-cms3deswrap' ? 'id-smime-alg-CMS3DESwrap' : k));
+  // Node 24+ lists every name in lower case (id-aes128-gcm, id-smime-alg-cms3deswrap)
+  return Object.keys(CIPHERS);
 }
 
 export function getSSLCiphers() {
   return SSL_CIPHERS.slice();
 }
 
-// getCipherInfo(target, nameOrNid, keyLength, ivLength)
-export function getCipherInfo(target: any, nameOrNid: unknown, keyLength?: number, ivLength?: number) {
+// getCipherInfo(nameOrNid, keyLength, ivLength): Node 24+ builds a null-prototype object with
+// lower-case names here (lib used to pass the target in and lower-case it itself)
+export function getCipherInfo(nameOrNid: unknown, keyLength?: number, ivLength?: number) {
+  const target = Object.create(null);
   const info = typeof nameOrNid === 'number' ? findByNid(nameOrNid) : findCipher(nameOrNid);
   if (!info) return undefined;
   let keyLen = info.keyLength;
@@ -1116,11 +1239,12 @@ export function getCipherInfo(target: any, nameOrNid: unknown, keyLength?: numbe
     } else if (ivLength !== ivLen) return undefined;
     ivLen = ivLength;
   }
-  if (info.mode) target.mode = info.mode;
-  target.name = info.name;
-  target.nid = info.nid;
-  if (info.mode !== 'stream') target.blockSize = blockSizeOf(info);
-  if (ivLen !== 0) target.ivLength = ivLen;
+  // every key is set, undefined when OpenSSL has no value (no NID, no IV, a stream cipher's block size)
+  target.mode = info.mode?.toLowerCase();
+  target.name = info.name.toLowerCase();
+  target.nid = info.nid || undefined;
   target.keyLength = keyLen;
+  target.blockSize = info.mode !== 'stream' ? blockSizeOf(info) : undefined;
+  target.ivLength = ivLen !== 0 ? ivLen : undefined;
   return target;
 }

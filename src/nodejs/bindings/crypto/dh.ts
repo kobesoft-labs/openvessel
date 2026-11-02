@@ -64,8 +64,8 @@ class DHBase {
   computeSecret(key: unknown) {
     const peer = bytesToBigInt(view(key));
     if (peer <= 1n) throw err('ERR_CRYPTO_INVALID_KEYLEN', 'Supplied key is too small');
-    // ncrypto reports DH_CHECK_PUBKEY_TOO_LARGE as an unspecified error
-    if (peer >= this.p - 1n) throw err('ERR_CRYPTO_INVALID_KEYTYPE', 'Unspecified validation error');
+    // Node 24+ (ncrypto) reports DH_CHECK_PUBKEY_TOO_LARGE as such
+    if (peer >= this.p - 1n) throw err('ERR_CRYPTO_INVALID_KEYLEN', 'Supplied key is too large');
     if (this.priv === undefined) return toBuffer(new Uint8Array(0));
     return toBuffer(bigIntToBytes(modPow(peer, this.priv, this.p), Math.ceil(bitLength(this.p) / 8)));
   }
@@ -123,6 +123,8 @@ export class DiffieHellman extends DHBase {
       g = bytesToBigInt(view(b));
       if (g < 2n) throw dhErr.badGenerator();
     }
+    // Node 24+ (ncrypto) also refuses a generator outside the group
+    if (g >= p) throw dhErr.badGenerator();
     super(p, g);
   }
 }

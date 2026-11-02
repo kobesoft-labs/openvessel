@@ -3,19 +3,19 @@ const b = require('internal/test/binding').internalBinding('crypto');
 const fs = require('fs');
 const supported = (n) => {
   const l = n.toLowerCase();
-  if (/xts|aria|camellia|sm4/.test(l)) return false;
+  if (/xts|aria|camellia|sm4|siv/.test(l)) return false; // AES-SIV and AES-GCM-SIV (OpenSSL 3.2+) are not implemented
   return /^(aes|id-aes|chacha20|des-ede|des3|id-smime-alg-cms3deswrap)/.test(l);
 };
 const ciphers = b.getCiphers().filter(supported);
 const table = {};
 for (const n of ciphers) {
-  const info = b.getCipherInfo({}, n);
+  const info = { ...b.getCipherInfo(n) }; // Node 24+: (nameOrNid[, keyLength, ivLength]), a null-prototype object
   table[n.toLowerCase()] = info;
 }
 const out = `// Generated from Node ${process.version} (OpenSSL ${process.versions.openssl}) by test/fixtures-gen/crypto-tables.cjs. Do not edit.
 // Cipher metadata for the ciphers OpenVessel implements: lookup key is the lower-cased name.
 
-export interface CipherInfo { mode?: string; name: string; nid: number; blockSize?: number; ivLength?: number; keyLength: number }
+export interface CipherInfo { mode?: string; name: string; nid?: number; blockSize?: number; ivLength?: number; keyLength: number }
 
 export const CIPHERS: Record<string, CipherInfo> = ${JSON.stringify(table, null, 0).replace(/\},"/g, '},\n  "')};
 

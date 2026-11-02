@@ -30,8 +30,10 @@ export class Hash {
   #len: number;
   #digest: Uint8Array | null = null;
 
-  // new Hash(algorithm | Hash, xofLen, algorithmId, algorithmCache)
-  constructor(algorithm: unknown, xofLen?: number, algorithmId?: number, cache?: object) {
+  // new Hash(algorithm | Hash, xofLen, algorithmId, algorithmCache[, functionName, customization])
+  constructor(algorithm: unknown, xofLen?: number, algorithmId?: number, cache?: object, functionName?: unknown, customization?: unknown) {
+    // cSHAKE parameters need OpenSSL 4's digest options (Node 26 ships OpenSSL 3.5)
+    if (functionName !== undefined || customization !== undefined) throw cryptoError('Digest method not supported');
     let algo: DigestAlgo | undefined;
     let ctx: Ctx | undefined;
     if (algorithm instanceof Hash) {
@@ -68,7 +70,10 @@ export class Hmac {
   #ctx: HmacCtx | null = null;
 
   init(hashType: unknown, key: unknown) {
-    const algo = getDigest(String(hashType));
+    let name = String(hashType);
+    // historically, dss1 is an alias of SHA-1
+    if (name === 'dss1' || name === 'DSS1') name = 'SHA1';
+    const algo = getDigest(name);
     if (!algo) throw err('ERR_CRYPTO_INVALID_DIGEST', `Invalid digest: ${String(hashType)}`);
     if (algo.xof) throw cryptoError('error:00000000:lib(0)::reason(0)');
     this.#ctx = new HmacCtx(algo, secretKeyBytes(key));
@@ -91,12 +96,31 @@ export class Hmac {
   }
 }
 
-// crypto.digest(algorithm, algorithmId, algorithmCache, input, outputEncoding, outputEncodingId)
-export function oneShotDigest(algorithm: string, algorithmId: number, cache: object, input: unknown, outputEncoding: string, outputEncodingId?: number) {
+// crypto.hash(algorithm, algorithmId, algorithmCache, input, outputEncoding, outputEncodingId,
+//             outputLength[, functionName, customization])
+export function oneShotDigest(
+  algorithm: string,
+  algorithmId: number,
+  cache: object,
+  input: unknown,
+  outputEncoding: string,
+  outputEncodingId?: number,
+  outputLength?: number,
+  functionName?: unknown,
+  customization?: unknown,
+) {
   const algo = lookup(algorithm, algorithmId, cache);
   if (!algo) throw cryptoError(`Digest method ${algorithm} is not supported`);
+  // cSHAKE parameters need OpenSSL 4's digest options; Node 26 ships OpenSSL 3.5
+  if (functionName !== undefined || customization !== undefined) throw cryptoError('Digest options are not supported');
+  let len = algo.size;
+  if (typeof outputLength === 'number' && outputLength !== len) {
+    if (!algo.xof) throw cryptoError(`Output length ${outputLength} is invalid for ${algorithm}, which does not support XOF`);
+    len = outputLength;
+  }
   const enc = typeof outputEncodingId === 'number' ? (outputEncodingId as Enc) : parseEncoding(outputEncoding, Enc.HEX);
-  return encodeOutput(digestOnce(algo, stringOrBuffer(input)), enc);
+  const out = len === algo.size ? digestOnce(algo, stringOrBuffer(input)) : len > 0 ? digestOnce(algo, stringOrBuffer(input), len) : new Uint8Array(0);
+  return encodeOutput(out, enc);
 }
 
 export function getHashes() {
@@ -104,10 +128,11 @@ export function getHashes() {
   return HASH_NAMES.slice();
 }
 
-// new HashJob(mode, algorithm, data[, lengthInBits])
-export const HashJob = jobClass('HashJob', (async, algorithm: string, data: unknown, length?: number) => {
+// new HashJob(mode, algorithm, data[, lengthInBits[, functionName, customization]])
+export const HashJob = jobClass('HashJob', (async, algorithm: string, data: unknown, length?: number, functionName?: unknown, customization?: unknown) => {
   const algo = getDigest(algorithm);
   if (!algo) throw err('ERR_CRYPTO_INVALID_DIGEST', `Invalid digest: ${algorithm}`);
+  if (functionName !== undefined || customization !== undefined) throw cryptoError('Digest options are not supported');
   const input = async ? copy(view(data)) : view(data);
   let len = algo.size;
   if (typeof length === 'number' && length >= 0 && Number.isInteger(length)) {
