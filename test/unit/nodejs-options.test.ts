@@ -26,7 +26,7 @@ test('V8 flags are checked against V8 list', () => {
   assert.equal(int.error!.split('\n')[0], 'bad option: --stack-trace-limit');
   assert.equal(int.v8Error, 'Error: illegal value for flag --stack-trace-limit of type int\nTry --help for options\n');
   // V8 stops at a bad value: that flag, the ones after it and Node's own V8 flags are left over
-  const NODE_V8 = ['--harmony-import-attributes', '--no-harmony-import-assertions', '--experimental-wasm-imported-strings', '--experimental-wasm-memory64', '--experimental-wasm-exnref'];
+  const NODE_V8 = ['--harmony-import-attributes', '--js-source-phase-imports', '--external-memory-max-reasonable-size=0'];
   assert.equal(parseCommandLine(['node', '--foo', '--stack-size=x', '--bar']).error, ['--foo', '--stack-size=x', '--bar', ...NODE_V8].map((a) => `bad option: ${a}`).join('\n'));
   assert.equal(parseCommandLine(['node', '--foo', '--bar']).error, 'bad option: --foo\nbad option: --bar');
 });
@@ -62,7 +62,8 @@ test('implications', () => {
 });
 
 test('--watch checks', () => {
-  assert.equal(parseCommandLine(['node', '--watch']).error, '--watch requires specifying a file');
+  // Node 26 checks the arguments after the executable (`node --watch` runs `node` again, a REPL)
+  assert.equal(parseCommandLine(['node', '--watch']).error, undefined);
   assert.equal(parseCommandLine(['node', '--watch', '-e', '1']).error, 'either --watch or --eval can be used, not both');
   assert.equal(parseCommandLine(['node', '--watch', '--check', 'a.js']).error, 'either --watch or --check can be used, not both');
   assert.equal(parseCommandLine(['node', '--watch', 'a.js']).error, undefined);
