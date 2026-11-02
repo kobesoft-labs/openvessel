@@ -47,7 +47,7 @@ try {
     let log = '';
     try {
       await session.page.reload();
-      await session.page.evaluate(() => window.ovReady);
+      await Promise.race([session.page.evaluate(() => window.ovReady), new Promise((_, j) => setTimeout(() => j(new Error('runtime did not boot in 60 s')), 60000))]);
       await mountProject(session.page, join(root, 'sites', s.id));
       const pm = packageManagerOf(join(root, 'sites', s.id));
       const inst = await exec(session.page, `${env} ${pm} install 2>&1`, { timeout: 15 * 60e3 });
@@ -62,9 +62,8 @@ try {
     } catch (e) {
       r.error = `harness: ${e.message}`.slice(0, 2000);
       log += r.error;
-      try {
-        await session.browser.close();
-      } catch {}
+      // a browser stuck on a hung page may never finish closing: give up on it after 30 s
+      await Promise.race([session.browser.close().catch(() => {}), new Promise((r) => setTimeout(r, 30000))]);
       session = await openBrowser();
     }
     r.ms = Date.now() - t0;
