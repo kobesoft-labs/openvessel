@@ -2305,7 +2305,7 @@ const mktemp: Program = async (ctx) => {
   const { flags, opts, args } = getopt(ctx.argv.slice(1), 'p');
   const tmpl = args[0] ?? 'tmp.XXXXXXXXXX';
   const dir = opts.get('p') ?? (flags.has('t') || !args[0] ? (ctx.env.TMPDIR ?? '/tmp') : '');
-  const name = tmpl.replace(/X+$/, (m) => Array.from({ length: m.length }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join(''));
+  const name = tmpl.replace(/X+$/, (m) => Array.from(crypto.getRandomValues(new Uint8Array(m.length)), (b) => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join(''));
   const full = ctx.resolve(dir ? path.join(dir, name) : name);
   if (flags.has('d')) ctx.vfs.mkdir(full, 0o700);
   else ctx.vfs.createFile(full, 0o600, { excl: true });

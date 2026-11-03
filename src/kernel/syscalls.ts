@@ -237,6 +237,8 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         proc.freeFd(3); // EMFILE before anything is created
         // an existing file needs the permission its access mode asks for (the kernel's own /proc and
         // /dev/tty paths aside); a new one, write permission on its directory
+        // O_CREAT|O_EXCL fails on any existing entry, a dangling symlink included (nothing is created through it)
+        if ((flags & 0o300) === 0o300 && kernel.procFdOf(p, proc.pid) === null && vfs.tryLookup(p, false)) throw kerr('EEXIST');
         const existing = kernel.procFdOf(p, proc.pid) === null && p !== '/dev/tty' ? vfs.tryLookup(p, !(flags & 0o400000)) : undefined;
         if (existing) {
           if ((flags & 0o300) !== 0o300) checkPerm(existing, accessFor(flags)); // O_CREAT|O_EXCL: EEXIST comes first
@@ -328,6 +330,8 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
         const p = abs(proc, a.p);
         const flags = a.flags ?? 0o1101;
         const data = bin ?? new Uint8Array(0);
+        // O_CREAT|O_EXCL fails on any existing entry, a dangling symlink included (nothing is created through it)
+        if ((flags & 0o300) === 0o300 && vfs.tryLookup(p, false)) throw kerr('EEXIST');
         const existing = vfs.tryLookup(p);
         if (existing && flags & 0o200) throw kerr('EEXIST');
         if (existing && !isDir(existing)) checkPerm(existing, 2);
@@ -373,9 +377,9 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       }
       case 'mkdtemp': {
         for (let i = 0; i < 100; i++) {
-          const suffix = Array.from({ length: 6 }, () => 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[Math.floor(Math.random() * 62)]).join('');
+          const suffix = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[b % 62]).join('');
           const p = abs(proc, a.prefix + suffix);
-          if (vfs.exists(p)) continue;
+          if (vfs.tryLookup(p, false)) continue; // a dangling symlink counts as taken
           checkDirWritable(p);
           vfs.mkdir(p, 0o700, false, proc.umask);
           return p;

@@ -238,10 +238,15 @@ const GAP = 0xffffffff;
 const HDR = 16;
 let spillSeq = 0;
 
+const SPILL_PREFIX = '/tmp/.openvessel-msg-';
+// the browser's, taken before bootstrap puts Node's webcrypto on globalThis
+const nativeGetRandomValues = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
 function spill(payload: Uint8Array): Uint8Array | null {
-  const p = `/tmp/.openvessel-msg-${S.init.pid}-${++spillSeq}-${Math.random().toString(36).slice(2)}`;
+  // an unguessable name, created exclusively (O_EXCL): another program can't plant a file or link there
+  const rnd = Array.from(nativeGetRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+  const p = `${SPILL_PREFIX}${S.init.pid}-${++spillSeq}-${rnd}`;
   try {
-    sys('writeFile', { p, flags: 0o1101, mode: 0o600 }, payload);
+    sys('writeFile', { p, flags: 0o1301, mode: 0o600 }, payload);
   } catch {
     return null;
   }
@@ -251,7 +256,10 @@ function spill(payload: Uint8Array): Uint8Array | null {
   return rec;
 }
 function spilledPath(payload: Uint8Array | null): string | null {
-  return payload && payload.length && payload[0] === 0 ? new TextDecoder().decode(payload.subarray(1)) : null;
+  if (!payload || !payload.length || payload[0] !== 0) return null;
+  const p = new TextDecoder().decode(payload.subarray(1));
+  // only files spill() made are read and removed
+  return p.startsWith(SPILL_PREFIX) && !p.includes('/', SPILL_PREFIX.length) ? p : null;
 }
 /** The payload a record stands for: a spilled one is read back (and its file removed). */
 function unspill(payload: Uint8Array | null): Uint8Array | null {
