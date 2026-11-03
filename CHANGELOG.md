@@ -3,7 +3,27 @@
 OpenVessel follows [Semantic Versioning](https://semver.org). Each release states the Node.js
 version it ports; see [docs/NODE-VERSION.md](docs/NODE-VERSION.md) for how that version is tracked.
 
-## Unreleased · Node.js v26.13.0
+## 2.0.0 — 2026-11-03 · Node.js v26.13.0
+
+Major version: OpenVessel now ports a new Node.js major. The host API and the embedding requirements
+are unchanged, but programs run on Node.js 26 instead of 22.
+
+### Upgrading
+
+- Programs see Node.js 26's behaviour, including what Node 23–26 removed or changed: the `_stream_*`
+  modules and `assert.CallTracker` are gone, `--experimental-strip-types` and
+  `--experimental-require-module` are now `--strip-types` and `--require-module` (the old names are
+  aliases), and `localStorage`/`sessionStorage` exist as globals. Check packages that pin
+  `engines.node` to 22.
+- Embedders don't need to change anything; the bundled Node `lib/` (`dist/runtime/nodelib.js`) grows
+  from about 4.5 MB to about 6.6 MB.
+
+### Results
+
+- Node's own test suite: 1516 of 1516 tests that a browser can pass (Chrome 156); 1484 in Firefox 157.
+- Astro corpus: 127 of 147 real sites build. Four more (Tailwind CSS 4 sites without a lockfile)
+  currently get `tailwindcss` 4.3.4, whose WebAssembly build hangs while loading in real Node.js 26 as
+  well; with 4.3.3 they build, which gives 131, as on 1.2.1.
 
 ### Node.js runtime
 

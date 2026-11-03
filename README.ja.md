@@ -46,7 +46,7 @@ OpenVessel はクリーンルーム方式で開発しています（ほかのブ
 
 ## いまの状態
 
-- バージョン: 1.2.1。[変更履歴](CHANGELOG.md)・[リリース手順](docs/RELEASING.md) を参照してください。バージョン番号は
+- バージョン: 2.0.0。[変更履歴](CHANGELOG.md)・[リリース手順](docs/RELEASING.md) を参照してください。バージョン番号は
   OpenVessel 独自の semver で、移植している Node.js のバージョンは各リリースのタイトルに記載します。
 - Node.js: v26.13.0（`src/node/version.ts`）
 - Node 自身のテストスイート: 対象モジュールの 1563 本のうち、ブラウザで通せる 1516 本すべて（100%）が通ります。ブラウザでは通せないテストは、理由とともに [docs/compatibility.ja.md](docs/compatibility.ja.md) に記載しています。
