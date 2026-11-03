@@ -3,6 +3,18 @@
 OpenVessel follows [Semantic Versioning](https://semver.org). Each release states the Node.js
 version it ports; see [docs/NODE-VERSION.md](docs/NODE-VERSION.md) for how that version is tracked.
 
+## 2.0.1 — 2026-11-03 · Node.js v26.13.0
+
+Hardening from a security review. All three are inside the virtual machine (between programs running in
+the same tab); the host page, the origin isolation and the network policy are unaffected.
+
+- `open()` and `writeFile` with `O_CREAT|O_EXCL` (`fs` flag `wx`) fail with `EEXIST` on a dangling
+  symbolic link, as on Linux. They used to create the file the link points to.
+- `mkdtemp`, `mktemp` and the kernel files that carry large `MessageChannel` messages get their names
+  from the browser's cryptographic random number generator instead of `Math.random`, so other programs
+  can't predict them.
+- Those message files are created exclusively, and a reader only reads and removes files of that kind.
+
 ## 2.0.0 — 2026-11-03 · Node.js v26.13.0
 
 Major version: OpenVessel now ports a new Node.js major. The host API and the embedding requirements
