@@ -52,18 +52,29 @@ export async function openBrowser({ headless = true, profile = root + 'node_modu
 }
 
 export async function exec(page, cmd, { cwd = '/home/user/app', timeout = 600000, allowAll = true } = {}) {
-  return page.evaluate(
-    async ({ cmd, cwd, allowAll }) => {
-      const ov = window.ov;
-      if (allowAll) await ov.network.setPolicy({ mode: 'allow-all' });
-      if (window.__trace) await ov._call('debug.trace', { on: true });
-      const t0 = performance.now();
-      const r = await ov.exec(cmd, { cwd });
-      return { ...r, ms: Math.round(performance.now() - t0) };
-    },
-    { cmd, cwd, allowAll },
-    { timeout },
-  );
+  // page.evaluate takes no timeout: a command that never ends would hold the caller forever
+  let timer;
+  const expired = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`command timed out after ${Math.round(timeout / 1000)} s: ${cmd}`)), timeout);
+  });
+  try {
+    return await Promise.race([run(), expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+  function run() {
+    return page.evaluate(
+      async ({ cmd, cwd, allowAll }) => {
+        const ov = window.ov;
+        if (allowAll) await ov.network.setPolicy({ mode: 'allow-all' });
+        if (window.__trace) await ov._call('debug.trace', { on: true });
+        const t0 = performance.now();
+        const r = await ov.exec(cmd, { cwd });
+        return { ...r, ms: Math.round(performance.now() - t0) };
+      },
+      { cmd, cwd, allowAll },
+    );
+  }
 }
 
 /** The ported runtime (src/nodejs) is the default; this only makes it explicit (/etc/openvessel/node = port). */

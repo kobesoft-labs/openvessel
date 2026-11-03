@@ -1,6 +1,6 @@
 // Runs `npm install && npm run build` for each corpus site in headless Chrome.
 //   node corpus/run.mjs [--legacy] [--shard=i/n] [filter...]   results → corpus/results/port/ (the default, ported runtime) or corpus/results/ (--legacy)
-//   --shard=i/n runs every n-th site from the i-th (1-based), so n runs with different OV_PORT_BASE values share the work
+//   --resume skips sites that already have a result; --shard=i/n runs every n-th site from the i-th (1-based), so n runs with different OV_PORT_BASE values share the work
 import { mkdirSync, readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { startServer, openBrowser, exec } from '../test/e2e/harness.mjs';
@@ -17,6 +17,8 @@ const todo = sites.filter((s) => !filters.length || filters.some((f) => s.id.inc
 const resultsPath = join(outDir, 'results.json');
 const readResults = () => (existsSync(resultsPath) ? JSON.parse(readFileSync(resultsPath, 'utf8')) : {});
 let results = readResults();
+// --resume: skip the sites that already have a result (after an interrupted run)
+if (process.argv.includes('--resume')) todo.splice(0, todo.length, ...todo.filter((s) => !results[s.id]));
 /** Records one site; re-reads the file first, so shards running side by side keep each other's results. */
 function saveResult(r) {
   results = { ...readResults(), [r.id]: r };
