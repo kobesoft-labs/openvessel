@@ -121,6 +121,8 @@ export class Kernel {
     v.writeFile('/proc/cpuinfo', cpuinfo);
     v.writeFile('/proc/meminfo', 'MemTotal:        8388608 kB\nMemFree:         4194304 kB\nMemAvailable:    4194304 kB\n');
     v.writeFile('/proc/version', 'Linux version 6.8.0-openvessel (user@openvessel) #1 SMP OpenVessel\n');
+    v.mkdir('/proc/sys/kernel', 0o555, true);
+    v.writeFile('/proc/sys/kernel/hostname', `${this.hostname}\n`);
   }
 
   /** Installs a builtin program as an executable file in /bin (or another dir). */

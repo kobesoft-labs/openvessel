@@ -12,8 +12,14 @@ class FilePart {
   constructor(
     readonly path: string,
     readonly size: number,
+    /** mtime when the blob was made: a file changed since can't be read (FdEntry, NotReadableError) */
+    readonly mtimeMs?: number,
   ) {}
   read(): Uint8Array {
+    if (this.mtimeMs !== undefined) {
+      const st = sys<{ size: number; mtimeMs: number }>('stat', { p: this.path });
+      if (st.size !== this.size || st.mtimeMs !== this.mtimeMs) throw new Error('the file changed after the blob was made');
+    }
     return sys<Uint8Array>('readFile', { p: this.path });
   }
 }
@@ -96,13 +102,13 @@ export function createBlob() {
     createBlobFromFilePath(path: unknown) {
       // a path that can't be stat'ed throws the UVException (fs.openAsBlob/openAsBlobSync report it)
       const p = pathString(path);
-      let st: { size: number };
+      let st: { size: number; mtimeMs: number };
       try {
-        st = sys<{ size: number }>('stat', { p });
+        st = sys<{ size: number; mtimeMs: number }>('stat', { p });
       } catch (e) {
         throw uvError(e, 'stat', path);
       }
-      return [new BlobHandle([new FilePart(p, st.size)]), st.size];
+      return [new BlobHandle([new FilePart(p, st.size, st.mtimeMs)]), st.size];
     },
     concat(buffers: (ArrayBuffer | ArrayBufferView)[]) {
       const views = buffers.map((x) => (ArrayBuffer.isView(x) ? new Uint8Array(x.buffer, x.byteOffset, x.byteLength) : new Uint8Array(x)));

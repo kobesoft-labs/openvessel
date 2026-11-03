@@ -362,6 +362,8 @@ export function installSyscalls(kernel: Kernel, esm: EsmService, net: NetRouter)
       }
       case 'mkdir': {
         const p = abs(proc, a.p);
+        // procfs has a fixed layout: mkdir in it fails with ENOENT although the parent exists
+        if (p.startsWith('/proc/') && !vfs.tryLookup(p)) throw kerr('ENOENT');
         // the directory that gets the first new entry must be writable
         let first = p;
         if (a.recursive) while (first !== '/' && !vfs.tryLookup(path.dirname(first))) first = path.dirname(first);

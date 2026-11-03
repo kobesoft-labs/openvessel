@@ -2549,6 +2549,44 @@ function shellBuiltinProgram(name: string): Program {
   };
 }
 
+/** /bin/pwd (GNU coreutils): -L/-P, an invalid option fails, other arguments are ignored with a note. */
+const pwdProg: Program = async (ctx) => {
+  const name = ctx.argv[0] ?? 'pwd';
+  let physical = false;
+  let operands = false;
+  for (let i = 1; i < ctx.argv.length; i++) {
+    const a = ctx.argv[i];
+    if (a === '--') {
+      operands ||= i + 1 < ctx.argv.length;
+      break;
+    }
+    if (a === '--logical') physical = false;
+    else if (a === '--physical') physical = true;
+    else if (a.startsWith('--')) {
+      ctx.err(`${name}: unrecognized option '${a}'\nTry '${name} --help' for more information.\n`);
+      return 1;
+    } else if (a.startsWith('-') && a.length > 1) {
+      for (const c of a.slice(1)) {
+        if (c === 'L') physical = false;
+        else if (c === 'P') physical = true;
+        else {
+          ctx.err(`${name}: invalid option -- '${c}'\nTry '${name} --help' for more information.\n`);
+          return 1;
+        }
+      }
+    } else operands = true;
+  }
+  if (operands) ctx.err(`${name}: ignoring non-option arguments\n`);
+  let dir = ctx.cwd;
+  if (physical) {
+    try {
+      dir = ctx.vfs.realpath(dir);
+    } catch {}
+  }
+  ctx.out(dir + '\n');
+  return 0;
+};
+
 const timeProg: Program = async (ctx) => {
   const t0 = performance.now();
   const code = ctx.argv.length > 1 ? await runCommand(ctx, 'time', ctx.argv.slice(1)) : 0;
@@ -2755,7 +2793,7 @@ export function installCoreutils(kernel: Kernel) {
   const progs: Record<string, Program> = {
     ls, cat, mkdir, mkfifo, rm, rmdir, cp, mv, touch, ln, chmod, head, tail, wc, grep, egrep: grep, fgrep: grep, find, sort, uniq, cut, tr, sed, xargs, tee, env, which, basename, dirname, realpath, readlink, stat, du, df, free, date, sleep, uname, ps, kill, seq, yes, mktemp, base64, diff, clear, nproc, id, hostname, whoami, tty, stty, nohup, nice, less, more: less, file, rev, nl, timeout, time: timeProg, truncate: truncateProg,
     sha256sum, sha1sum: hashProgram('SHA-1'), sha512sum: hashProgram('SHA-512'), md5sum: hashProgram('MD5'),
-    echo: shellBuiltinProgram('echo'), printf: shellBuiltinProgram('printf'), test: shellBuiltinProgram('test'), '[': shellBuiltinProgram('['), true: shellBuiltinProgram('true'), false: shellBuiltinProgram('false'), pwd: shellBuiltinProgram('pwd'),
+    echo: shellBuiltinProgram('echo'), printf: shellBuiltinProgram('printf'), test: shellBuiltinProgram('test'), '[': shellBuiltinProgram('['), true: shellBuiltinProgram('true'), false: shellBuiltinProgram('false'), pwd: pwdProg,
     chown: async () => 0, sync: async () => 0, true_: async () => 0,
   };
   delete progs.true_;

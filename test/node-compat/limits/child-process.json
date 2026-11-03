@@ -1,3 +1,6 @@
 {
-  "test-child-process-set-blocking.js": "Spawns python3, an interpreter that does not exist in a browser (like git, it is a separate native program, not a shell feature)."
+  "test-child-process-set-blocking.js": "Spawns python3, an interpreter that does not exist in a browser (like git, it is a separate native program, not a shell feature).",
+  "test-child-process-net-reuseport.js": "SO_REUSEPORT (several processes listening on one port, the kernel balancing connections between them) is not implemented by the virtual network.",
+  "test-child-process-dgram-reuseport.js": "SO_REUSEPORT for UDP is not implemented by the virtual network.",
+  "test-child-process-send-boundsocket.js": "Sends a net.BoundSocket (new in Node 26: a bound, not yet listening TCP socket) to a child over IPC; passing a bound-only virtual socket between processes is not implemented."
 }

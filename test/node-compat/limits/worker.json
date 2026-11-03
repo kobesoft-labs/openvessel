@@ -9,5 +9,7 @@
   "test-worker-dns-terminate-during-query.js": "Runs a DNS server on a UDP socket; a browser can't open UDP sockets.",
   "test-worker-http2-generic-streams-terminate.js": "Needs http2 over a JS stream (internalBinding('js_stream') feeding nghttp2), which OpenVessel doesn't provide.",
   "test-worker-http2-stream-terminate.js": "Needs http2 over a JS stream (internalBinding('js_stream') feeding nghttp2), which OpenVessel doesn't provide.",
-  "test-worker-terminate-http2-respond-with-file.js": "Needs http2 over a JS stream (internalBinding('js_stream') feeding nghttp2), which OpenVessel doesn't provide."
+  "test-worker-terminate-http2-respond-with-file.js": "Needs http2 over a JS stream (internalBinding('js_stream') feeding nghttp2), which OpenVessel doesn't provide.",
+  "test-worker-message-port-transfer-filehandle-fd0.js": "Closes fd 0 and expects the next open() to reuse it; the kernel hands out file descriptors from 3 so a process's standard streams can't be replaced by accident.",
+  "test-worker-spec-differences.js": "Checks Node 26's experimental Web Worker (--experimental-web-worker) against the specification's error types; the experimental global Worker isn't ported."
 }

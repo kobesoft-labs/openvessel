@@ -319,3 +319,21 @@ export function workerOptionErrors(args: string[] | string, fromEnv: boolean): s
   }
   return null;
 }
+
+/**
+ * HandleEnvOptions (node_options.cc): options that environment variables set. Node applies them before
+ * the command line and NODE_OPTIONS, which win, so here they only fill in what those left unset.
+ */
+export function handleEnvOptions(values: Record<string, unknown>, env: Record<string, string | undefined>) {
+  const flag = (opt: string, name: string) => {
+    if (!(opt in values) || env[name] !== '1' || values[opt]) return;
+    values[opt] = true;
+    if (('--no-' + opt.slice(2)) in values) values['--no-' + opt.slice(2)] = false;
+  };
+  flag('--pending-deprecation', 'NODE_PENDING_DEPRECATION');
+  flag('--preserve-symlinks', 'NODE_PRESERVE_SYMLINKS');
+  flag('--preserve-symlinks-main', 'NODE_PRESERVE_SYMLINKS_MAIN');
+  flag('--use-env-proxy', 'NODE_USE_ENV_PROXY');
+  flag('--use-system-ca', 'NODE_USE_SYSTEM_CA');
+  if (!values['--redirect-warnings']) values['--redirect-warnings'] = env.NODE_REDIRECT_WARNINGS ?? '';
+}

@@ -1,3 +1,6 @@
 {
-  "test-process-env-tz.js": "Date's local time zone is the browser's, fixed for the page by its JS engine; setting process.env.TZ can't change it at runtime (Node calls tzset() and tells V8 to re-detect it)."
+  "test-process-env-tz.js": "Date's local time zone is the browser's, fixed for the page by its JS engine; setting process.env.TZ can't change it at runtime (Node calls tzset() and tells V8 to re-detect it).",
+  "test-process-timeout.js": "--process-timeout (new in Node 26) has to interrupt a thread that is running JavaScript and list libuv's handles from outside it; a Web Worker can't be interrupted from another thread without being terminated, so the option isn't implemented.",
+  "test-process-timeout-coverage.js": "--process-timeout (new in Node 26) is not implemented: see test-process-timeout.js.",
+  "test-process-timeout-inspector.js": "--process-timeout (new in Node 26) is not implemented, and the inspector isn't available: see test-process-timeout.js."
 }

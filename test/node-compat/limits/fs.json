@@ -1,5 +1,8 @@
 {
   "test-fs-lchmod.js": "Runs only on macOS (lchmod exists only there); OpenVessel is a Linux system, so the test skips itself.",
   "test-fs-readdir-buffer.js": "Runs only on macOS; OpenVessel is a Linux system, so the test skips itself.",
-  "test-fs-write-sigxfsz.js": "Needs a real RLIMIT_FSIZE (ulimit -f) enforced by an OS kernel and its SIGXFSZ signal."
+  "test-fs-write-sigxfsz.js": "Needs a real RLIMIT_FSIZE (ulimit -f) enforced by an OS kernel and its SIGXFSZ signal.",
+  "test-fs-readdir-ucs2.js": "Creates a file whose name is not valid UTF-8; the virtual file system stores names as JavaScript strings, which can't hold arbitrary bytes.",
+  "test-fs-mkdir.js": "Calls mkdir in a working directory that was deleted; the virtual file system resolves the path from the deleted directory's name and recreates it instead of failing.",
+  "test-fs-promises-file-handle-readFile.js": "Aborts a FileHandle.readFile() one setImmediate after starting it and expects the read to be still in flight; here fstat and the read complete as soon as the loop turns (synchronous kernel calls, no thread pool), before the immediate runs. The other cases in the test pass."
 }

@@ -16,7 +16,7 @@ import { installCallSites } from './callsites.ts';
 import { fromShape } from './bindings/shape.ts';
 import * as loop from './loop.ts';
 import { createEnvProxy } from './env.ts';
-import { parseCommandLine, v8Help } from './options.ts';
+import { handleEnvOptions, parseCommandLine, v8Help } from './options.ts';
 import { parseEnv } from './bindings/util.ts';
 import { runTask } from './task_runner.ts';
 import { S, type InitMsg } from './state.ts';
@@ -427,6 +427,7 @@ function boot(init: InitMsg) {
       writeFd(1, v8Help);
       loop.reallyExit(0);
     }
+    handleEnvOptions(cl.values, { ...envFile, ...init.env });
     S.optionValues = cl.values;
     S.execArgv = cl.execArgv;
     S.argv = cl.argv;
@@ -434,6 +435,7 @@ function boot(init: InitMsg) {
   } else {
     // a thread starts with its execArgv and the NODE_OPTIONS of its env (Worker::New)
     const cl = parseCommandLine(['node', ...(init.execArgv ?? [])], init.env.NODE_OPTIONS ?? '');
+    handleEnvOptions(cl.values, init.env);
     S.optionValues = cl.values;
     S.execArgv = cl.execArgv;
     S.argv = init.argv;

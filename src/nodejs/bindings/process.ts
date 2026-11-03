@@ -132,14 +132,17 @@ export function createProcessMethods() {
       try {
         sys('execve', { argv: [file, ...argv.slice(1)], argv0: argv[0] ?? file, env });
       } catch (e: any) {
-        // node_process_methods.cc: a failed execve() leaves nothing to return to
-        const code = e?.code ?? 'EIO';
-        const err = new Error(`process.execve failed with error code ${code}`);
-        writeFd(2, `${err.stack}\n`);
-        try {
-          sys('kill', { pid: S.init.pid, sig: 6 });
-        } catch {}
-        return loop.reallyExit(134);
+        // Node 26 (node_process_methods.cc): a failed execve() throws an ErrnoException JS can catch —
+        // "<CODE>, <strerror> '<path>'" with a positive errno
+        const code: string = e?.code ?? 'EIO';
+        const entry = [...((shapeOf('uv').__errmap ?? []) as [number, [string, string]][])].find(([, v]) => v[0] === code);
+        const text = entry ? entry[1][1] : 'i/o error';
+        const err = new Error(`${code}, ${text[0].toUpperCase()}${text.slice(1)} '${file}'`) as Error & Record<string, unknown>;
+        err.errno = entry ? -entry[0] : 5;
+        err.code = code;
+        err.path = file;
+        err.syscall = 'execve';
+        throw err;
       }
       return loop.reallyExit(0);
     },
