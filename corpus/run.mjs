@@ -24,6 +24,8 @@ function saveResult(r) {
   writeFileSync(tmp, JSON.stringify(results, null, 2));
   renameSync(tmp, resultsPath);
 }
+// OV_CORPUS_MINUTES: how long install and build may each take (default 15)
+const STEP_MS = Number(process.env.OV_CORPUS_MINUTES ?? 15) * 60e3;
 const env = (port ? '' : 'mkdir -p /etc/openvessel && echo legacy > /etc/openvessel/node; ') + 'export CI=1 ASTRO_TELEMETRY_DISABLED=1;';
 
 /** The package manager the project asks for (packageManager field, then lockfile). */
@@ -50,11 +52,11 @@ try {
       await Promise.race([session.page.evaluate(() => window.ovReady), new Promise((_, j) => setTimeout(() => j(new Error('runtime did not boot in 60 s')), 60000))]);
       await mountProject(session.page, join(root, 'sites', s.id));
       const pm = packageManagerOf(join(root, 'sites', s.id));
-      const inst = await exec(session.page, `${env} ${pm} install 2>&1`, { timeout: 15 * 60e3 });
+      const inst = await exec(session.page, `${env} ${pm} install 2>&1`, { timeout: STEP_MS });
       r.install = inst.code === 0;
       log += `$ ${pm} install\n${inst.output}\n[exit ${inst.code} ${inst.ms}ms]\n`;
       if (r.install) {
-        const b = await exec(session.page, `${env} ${pm} run build 2>&1`, { timeout: 15 * 60e3 });
+        const b = await exec(session.page, `${env} ${pm} run build 2>&1`, { timeout: STEP_MS });
         r.build = b.code === 0;
         log += `$ ${pm} run build\n${b.output}\n[exit ${b.code} ${b.ms}ms]\n`;
         if (!r.build) r.error = b.output.split('\n').filter((l) => l.trim()).slice(-12).join('\n');
