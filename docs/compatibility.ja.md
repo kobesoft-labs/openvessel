@@ -182,7 +182,8 @@ WebAssembly にコンパイルできますが、Node 用のバインディング
 ## Astro のサイト集
 
 `corpus/` には、実在する Astro のサイトを 147 本（Astro 5・6・7 の公式サンプルと、よく使われているコミュニティの
-テーマ）収録しています。`node corpus/run.mjs` で、それぞれに対して install と build を実行します。
+テーマ）収録しています。`node corpus/run.mjs` で、それぞれに対して install と build を実行します。2026-11-03（Node.js v26.13.0、Chrome 156）の結果は
+127 本がビルドできました。Tailwind CSS を 4.3.4 ではなく 4.3.3 にすると（下の表の該当行）131 本で、Node.js v22.23.4 のときと同じです。
 
 ビルドできないサイトとその理由は次のとおりです。
 
@@ -193,6 +194,7 @@ WebAssembly にコンパイルできますが、Node 用のバインディング
 | ヘッドレスブラウザで図を描画する | huangmingche/astro-theme-aither |
 | 互換パッケージがまだないネイティブ専用の依存（Typst） | LemonAdorable/astro-theme-iris |
 | リポジトリに含まれていない準備が必要（環境変数、生成ファイル、コメントサービスの設定） | SolitudeRA/Solitude-Interface・unfolding-io/nebulix・vic/awesome-gh-repos・Liksium/astro-theme-sora・louisescher/spectre |
+| Tailwind CSS 4.3.4（2026-11-02 公開）: WebAssembly 版（`@tailwindcss/oxide-wasm32-wasi`）が読み込みの途中で止まる。本物の Node.js 26 でも同じです。lockfile のないサイトなので、この版が入ります。`tailwindcss` と `@tailwindcss/vite` を 4.3.3 にするとビルドできます | Astro 5・6・7 の公式サンプル with-tailwindcss・RATIU5/zaggonaut |
 | 調査中 | izmttk/astro-mecure（プリレンダリング中の CommonJS の依存の名前付き export） |
 
 <!-- corpus: updated with each full run -->

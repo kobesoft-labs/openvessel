@@ -53,7 +53,7 @@ in-browser runtimes. It is open source under the [Apache License 2.0](LICENSE).
 - Node.js: v26.13.0 (`src/node/version.ts`).
 - Node's own test suite: 1516 of 1516 (100%) of the tests a browser can pass, across 1563 tests of the targeted modules. The tests a browser can't pass are listed with the reason in
   [docs/compatibility.md](docs/compatibility.md).
-- Astro sites: {{CORPUS}} (Astro 5, 6 and 7); see
+- Astro sites: 127 of a corpus of 147 real sites build (Astro 5, 6 and 7; 131 with Tailwind CSS 4.3.3, see below); see
   [docs/compatibility.md](docs/compatibility.md).
 - Browsers: Chromium-based browsers. Firefox (current release) runs the ported runtime: the shell, npm,
   Astro build and dev server with the preview, and 1484 of the 1516 Node tests

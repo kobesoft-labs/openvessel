@@ -191,7 +191,8 @@ compiles to WebAssembly, but the Node binding has no WASI build yet).
 ## Astro site corpus
 
 `corpus/` holds 147 real Astro sites (official examples and popular community themes for Astro 5,
-6 and 7). `node corpus/run.mjs` runs `install` and `build` for each.
+6 and 7). `node corpus/run.mjs` runs `install` and `build` for each. On 2026-11-03 (Node.js v26.13.0, Chrome 156),
+127 of them build; with Tailwind CSS 4.3.3 instead of 4.3.4 (first row below), 131, as on Node.js v22.23.4.
 
 These sites don't build, for the reasons given:
 
@@ -202,6 +203,7 @@ These sites don't build, for the reasons given:
 | Renders diagrams with a headless browser | huangmingche/astro-theme-aither |
 | Native-only dependency without a compat package yet (Typst) | LemonAdorable/astro-theme-iris |
 | The site needs setup the repository doesn't include (env variables, generated files, comment-service config) | SolitudeRA/Solitude-Interface, unfolding-io/nebulix, vic/awesome-gh-repos, Liksium/astro-theme-sora, louisescher/spectre |
+| Tailwind CSS 4.3.4 (published 2026-11-02): its WebAssembly build (`@tailwindcss/oxide-wasm32-wasi`) hangs while it loads, in real Node.js 26 as well; the sites have no lockfile, so they get it. With `tailwindcss` and `@tailwindcss/vite` at 4.3.3 they build | astro-5/6/7 examples with-tailwindcss, RATIU5/zaggonaut |
 | Under investigation | izmttk/astro-mecure (a CommonJS dependency's named exports during prerendering) |
 
 <!-- corpus: updated with each full run -->
