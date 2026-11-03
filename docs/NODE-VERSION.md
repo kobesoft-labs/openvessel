@@ -2,8 +2,8 @@
 
 | 項目 | 値 |
 |---|---|
-| **いまの版** | **v22.23.4**（22 系 LTS "Jod"） |
-| 取り込んだ日 | 2026-10-24（初回 2026-10-23 に v22.20.0） |
+| **いまの版** | **v26.13.0**（26 系 Active LTS "Lithium"） |
+| 取り込んだ日 | 2026-11-02（初回 2026-10-23 に v22.20.0） |
 | 固定している場所 | `src/node/version.ts`（ここだけ。ほかはすべてここを読む） |
 | 取り込み元 | 公式 Docker イメージ `node:<版>-bookworm-slim`（linux/amd64）。lib と deps のソースは、その Node が持つ `internalBinding('builtins').natives` から取る |
 | 取り込んだもの | `vendor/node/natives.json`（lib と deps。git の外）・`vendor/node/LICENSE`・`src/node/data/bindings.json`（バインディングの形と定数）・`src/node/data/process.json`（versions・オプションの既定値など） |
@@ -27,3 +27,4 @@
 |---|---|---|
 | 2026-10-23 | v22.20.0 | 方針 A（Node の lib をそのまま動かす）で取り込み開始 |
 | 2026-10-24 | v22.23.4 | Astro 7 が Node >=22.23.4 を要求するため。差分は [node-upgrades/22.20.0-to-22.23.4.md](node-upgrades/22.20.0-to-22.23.4.md)（lib 105 ファイル、バインディング 15 件）。直したもの: buffer `createUnsafeArrayBuffer`、encoding `decodeWindows1252`（`decodeLatin1` の後継）、errors `getErrorSourcePositions`、crypto の証明書まわりの関数、OpenSSL 3.5.9 の CCM の `final`・ChaCha20-Poly1305 の遅い AAD の拒否 |
+| 2026-11-03 | v26.13.0 | 26 系の Active LTS（"Lithium"）に追従。差分は [node-upgrades/22.23.4-to-26.13.0.md](node-upgrades/22.23.4-to-26.13.0.md)（lib 272 ファイル変更・97 追加・13 削除、バインディング 163 件）。新しいバインディング: `cjs_lexer`・`diagnostics_channel`・`ipc_serdes`・`locks`・`webstorage`・`url_pattern`・`async_context_frame`・`ffi`。呼び出し方が変わったもの: `module_wrap`（フェーズ、`import.meta` をバインディングで埋める、`hasTopLevelAwait`/`hasAsyncGraph` がプロパティに）、StreamBase の書き込み（要求なしで呼ばれ、状態か WriteWrap を返す）、`Process.spawn`（引数の並び）、Buffer の slice/write（バッファが第 1 引数）、`indexOf` の `end`、fs のジョブ（`ReadFileJob`・`WriteFileJob`・`CpDirJob`・`readdirRecursive`・`rmSync`）、crypto（KeyObject/CryptoKey/X509 のスロット、WebCrypto のジョブ、ML-KEM・ML-DSA・SLH-DSA など）、zlib（reset と zstd の pledged size、brotli 1.2.0）、Histogram。Node 26 の既定の `--async-context-frame` はブラウザで作れないため、既定を `--no-async-context-frame` にした（AsyncLocalStorage は 22 と同じく async_hooks の上） |

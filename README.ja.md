@@ -49,10 +49,10 @@ OpenVessel はクリーンルーム方式で開発しています（ほかのブ
 - バージョン: 1.2.1。[変更履歴](CHANGELOG.md)・[リリース手順](docs/RELEASING.md) を参照してください。バージョン番号は
   OpenVessel 独自の semver で、移植している Node.js のバージョンは各リリースのタイトルに記載します。
 - Node.js: v26.13.0（`src/node/version.ts`）
-- Node 自身のテストスイート: {{NODE_TESTS}}。ブラウザでは通せないテストは、理由とともに [docs/compatibility.ja.md](docs/compatibility.ja.md) に記載しています。
+- Node 自身のテストスイート: 対象モジュールの 1563 本のうち、ブラウザで通せる 1516 本すべて（100%）が通ります。ブラウザでは通せないテストは、理由とともに [docs/compatibility.ja.md](docs/compatibility.ja.md) に記載しています。
 - Astro のサイト: {{CORPUS}}（Astro 5・6・7）。[docs/compatibility.ja.md](docs/compatibility.ja.md) を参照してください。
 - ブラウザ: Chromium 系のブラウザ。Firefox（現行版）でも移植版ランタイムが動き、シェル・npm・Astro のビルドと開発サーバー・
-  プレビューが使えます。Node のテストは 1237 本中 1200 本が通ります（[注意点](docs/compatibility.ja.md#firefox)）。
+  プレビューが使えます。Node のテストは 1516 本中 1484 本が通ります（[注意点](docs/compatibility.ja.md#firefox)）。
   クロスオリジン分離（`SharedArrayBuffer`）が必要です。
 
 ブラウザでは動作しないものとその理由は、[docs/compatibility.ja.md](docs/compatibility.ja.md) にまとめています。

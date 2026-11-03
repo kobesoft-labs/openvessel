@@ -13,7 +13,7 @@ The measurement is done by `test/node-compat/run.mjs`:
 
 - The tests are Node.js's own `test/parallel` files for the modules OpenVessel targets (fs, stream,
   buffer, events, child_process, process, worker_threads, crypto, zlib, vm, timers, module loading,
-  util, url, readline, …), from the same Node version (v22.23.4).
+  util, url, readline, WebCrypto, …), from the same Node version (v26.13.0).
 - A test counts only if it passes on real Node.js on Linux (`--baseline`).
 - Tests that exercise Node's internals rather than its public behaviour are out of scope and are not run.
   These are tests that need `--expose-internals`, call `internalBinding`/`process.binding`, set V8 flags,
@@ -22,50 +22,58 @@ The measurement is done by `test/node-compat/run.mjs`:
 - Tests that can't pass in a browser are listed with the reason in `test/node-compat/limits/*.json`.
   The target is every other test. The report shows `pass / target`, and the goal is 100%.
 
-Result (2026-10-24, Chrome):
+Result (2026-11-03, Chrome 156):
 
 | Module | Pass | Target | Listed as limits |
 |---|---:|---:|---:|
-| fs | 173 | 173 | 4 |
-| stream | 165 | 165 | 1 |
-| worker_threads | 118 | 118 | 11 |
-| crypto | 96 | 96 | 2 |
-| child_process | 94 | 94 | 1 |
-| vm | 78 | 78 | 11 |
-| process | 73 | 73 | 1 |
-| buffer | 60 | 60 | 1 |
-| zlib | 60 | 60 | 0 |
+| fs | 234 | 234 | 4 |
+| stream | 219 | 219 | 1 |
+| crypto | 138 | 138 | 4 |
+| WebCrypto | 72 | 72 | 0 |
+| worker_threads | 121 | 121 | 13 |
+| child_process | 101 | 101 | 4 |
+| vm | 83 | 83 | 13 |
+| process | 74 | 74 | 4 |
+| zlib | 78 | 78 | 0 |
+| buffer | 65 | 65 | 1 |
 | timers | 47 | 47 | 0 |
-| module, require | 48 | 48 | 0 |
+| module, require | 51 | 51 | 0 |
 | events, event-emitter | 33 | 33 | 0 |
-| stream2, stream3, readable | 35 | 35 | 0 |
-| url, whatwg-url | 36 | 36 | 0 |
-| console | 19 | 19 | 0 |
-| util | 18 | 18 | 0 |
-| assert | 17 | 17 | 1 |
+| stream2, stream3, readable | 36 | 36 | 0 |
+| url, whatwg-url | 39 | 39 | 0 |
+| util | 22 | 22 | 0 |
+| console | 20 | 20 | 0 |
 | path | 16 | 16 | 0 |
-| readline | 13 | 13 | 0 |
+| readline | 15 | 15 | 0 |
 | process.nextTick, microtasks, promises | 18 | 18 | 0 |
-| async_hooks (AsyncLocalStorage) | 7 | 7 | 1 |
+| assert | 12 | 12 | 1 |
+| async_hooks (AsyncLocalStorage) | 8 | 8 | 2 |
 | os | 6 | 6 | 0 |
 | querystring | 4 | 4 | 0 |
-| string_decoder | 3 | 3 | 0 |
-| **All** | **1237** | **1237 (100%)** | **34** |
+| string_decoder | 4 | 4 | 0 |
+| **All** | **1516** | **1516 (100%)** | **47** |
 
-The 34 tests listed as limits break down by reason as follows (each file in `test/node-compat/limits/`
-gives the reason per test):
+For comparison, the Node v22.23.4 port passed 1272 of the 1284 targets of its own test suite on the same
+machine; every one of those tests that is still in the v26.13.0 suite passes.
+
+The 47 tests listed as limits break down by reason as follows (each file in `test/node-compat/limits/`
+gives the reason per test; the two macOS-only tests there skip themselves on Linux, so they are not
+counted):
 
 | Reason | Tests |
 |---|---:|
 | Stopping JavaScript while it runs (`vm` `timeout`, `breakOnSigint`) or a context with its own microtask queue (`microtaskMode`) | 9 |
 | The inspector, heap snapshots or per-thread heap limits | 7 |
-| A context with its own built-ins (a separate V8 realm) | 4 |
+| Not implemented yet, and not a browser limit: `--process-timeout` (new in Node 26, 3), `SO_REUSEPORT` (2), sending a `net.BoundSocket` to a child (1), the experimental global `Worker` (1) | 7 |
+| A `vm` context's global semantics: its own built-ins (a separate V8 realm), or strict-mode and `let` checks that a `with` scope can't make | 6 |
 | HTTP/2: not implemented, and not a browser limit (porting `node_http2.cc` over nghttp2 is a large project of its own) | 4 |
 | No OS underneath: another program (`python3`), `RLIMIT_FSIZE`, changing the time zone at run time, UDP | 4 |
-| One allocation of 2 GiB or more | 2 |
-| macOS-only tests (OpenVessel is a Linux system, so they skip themselves) | 2 |
-| `AsyncLocalStorage` after `await` (V8 promise hooks) | 1 |
-| An OpenSSL configuration file | 1 |
+| The virtual file system: file names that aren't valid UTF-8, `mkdir` in a deleted working directory, reusing fd 0 | 3 |
+| `AsyncLocalStorage` across promise jobs (V8 promise hooks or continuation-preserved embedder data) | 2 |
+| An OpenSSL configuration file or a V8 startup snapshot | 2 |
+| A request that has to be still in flight one `setImmediate` later (no thread pool: kernel calls finish at once) | 1 |
+| Immutable `ArrayBuffer`s (`--js-immutable-arraybuffer`), which Chrome doesn't ship | 1 |
+| Too slow: 96 SLH-DSA key pairs in JavaScript take longer than the 30 s budget | 1 |
 
 To measure again, run `node test/node-compat/run.mjs --port && node test/node-compat/run.mjs --port --report`.
 The table is written to `test/node-compat/results/port/REPORT.md`.
@@ -76,7 +84,7 @@ The table is written to `test/node-compat/results/port/REPORT.md`.
 The ported runtime (the default) works in the current Firefox release. This covers booting, the shell,
 `node` (CommonJS, ES modules, TypeScript, `worker_threads`, `child_process`, zlib, crypto), `npm install`,
 `npx`, an HTTP server in the preview, and Astro builds and `astro dev` with hot reload over WebSocket.
-Of Node's own tests, 1200 of the 1237 that pass in Chrome also pass in Firefox (2026-10-26, Playwright's
+Of Node's own tests, 1484 of the 1516 that pass in Chrome also pass in Firefox (2026-11-03, Playwright's
 Firefox 157). The rest fail for these reasons:
 
 - Error messages come from SpiderMonkey instead of V8 (`can't convert symbol to string` instead of

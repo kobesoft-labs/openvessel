@@ -3,6 +3,47 @@
 OpenVessel follows [Semantic Versioning](https://semver.org). Each release states the Node.js
 version it ports; see [docs/NODE-VERSION.md](docs/NODE-VERSION.md) for how that version is tracked.
 
+## Unreleased · Node.js v26.13.0
+
+### Node.js runtime
+
+- The ported runtime follows Node.js v26.13.0 (Active LTS "Lithium") instead of v22.23.4: Node's own
+  `lib/` from 26.13.0, `process.version` `v26.13.0`, and the bindings Node 24–26 added or changed
+  (see [docs/node-upgrades/22.23.4-to-26.13.0.md](docs/node-upgrades/22.23.4-to-26.13.0.md) and
+  [docs/NODE-VERSION.md](docs/NODE-VERSION.md)).
+- Node's own test suite: 1516 of 1516 (100%) of the tests a browser can pass across the targeted modules,
+  now including WebCrypto; the 47 exclusions are listed with the reason in
+  [docs/compatibility.md](docs/compatibility.md). Every test that passed on the v22.23.4 port and is still
+  in Node's suite passes.
+- AsyncLocalStorage: Node 24+ defaults to `--async-context-frame`, which needs V8's
+  continuation-preserved embedder data; a browser doesn't expose it, so OpenVessel defaults to
+  `--no-async-context-frame` and AsyncLocalStorage runs on async_hooks as before.
+- New in Node 26 and available: `localStorage` (`--localstorage-file`, kept as a JSON file) and
+  `sessionStorage`, `URLPattern` (the browser's), `navigator.locks` (per thread), `import source` /
+  `import defer` (defer is eager), `--prof-process`, worker CPU and heap profiles (empty profiles),
+  `Buffer` `indexOf` with an end, `util.parseEnv` with a null prototype, `process.execve` errors that
+  can be caught.
+- crypto: ML-KEM, ML-DSA and SLH-DSA (through `@noble/post-quantum`, a new dependency), KEM
+  encapsulation, Argon2, KMAC, TurboSHAKE, KangarooTwelve, ChaCha20-Poly1305 and AES-OCB in WebCrypto,
+  AES-SIV, AES-GCM-SIV, SM4, XTS, `crypto.parsePKCS12`, multi-prime RSA.
+- Pending `WebAssembly.compile`/`instantiate` keep the process alive, as in Node (a top-level `await`
+  of them ended the process early; Astro 5/6 builds failed with "Unexpected early exit").
+  `WebAssembly.compileStreaming`/`instantiateStreaming` stay available.
+- `MessageChannel` messages larger than the shared ring used for `receiveMessageOnPort` are passed
+  through the kernel, so a module loader hook (`module.register`, used by Tailwind 4) can return a large
+  module source (a 12 MB generated module hung the build).
+- Environment variables Node reads as options (`NODE_REDIRECT_WARNINGS`, `NODE_PENDING_DEPRECATION`,
+  `NODE_PRESERVE_SYMLINKS`, …) apply.
+- File-backed blobs (`fs.openAsBlob`) fail to read once the file has changed; `/proc/sys/kernel/hostname`
+  exists and `mkdir` under `/proc` fails with `ENOENT`; `/bin/pwd` rejects invalid options as GNU's does.
+
+### Tests and tools
+
+- The end-to-end harness falls back to Playwright's Chromium when Google Chrome isn't installed
+  (`OV_CHROME`). `corpus/run.mjs` takes `--shard=i/n` and `OV_CORPUS_MINUTES`, and a hung browser no
+  longer stalls a run. `corpus/collect.mjs` works with GNU tar. `net-gate.mjs` uses httpbin.dev for
+  redirects to other hosts (httpbin.org stopped allowing them).
+
 ## 1.2.1 — 2026-10-26 · Node.js v22.23.4
 
 - The preview relay accepts a host on the same origin again when the host page is outside the preview's

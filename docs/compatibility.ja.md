@@ -11,8 +11,8 @@ OpenVessel は Node.js 本体の JavaScript（`lib/`）をそのまま動かし�
 計測には `test/node-compat/run.mjs` を使います。
 
 - 対象は、OpenVessel が対応するモジュール（fs、stream、buffer、events、child_process、process、worker_threads、
-  crypto、zlib、vm、timers、モジュールの読み込み、util、url、readline など）についての、Node.js 本体の
-  `test/parallel` のテストです。Node のバージョンも同じもの（v22.23.4）を使います。
+  crypto、WebCrypto、zlib、vm、timers、モジュールの読み込み、util、url、readline など）についての、Node.js 本体の
+  `test/parallel` のテストです。Node のバージョンも同じもの（v26.13.0）を使います。
 - 本物の Node.js（Linux）で通るテストだけを数えます（`--baseline`）。
 - Node の公開された動作ではなく内部を確認するテストは対象外とし、実行しません。具体的には、
   `--expose-internals` が必要なもの、`internalBinding`/`process.binding` を呼ぶもの、V8 のフラグを設定するもの、
@@ -20,49 +20,55 @@ OpenVessel は Node.js 本体の JavaScript（`lib/`）をそのまま動かし�
 - ブラウザでは通せないテストは、理由とあわせて `test/node-compat/limits/*.json` に記載しています。
   目標はそれ以外のすべてのテストです。レポートには「通過 / 目標」を表示し、100% を目指します。
 
-結果（2026-10-24、Chrome）:
+結果（2026-11-03、Chrome 156）:
 
 | モジュール | 通過 | 目標 | 対象外（理由つき） |
 |---|---:|---:|---:|
-| fs | 173 | 173 | 4 |
-| stream | 165 | 165 | 1 |
-| worker_threads | 118 | 118 | 11 |
-| crypto | 96 | 96 | 2 |
-| child_process | 94 | 94 | 1 |
-| vm | 78 | 78 | 11 |
-| process | 73 | 73 | 1 |
-| buffer | 60 | 60 | 1 |
-| zlib | 60 | 60 | 0 |
+| fs | 234 | 234 | 4 |
+| stream | 219 | 219 | 1 |
+| crypto | 138 | 138 | 4 |
+| WebCrypto | 72 | 72 | 0 |
+| worker_threads | 121 | 121 | 13 |
+| child_process | 101 | 101 | 4 |
+| vm | 83 | 83 | 13 |
+| process | 74 | 74 | 4 |
+| zlib | 78 | 78 | 0 |
+| buffer | 65 | 65 | 1 |
 | timers | 47 | 47 | 0 |
-| module, require | 48 | 48 | 0 |
+| module, require | 51 | 51 | 0 |
 | events, event-emitter | 33 | 33 | 0 |
-| stream2, stream3, readable | 35 | 35 | 0 |
-| url, whatwg-url | 36 | 36 | 0 |
-| console | 19 | 19 | 0 |
-| util | 18 | 18 | 0 |
-| assert | 17 | 17 | 1 |
+| stream2, stream3, readable | 36 | 36 | 0 |
+| url, whatwg-url | 39 | 39 | 0 |
+| util | 22 | 22 | 0 |
+| console | 20 | 20 | 0 |
 | path | 16 | 16 | 0 |
-| readline | 13 | 13 | 0 |
+| readline | 15 | 15 | 0 |
 | process.nextTick, microtasks, promises | 18 | 18 | 0 |
-| async_hooks (AsyncLocalStorage) | 7 | 7 | 1 |
+| assert | 12 | 12 | 1 |
+| async_hooks (AsyncLocalStorage) | 8 | 8 | 2 |
 | os | 6 | 6 | 0 |
 | querystring | 4 | 4 | 0 |
-| string_decoder | 3 | 3 | 0 |
-| **合計** | **1237** | **1237 (100%)** | **34** |
+| string_decoder | 4 | 4 | 0 |
+| **合計** | **1516** | **1516 (100%)** | **47** |
 
-対象外にした 34 本の内訳は次のとおりです（テストごとの理由は `test/node-compat/limits/` の各ファイルにあります）。
+比較のため、Node v22.23.4 の移植版は同じマシンで、その版のテスト 1284 本の目標のうち 1272 本を通しました。そこで通っていたテストのうち v26.13.0 のテストにも残っているものは、すべて通ります。
+
+対象外にした 47 本の内訳は次のとおりです（テストごとの理由は `test/node-compat/limits/` の各ファイルにあります。そこにある macOS 専用の 2 本は Linux ではテスト側でスキップされるので、数に入りません）。
 
 | 理由 | 本数 |
 |---|---:|
 | 実行中の JavaScript を止める（`vm` の `timeout`・`breakOnSigint`）、または専用のマイクロタスクキューを持つコンテキスト（`microtaskMode`） | 9 |
 | inspector、ヒープスナップショット、スレッドごとのヒープ上限 | 7 |
-| 専用の組み込みオブジェクトを持つコンテキスト（別の V8 realm） | 4 |
+| ブラウザの制約ではなく未実装: `--process-timeout`（Node 26 で追加、3）、`SO_REUSEPORT`（2）、子プロセスへの `net.BoundSocket` の受け渡し（1）、実験的なグローバルの `Worker`（1） | 7 |
+| `vm` のコンテキストのグローバル: 専用の組み込みオブジェクト（別の V8 realm）や、`with` のスコープでは作れない strict モードと `let` の検査 | 6 |
 | HTTP/2。ブラウザの制約ではなく未実装です（nghttp2 を使う `node_http2.cc` の移植は、それだけで大きな作業になります） | 4 |
 | 下に OS がない: 別のプログラム（`python3`）、`RLIMIT_FSIZE`、実行中のタイムゾーン変更、UDP | 4 |
-| 2 GiB 以上の一括確保 | 2 |
-| macOS 専用のテスト（OpenVessel は Linux として動くので、テスト側でスキップされます） | 2 |
-| `await` の後の `AsyncLocalStorage`（V8 の promise hooks） | 1 |
-| OpenSSL の設定ファイル | 1 |
+| 仮想ファイルシステム: UTF-8 として正しくないファイル名、削除された作業ディレクトリでの `mkdir`、fd 0 の再利用 | 3 |
+| promise のジョブをまたぐ `AsyncLocalStorage`（V8 の promise hooks、または continuation-preserved embedder data） | 2 |
+| OpenSSL の設定ファイル、V8 のスタートアップスナップショット | 2 |
+| `setImmediate` 1 回分あとまで処理中であることが前提の要求（スレッドプールがなく、カーネルの呼び出しはすぐ終わる） | 1 |
+| 変更できない `ArrayBuffer`（`--js-immutable-arraybuffer`）。Chrome は出荷していません | 1 |
+| 遅すぎる: JavaScript で SLH-DSA の鍵ペアを 96 組作ると、30 秒の制限を超える | 1 |
 
 計測し直すには `node test/node-compat/run.mjs --port && node test/node-compat/run.mjs --port --report` を実行します。
 表は `test/node-compat/results/port/REPORT.md` に出力されます。
@@ -73,7 +79,7 @@ OpenVessel は Node.js 本体の JavaScript（`lib/`）をそのまま動かし�
 移植版ランタイム（デフォルト）は、現行の Firefox で動きます。起動、シェル、`node`
 （CommonJS、ES モジュール、TypeScript、`worker_threads`、`child_process`、zlib、crypto）、`npm install`、
 `npx`、プレビューでの HTTP サーバー、Astro のビルド、WebSocket でホットリロードする `astro dev` を
-確認しています。Node 本体のテストは、Chrome で通る 1237 本のうち 1200 本が通ります（2026-10-26、
+確認しています。Node 本体のテストは、Chrome で通る 1516 本のうち 1484 本が通ります（2026-11-03、
 Playwright の Firefox 157）。残りが通らない理由は次のとおりです。
 
 - エラーメッセージが V8 ではなく SpiderMonkey のものになります（`Cannot convert a Symbol value to a string`
